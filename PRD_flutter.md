@@ -74,26 +74,26 @@ The PNAS *one sec* randomized controlled trial found that the deliberation promp
 
 ---
 
-## 2. Current Implementation State (ground truth — verify against code before relying on this section)
+## 2. Current Implementation State (ground truth — verified on real device, 2026-07-17)
 
-This section exists because v1.0 of this PRD asserted things about "Sprint 1" that weren't accurate against the actual codebase. Treat this section as the most trustworthy part of the document precisely because it's the newest and was checked against real code, but re-verify it yourself before making decisions on top of it if meaningful time has passed.
+v1.0 of this PRD asserted things about "Sprint 1" that weren't accurate against the actual codebase. This section has since been verified end-to-end on a physical device in `--release` mode — treat it as trustworthy, but re-verify against code if meaningful time has passed since the date above.
 
-**Built (Sprint 1, verified 2026-07-17):**
+**Built and confirmed working (Sprint 1 + Sprint 2, real-device `--release` test):**
 - Unlock detection: `UnlockReceiver` → `UnlockListenerService` (foreground service) → `MainActivity` → Flutter `MethodChannel`.
-- A floating overlay bubble via the `flutter_overlay_window` package, triggered on unlock.
-- **The bubble is currently static and decorative** — a purple circle with a 🔒 emoji. It does not display intent text, because no intent has been captured yet — there is no capture screen.
+- Intent-capture screen appears on unlock (presets / custom text).
+- **The floating bubble displays the actual declared intent text** — the earlier decorative purple-circle placeholder has been superseded.
+- Bubble persists across app switches, with one confirmed OS-level exception: it does not render over the Settings app, which is expected Android anti-"tapjacking" behavior (suppressing overlays on sensitive system screens since Android 12) — not a defect.
+- Manual completion works: tapping the bubble and marking an intent done clears it.
+- **Single-active-intent behavior is confirmed and intentional:** unlocking again while an intent is still incomplete does not re-trigger a fresh capture screen — the existing bubble simply persists. A new capture screen only appears once the current intent is completed. This is a real product/behavioral constraint to design around in Sprint 3+ (e.g. smart triage and cooldown logic should compose with this, not assume every unlock gets a fresh prompt).
+- Foreground service survived a background-kill test on a Realme/ColorOS device after a manual app reopen. **OEM battery-optimization exemption and autostart are not yet configured/tested for long-running reliability** — treat background survival as demonstrated short-term, not yet production-hardened.
 
-**Not yet built, despite being implied as "done" in earlier framing:**
-- Intent-capture screen (presets, custom text field, voice input) — does not exist.
-- Timer / countdown — does not exist.
-- Completion flow (marking an intent done/abandoned) — does not exist.
-- Local storage / intent history — does not exist.
-- Dashboard / analytics — does not exist.
+**Not yet built:**
+- Voice input.
+- Timer / countdown.
+- Local storage / intent history (so completed intents aren't persisted yet — they clear but aren't logged anywhere).
+- Dashboard / analytics.
 
-**In progress (Sprint 2, status at time of writing: nearly complete — confirm final scope against the actual commits before treating any of this as shipped):**
-- Sprint 2 was scoped around building the actual core loop: the intent-capture screen (presets + custom text, bubble now displaying the declared intent) and a basic completion flow. Confirm with the current codebase exactly what landed before using this as a planning baseline for Sprint 3.
-
-**Current dependencies:** `flutter_overlay_window`, `cupertino_icons`. No state-management package, no local-storage package, no permission-handler package installed as of Sprint 1 — anything beyond that should be checked against the current `pubspec.yaml` rather than assumed from this document.
+**Current dependencies:** `flutter_overlay_window`, `cupertino_icons`. No state-management, local-storage, or permission-handler package installed yet — anything beyond this should be checked against the current `pubspec.yaml` rather than assumed from this document.
 
 ---
 
@@ -170,7 +170,7 @@ This app runs a persistent overlay and a foreground service, which is exactly wh
 4. User configures a small set of default intent presets.
 5. Setup complete; user locks the phone to test the flow.
 
-### Flow 2: Standard Unlock — Core Loop *(Sprint 2 scope; verify actual completion against code — see §2)*
+### Flow 2: Standard Unlock — Core Loop *(Confirmed working on real device, 2026-07-17 — see §2)*
 
 1. User unlocks phone.
 2. Intent-capture prompt appears: preset buttons + custom text field (+ voice, if/when built).
@@ -192,12 +192,13 @@ Countdown reaches visual thresholds (e.g., approaching expiry → expired), bubb
 
 | Feature | Status | Notes |
 |---|---|---|
-| Unlock Detection | **Built** | Sprint 1. |
-| Floating Bubble (mechanism) | **Built** | Sprint 1 — currently decorative only, no intent content. |
-| Intent Capture Screen (presets + custom text) | **In progress** | Sprint 2 — verify final state against code. |
-| Bubble displaying declared intent | **In progress** | Sprint 2 — this is what turns the decorative bubble into the actual product. |
-| Manual Completion (mark intent done) | **In progress / Planned** | Confirm Sprint 2 scope. |
-| Intent History (local log) | **Planned** | Needs a storage decision first (§4.1). |
+| Unlock Detection | **Built & confirmed** | Sprint 1. Verified reliable across repeated unlock cycles on real device. |
+| Floating Bubble (mechanism) | **Built & confirmed** | Sprint 1. |
+| Intent Capture Screen (presets + custom text) | **Built & confirmed** | Sprint 2. Verified on real device, `--release` build. |
+| Bubble displaying declared intent | **Built & confirmed** | Sprint 2. Bubble now shows actual intent text; decorative placeholder is superseded. |
+| Manual Completion (mark intent done) | **Built & confirmed** | Sprint 2. Tapping bubble → mark done → bubble clears, verified working. |
+| Single-active-intent behavior | **Built & confirmed (by design)** | A fresh unlock while an intent is incomplete does not re-trigger capture — existing bubble persists until completed. Design a decision for Sprint 3+ features to respect, not a bug. |
+| Intent History (local log) | **Planned** | Needs a storage decision first (§4.1) — intents currently clear on completion without being logged anywhere. |
 | Cooldown / smart triage | **Planned** | See §4.3. |
 
 ### P1 — Should have (post-MVP core loop)
