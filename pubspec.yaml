@@ -1,5 +1,5 @@
 name: why_did_i_unlock
-description: "A new Flutter project."
+description: "A digital-wellbeing app that asks what you're unlocking your phone for, then keeps a persistent bubble reminder until you're done."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+1
+version: 0.3.0+3
 
 environment:
   sdk: ^3.11.5
@@ -46,6 +46,14 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.3
+
+# Dev-only tool config for flutter_launcher_icons — generates android/app icon
+# resources from assets/icon/icon.png. Placeholder icon, not final branding
+# (see CLAUDE.md §9 — store brand is still unresolved).
+flutter_launcher_icons:
+  android: true
+  image_path: "assets/icon/icon.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

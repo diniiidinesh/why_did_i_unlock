@@ -16,6 +16,10 @@ class MainActivity : FlutterActivity() {
         fun onPhoneUnlocked() {
             methodChannel?.invokeMethod("onUnlock", null)
         }
+
+        fun onPhoneLocked() {
+            methodChannel?.invokeMethod("onLock", null)
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {

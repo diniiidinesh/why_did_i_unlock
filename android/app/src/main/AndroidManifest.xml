@@ -4,7 +4,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <application
-        android:label="why_did_i_unlock"
+        android:label="Why Did I Unlock"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
