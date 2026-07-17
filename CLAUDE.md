@@ -1,7 +1,7 @@
 # CLAUDE.md — Why Did I Unlock
 
 > Operational context for Claude Code. Read this fully at the start of every session.
-> Last updated: 2026-07-17. Owner: Dinesh.
+> Last updated: 2026-07-17 (rev 2 — monetization + bubble-pricing reopened). Owner: Dinesh.
 > Working name: **Why Did I Unlock** (originally "IntentLock" in the PRD). The public/store brand is NOT finalized — see §9.
 
 ## 1. What this app is
@@ -61,7 +61,7 @@ This is a hard requirement, not a nice-to-have. The app runs a persistent overla
 
 - The **SYSTEM_ALERT_WINDOW + AccessibilityService** permission stack is the most policy-pressured area on Android 12–16 and the single biggest existential risk to the app.
 - **Prefer `UsageStatsManager` over `AccessibilityService`** wherever the same signal can be obtained. Accessibility use is heavily scrutinized in Play review and can get the app pulled.
-- **Onboarding is a permission cliff.** Do NOT demand overlay + accessibility on day one — that's a top drop-off risk. Make the **bubble an opt-in Pro feature**, earned after the user has seen value, rather than a required upfront grant.
+- **Onboarding is a permission cliff.** Do NOT demand overlay + accessibility on day one — that's a top drop-off risk regardless of pricing. **Whether the bubble itself is free or Pro-gated is now an open question (see §8/§9) — don't assume Pro.** The "ease into it, don't demand upfront" onboarding principle still holds either way; it's separate from the monetization decision.
 - **Smart unlock triage:** don't prompt on every unlock. Skip very short/quick unlocks to avoid friction fatigue; make cooldown and triage configurable.
 
 ## 7. Product strategy (keep decisions anchored here)
@@ -71,18 +71,21 @@ This is a hard requirement, not a nice-to-have. The app runs a persistent overla
 - **Repositioning:** frame as a "phone session manager," which broadens the market and reduces head-to-head overlap with Intenty.
 - **Kill criteria exist** (tripwires on D1 retention, permission-grant rate, Play policy actions, Intenty shipping its own bubble, conversion, NPS). Revisit these before over-investing in any direction.
 
-## 8. Monetization
+## 8. Monetization — UNDECIDED (open question, see §9)
 
-- Freemium: monthly, annual, and lifetime tiers.
-- **Lifetime priced ≥ $79.99.** The PRD's $59.99 is outdated and underpriced.
-- Free tier must still deliver the core value; gate power features (bubble customization, voice-to-text, analytics, advanced timer) behind Pro.
-- Local-first by default: no analytics or network calls in the free tier — privacy is a selling point.
+- **No model is committed.** Freemium (monthly/annual/lifetime) is the leading candidate but NOT settled. Donation-based / pay-what-you-want is also under active consideration — viability untested. Do not build code that hard-assumes a specific monetization structure (e.g., don't wire up a paywall gate around the bubble — see §6).
+- The earlier "$79.99 lifetime" figure was a candidate number under a freemium assumption, not a decision — treat all specific pricing as provisional until the model itself is chosen.
+- Freemium feature-gating (which features are Pro) is also open, since the bubble itself may end up free — don't hardcode a specific gating list.
+- **Local-first by default stays a principle regardless of monetization model:** no analytics or network calls in the free/base experience — privacy is a selling point independent of how the app makes money.
 
 ## 9. Open decisions (flag these, don't assume)
 
 - **Naming / branding (UNRESOLVED):** Started as "IntentLock" (PRD), then shifted to the working name "Why Did I Unlock." Neither is settled as the store brand. The May 2026 stress-test recommended dropping BOTH: "IntentLock" reads like a security/MDM product; "Why Did I Unlock" is a strong tagline but long, hard to search, and semantically owned by the competitor Intenty. Alternatives floated (not chosen): Sesh, Throughline, Onpurpose, Phonepoint. Decide the *store brand* before the listing. Separately, keep the *code package name* (in `pubspec.yaml` / Android `applicationId`) as whatever Sprint 1 scaffolded it to — renaming a Flutter package post-scaffold is disruptive, and the internal identifier need not match the marketed brand. Confirmed: the code package is already `why_did_i_unlock`, so only the *store brand* is still open — the code needs no rename regardless of what brand is chosen.
 - **iOS strategy:** the floating bubble cannot be replicated on iOS as it is on Android. iOS would be a *separate product* built on Shortcuts + Focus Filters. Decision pending: deprioritize / rebuild separately / drop.
-- **PRD rewrite:** verified stale against actual code (2026-07-17) — confirm every point still holds before drafting `PRD_flutter.md`: header tech stack + all of Appendix 6.1 "Replit Development Notes" (no `BubbleService.kt`, overlay is a plugin not hand-rolled); state-mgmt/storage rows (Zustand/Riverpod, sqflite/expo-sqlite) are aspirational, nothing installed; RN/Expo appendix packages have no Flutter equivalents in `pubspec.yaml`; Bubble API is framed as primary in the PRD's risk mitigation but the real implementation only uses `SYSTEM_ALERT_WINDOW`; $59.99 lifetime pricing is superseded (see §8). What still holds from the original PRD: the unlock-detection approach (`BroadcastReceiver` + `ACTION_USER_PRESENT`), the three baseline Android permissions, and essentially all of §1–§3.3 (persona/market/competitive content). **Critically: the new PRD's Sprint 2 scope must treat intent capture as net-new, not "add polish to existing capture" — see §2.**
+- **PRD rewrite:** verified stale against actual code (2026-07-17) — confirm every point still holds before drafting `PRD_flutter.md`: header tech stack + all of Appendix 6.1 "Replit Development Notes" (no `BubbleService.kt`, overlay is a plugin not hand-rolled); state-mgmt/storage rows (Zustand/Riverpod, sqflite/expo-sqlite) are aspirational, nothing installed; RN/Expo appendix packages have no Flutter equivalents in `pubspec.yaml`; Bubble API is framed as primary in the PRD's risk mitigation but the real implementation only uses `SYSTEM_ALERT_WINDOW`; $59.99 lifetime pricing is superseded (see §8, itself now open). What still holds from the original PRD: the unlock-detection approach (`BroadcastReceiver` + `ACTION_USER_PRESENT`), the three baseline Android permissions, and essentially all of §1–§3.3 (persona/market/competitive content). **Critically: the new PRD's Sprint 2 scope must treat intent capture as net-new, not "add polish to existing capture" — see §2.**
+- **Monetization model (UNRESOLVED):** freemium vs. donation-based vs. hybrid — not decided. See §8. To be worked through together; don't let any single sprint's code assume an answer.
+- **Bubble: free vs. Pro (UNRESOLVED):** previously assumed Pro-gated; now open — may ship free. See §6/§8.
+- **Delay-before-unlock / scheduling / bypass list — early-stage idea, NOT scoped, NOT committed.** Concept: add a deliberate delay when unlocking (possibly on a schedule, e.g., certain hours/contexts), with a bypass list for time-sensitive or essential actions (e.g., payments) so the friction doesn't block things that shouldn't be blocked. This is a distinct mechanic from "smart unlock triage" (§6, which *skips* prompting on short unlocks) — triage reduces friction, this idea *adds* friction deliberately, so don't conflate the two when either comes up. Needs real scoping (what triggers it, how the bypass list is defined/maintained, does it interact with the existing prompt+bubble flow or replace it for certain unlocks) before it enters any sprint.
 
 ## 10. Common commands
 
@@ -101,7 +104,8 @@ flutter clean                  # when builds get weird
 ## 11. Do NOT
 
 - Touch Kotlin / native Android files unless explicitly asked.
-- Add analytics or network calls to the free tier.
+- Add analytics or network calls to the free/base experience.
 - Reintroduce React Native / Expo / Replit anything.
 - Demand all permissions upfront in onboarding.
 - Trust the PRD over this file on stack, pricing, or platform decisions.
+- Assume the bubble is Pro-gated, or assume freemium is the final monetization model — both are open (§8/§9).
