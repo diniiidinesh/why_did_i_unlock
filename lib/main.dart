@@ -127,13 +127,22 @@ class OverlayRoot extends StatefulWidget {
 class _OverlayRootState extends State<OverlayRoot> {
   _OverlayMode _mode = _OverlayMode.capture;
   String _intentText = '';
+  String _intentSource = '';
+  DateTime? _declaredAt;
 
-  Future<void> _submitIntent(String text) async {
+  Future<void> _submitIntent(String text, String source) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
 
+    final declaredAt = DateTime.now();
+    debugPrint(
+      '📝 Intent declared: "$trimmed" (source: $source) at $declaredAt',
+    );
+
     setState(() {
       _intentText = trimmed;
+      _intentSource = source;
+      _declaredAt = declaredAt;
       _mode = _OverlayMode.bubble;
     });
 
@@ -161,6 +170,13 @@ class _OverlayRootState extends State<OverlayRoot> {
   }
 
   Future<void> _dismissBubble() async {
+    final dismissedAt = DateTime.now();
+    final activeFor = _declaredAt == null ? null : dismissedAt.difference(_declaredAt!);
+    debugPrint(
+      '✅ Intent dismissed: "$_intentText" (source: $_intentSource) '
+      'declared at $_declaredAt, dismissed at $dismissedAt, active for $activeFor',
+    );
+
     await FlutterOverlayWindow.closeOverlay();
     // The plugin caches the overlay's Flutter engine and only detaches the
     // view on closeOverlay() — the engine (and therefore this State's _mode +
@@ -173,6 +189,8 @@ class _OverlayRootState extends State<OverlayRoot> {
       setState(() {
         _mode = _OverlayMode.capture;
         _intentText = '';
+        _intentSource = '';
+        _declaredAt = null;
       });
     }
   }
@@ -189,7 +207,8 @@ class _OverlayRootState extends State<OverlayRoot> {
 }
 
 class IntentCaptureScreen extends StatefulWidget {
-  final ValueChanged<String> onSubmit;
+  /// Called with (text, source) where source is 'preset' or 'custom'.
+  final void Function(String text, String source) onSubmit;
 
   const IntentCaptureScreen({super.key, required this.onSubmit});
 
@@ -230,7 +249,7 @@ class _IntentCaptureScreenState extends State<IntentCaptureScreen> {
                   for (final preset in intentPresets)
                     _PresetButton(
                       label: preset,
-                      onTap: () => widget.onSubmit(preset),
+                      onTap: () => widget.onSubmit(preset, 'preset'),
                     ),
                 ],
               ),
@@ -246,7 +265,7 @@ class _IntentCaptureScreenState extends State<IntentCaptureScreen> {
                     borderSide: BorderSide(color: Colors.white54),
                   ),
                 ),
-                onSubmitted: widget.onSubmit,
+                onSubmitted: (value) => widget.onSubmit(value, 'custom'),
               ),
             ],
           ),
