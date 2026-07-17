@@ -22,7 +22,11 @@ class UnlockListenerService : Service() {
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
         unlockReceiver = UnlockReceiver()
-        registerReceiver(unlockReceiver, IntentFilter(Intent.ACTION_USER_PRESENT))
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_USER_PRESENT)
+            addAction(Intent.ACTION_SCREEN_OFF)
+        }
+        registerReceiver(unlockReceiver, filter)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

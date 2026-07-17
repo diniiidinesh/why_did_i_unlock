@@ -8,9 +8,15 @@ import android.util.Log
 class UnlockReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         Log.d("UnlockReceiver", "🔓 onReceive fired: ${intent.action}")
-        if (intent.action == Intent.ACTION_USER_PRESENT) {
-            Log.d("UnlockReceiver", "✅ ACTION_USER_PRESENT confirmed")
-            MainActivity.onPhoneUnlocked()
+        when (intent.action) {
+            Intent.ACTION_USER_PRESENT -> {
+                Log.d("UnlockReceiver", "✅ ACTION_USER_PRESENT confirmed")
+                MainActivity.onPhoneUnlocked()
+            }
+            Intent.ACTION_SCREEN_OFF -> {
+                Log.d("UnlockReceiver", "🔒 ACTION_SCREEN_OFF confirmed")
+                MainActivity.onPhoneLocked()
+            }
         }
     }
 }

@@ -73,8 +73,10 @@ class _HomeScreenState extends State<HomeScreen> {
   void _listenForUnlock() {
     platform.setMethodCallHandler((call) async {
       if (call.method == 'onUnlock') {
-        debugPrint('🔓 UNLOCK EVENT RECEIVED');
+        debugPrint('🔓 UNLOCK EVENT RECEIVED at ${DateTime.now()}');
         _showCaptureScreen();
+      } else if (call.method == 'onLock') {
+        debugPrint('🔒 LOCK EVENT RECEIVED at ${DateTime.now()}');
       }
     });
   }
