@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
@@ -92,11 +94,27 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    // WindowSize.fullCover/matchParent delegate to the plugin's own native
+    // screenHeight() calculation, which under-covers the bottom of the
+    // display on this device. Computing the true physical screen size
+    // ourselves sidesteps that calculation entirely — physicalSize is
+    // already in raw device pixels, which is what showOverlay() expects
+    // (see CLAUDE.md §5 on the px-not-dp gotcha).
+    final physicalSize = PlatformDispatcher.instance.views.first.physicalSize;
+
+    // The plugin's default start position (when none is given) shifts the
+    // window's top edge UP by the status bar height — a leftover from
+    // pairing with its own screenHeight() calculation. Combined with our
+    // explicit physicalSize.height above, that leftover shift makes the
+    // window's bottom edge land short of the true bottom by exactly the
+    // status bar height. Pinning the position to (0, 0) removes that shift
+    // so height reaches exactly to the true bottom of the display.
     await FlutterOverlayWindow.showOverlay(
-      height: WindowSize.fullCover,
-      width: WindowSize.matchParent,
+      height: physicalSize.height.round(),
+      width: physicalSize.width.round(),
       alignment: OverlayAlignment.center,
       flag: OverlayFlag.focusPointer,
+      startPosition: const OverlayPosition(0, 0),
       overlayTitle: 'Why Did I Unlock?',
       overlayContent: 'Declare your intent',
     );
