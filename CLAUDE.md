@@ -15,6 +15,8 @@ Why Did I Unlock (working name) is an Android-first digital-wellbeing app. Core 
 
 The defensible combination is **bubble + timer**, NOT the unlock prompt on its own (see §10). Positioning is deliberately drifting from "unlock interceptor" toward "phone session manager."
 
+> **Post-v0.3.0 note (branch work, 2026-07-20):** a batch of reliability/UX bugfixes has landed on a branch (not yet in a tagged release): unlock handling moved off `MainActivity` into a **persistent background Flutter engine** so it survives the app being swiped from Recents; boot auto-restart (`BootReceiver`); and a full-screen capture-window sizing fix. The engine topology this created is documented in **`docs/ARCHITECTURE.md`** — read it before touching the native layer or the overlay flow. The §2 "→ `MainActivity` → `MethodChannel`" description below is the v0.3.0 shape and is superseded by that doc.
+
 ## 2. Current state — ground truth (the PRD is partly stale)
 
 - **Stack is Flutter.** The PRD (in the repo / Drive) still describes React Native + Expo + Replit. That is obsolete. Trust THIS file over the PRD on anything stack-, pricing-, or platform-related. Flutter was chosen over RN/Expo after a feature-by-feature comparison, mainly because `flutter_overlay_window` handles the overlay + permission complexity cleanly.
@@ -68,6 +70,7 @@ None of these are scoped for any specific sprint yet — parked for a future pol
 - `android/app/keystore/upload-keystore.jks`, `android/key.properties` — release signing (gitignored, see §5).
 - `assets/icon/icon.png` — placeholder app icon source (purple lock, matches in-app bubble color; not final branding).
 - `pubspec.yaml` — Dart/Flutter dependencies.
+- `docs/ARCHITECTURE.md` — system design: the three-Flutter-engine topology, native components, event flows, and the "why" behind them. **Read before touching the native layer or overlay flow.**
 - `PRD_flutter.md` — the current, Flutter-accurate PRD (see §2). `IntentLock_PRD.md` is the original, partly-stale v1.0.
 - `SETUP.md` — Windows dev-environment bring-up (Git → Flutter SDK → Android Studio SDK-only → Claude Code → physical device).
 - `CLAUDE.md` — this file.
@@ -82,6 +85,7 @@ None of these are scoped for any specific sprint yet — parked for a future pol
 - **Ask clarifying questions when scope is ambiguous** rather than guessing.
 - Prefer editing existing files over adding new ones; keep the dependency count low.
 - Run `flutter analyze` and test on a real device before declaring anything done.
+- **Keep `docs/ARCHITECTURE.md` current.** Whenever the engine topology, native components (services/receivers), event flows, or their rationale change, update that doc in the same change — it's the durable, cross-machine record of how the system actually fits together.
 - **Claude Code's local auto-memory does not sync across machines** — treat it as a same-machine convenience only. Anything that needs to survive a laptop switch or be picked up fresh belongs in this file (or elsewhere in the repo), not solely in memory.
 
 ## 8. Engineering principles — must run well on low-end AND high-end devices
