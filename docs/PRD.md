@@ -7,7 +7,7 @@
 | Field | Details |
 |---|---|
 | Version | 2.0 (Flutter rewrite) |
-| Supersedes | v1.0, Feb 27 2026 (`IntentLock_PRD.md`, written for React Native/Expo/Replit) |
+| Supersedes | v1.0, Feb 27 2026 (`docs/archive/IntentLock_PRD_v1_original.md`, written for React Native/Expo/Replit) |
 | Date | July 17, 2026 |
 | Status | Living document — sections marked **OPEN** are genuinely undecided, not placeholders |
 | Platform | Android (Phase 1, active). iOS — undecided, see §9 |
@@ -274,7 +274,7 @@ Retained from v1.0 as directional targets — **note that Pro Conversion Rate is
 
 ### 11.1 Development Environment
 
-Superseded by `SETUP.md` in the repo root, which documents the actual Windows/Flutter/Android toolchain setup in detail. This PRD no longer carries Replit-specific setup notes (v1.0's Appendix 6.1) — they don't apply to the current stack and referencing them risks someone following stale instructions.
+Superseded by `docs/SETUP.md`, which documents the actual Windows/Flutter/Android toolchain setup in detail. This PRD no longer carries Replit-specific setup notes (v1.0's Appendix 6.1) — they don't apply to the current stack and referencing them risks someone following stale instructions.
 
 ### 11.2 Monetization Alternatives Considered
 

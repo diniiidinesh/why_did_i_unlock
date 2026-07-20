@@ -1,8 +1,9 @@
 # CLAUDE.md — Why Did I Unlock
 
 > Operational context for Claude Code. Read this fully at the start of every session.
-> Last updated: 2026-07-17 (rev 3 — v0.3.0 shipped: lock detection, logging, sharing-readiness/signing; Sprint 3 storage+cooldown design decided but not built). Owner: Dinesh.
+> Last updated: 2026-07-20 (rev 4 — post-v0.3.0 reliability fixes merged to `main`: persistent background engine, boot restart, full-screen capture fix; docs reorganized into `docs/`, real README added; Sprint 3 storage+cooldown still not built). Owner: Dinesh.
 > Working name: **Why Did I Unlock** (originally "IntentLock" in the PRD). The public/store brand is NOT finalized — see §12.
+> New here? Start with `README.md` (front door + doc map). Authoritative docs: this file (operational context), `docs/ARCHITECTURE.md` (system design), `docs/PRD.md` (product).
 > **This file — not Claude Code's local memory — is the durable source of truth across machines.** Claude Code's auto-memory (`~/.claude/projects/.../memory/`) is local-filesystem-only with no cross-device sync; anything that needs to survive a machine switch belongs here or elsewhere in the repo, not only in memory.
 
 ## 1. What this app is
@@ -15,7 +16,7 @@ Why Did I Unlock (working name) is an Android-first digital-wellbeing app. Core 
 
 The defensible combination is **bubble + timer**, NOT the unlock prompt on its own (see §10). Positioning is deliberately drifting from "unlock interceptor" toward "phone session manager."
 
-> **Post-v0.3.0 note (branch work, 2026-07-20):** a batch of reliability/UX bugfixes has landed on a branch (not yet in a tagged release): unlock handling moved off `MainActivity` into a **persistent background Flutter engine** so it survives the app being swiped from Recents; boot auto-restart (`BootReceiver`); and a full-screen capture-window sizing fix. The engine topology this created is documented in **`docs/ARCHITECTURE.md`** — read it before touching the native layer or the overlay flow. The §2 "→ `MainActivity` → `MethodChannel`" description below is the v0.3.0 shape and is superseded by that doc.
+> **Post-v0.3.0 note (merged to `main` 2026-07-20, merge commit `e7873a5`, not yet tagged):** a batch of reliability/UX fixes is now on `main`: unlock handling moved off `MainActivity` into a **persistent background Flutter engine** so it survives the app being swiped from Recents (was a P0 — detection silently died on swipe-away); boot auto-restart (`BootReceiver`); and full-screen capture-window sizing/gravity fixes. The resulting three-engine topology is documented in **`docs/ARCHITECTURE.md`** — read it before touching the native layer or the overlay flow. The §2 "→ `MainActivity` → `MethodChannel`" description below is the older v0.3.0 shape and is superseded by that doc.
 
 ## 2. Current state — ground truth (the PRD is partly stale)
 
@@ -31,7 +32,7 @@ The defensible combination is **bubble + timer**, NOT the unlock prompt on its o
   - Still not built: voice input, timer, local storage/history, dashboard, completed-vs-abandoned distinction.
 - Overlay is handled by the **`flutter_overlay_window`** package (currently `^0.5.0`).
 - Target: **Q3 2026 MVP**, built incrementally, sprint by sprint.
-- The PRD has been rewritten for Flutter as `PRD_flutter.md` (the original `IntentLock_PRD.md` is kept for reference but is stale on stack/pricing).
+- The PRD has been rewritten for Flutter as `docs/PRD.md` (the original v1.0 is archived at `docs/archive/IntentLock_PRD_v1_original.md`, kept for reference but stale on stack/pricing).
 - **Code package name (confirmed from `pubspec.yaml`): `why_did_i_unlock`.** Matches the working name; no code rename needed.
 - **Dependencies as of v0.3.0:** `flutter_overlay_window`, `cupertino_icons` (runtime); `flutter_launcher_icons` (dev-only, generates the app icon from `assets/icon/icon.png`). No state management, local storage, or permission-handler package added yet — `sqflite` is the next one to land, with Sprint 3 (§3). `pubspec.yaml`'s `description` and `version` have both been updated from scaffold defaults (`version: 0.3.0+3` as of this build).
 - **Toolchain floor:** pubspec requires Dart SDK `^3.11.5`, so install a **current stable Flutter** on the new machine. If `flutter pub get` fails with an SDK-constraint error, the Flutter version is too old — run `flutter upgrade`.
@@ -70,10 +71,11 @@ None of these are scoped for any specific sprint yet — parked for a future pol
 - `android/app/keystore/upload-keystore.jks`, `android/key.properties` — release signing (gitignored, see §5).
 - `assets/icon/icon.png` — placeholder app icon source (purple lock, matches in-app bubble color; not final branding).
 - `pubspec.yaml` — Dart/Flutter dependencies.
+- `README.md` — repo front door: what the app is, current status, and the map to every other doc. Start here on a fresh clone.
 - `docs/ARCHITECTURE.md` — system design: the three-Flutter-engine topology, native components, event flows, and the "why" behind them. **Read before touching the native layer or overlay flow.**
-- `PRD_flutter.md` — the current, Flutter-accurate PRD (see §2). `IntentLock_PRD.md` is the original, partly-stale v1.0.
-- `SETUP.md` — Windows dev-environment bring-up (Git → Flutter SDK → Android Studio SDK-only → Claude Code → physical device).
-- `CLAUDE.md` — this file.
+- `docs/PRD.md` — the current, Flutter-accurate PRD (see §2). `docs/archive/IntentLock_PRD_v1_original.md` is the original, stale v1.0 (RN/Expo/Replit), kept only for history.
+- `docs/SETUP.md` — Windows dev-environment bring-up (Git → Flutter SDK → Android Studio SDK-only → Claude Code → physical device).
+- `CLAUDE.md` — this file (repo root; Claude Code reads it from here).
 
 (Confirm the exact Kotlin package path after cloning and correct this section if it differs.)
 
@@ -125,7 +127,7 @@ This is a hard requirement, not a nice-to-have. The app runs a persistent overla
 
 - **Naming / branding (UNRESOLVED):** Started as "IntentLock" (PRD), then shifted to the working name "Why Did I Unlock." Neither is settled as the store brand. The May 2026 stress-test recommended dropping BOTH: "IntentLock" reads like a security/MDM product; "Why Did I Unlock" is a strong tagline but long, hard to search, and semantically owned by the competitor Intenty. Alternatives floated (not chosen): Sesh, Throughline, Onpurpose, Phonepoint. Decide the *store brand* before the listing. Separately, keep the *code package name* (in `pubspec.yaml` / Android `applicationId`) as whatever Sprint 1 scaffolded it to — renaming a Flutter package post-scaffold is disruptive, and the internal identifier need not match the marketed brand. Confirmed: the code package is already `why_did_i_unlock`, so only the *store brand* is still open. **The on-device app label was set to "Why Did I Unlock" for v0.3.0's informal sharing** — this is a low-risk interim choice for friend-testing, not a resolution of the store-brand question; the app icon shipped alongside it is explicitly a placeholder for the same reason.
 - **iOS strategy:** the floating bubble cannot be replicated on iOS as it is on Android. iOS would be a *separate product* built on Shortcuts + Focus Filters. Decision pending: deprioritize / rebuild separately / drop.
-- **PRD rewrite:** done — see `PRD_flutter.md`. Re-verify it against actual code if meaningful time has passed since 2026-07-17.
+- **PRD rewrite:** done — see `docs/PRD.md`. Re-verify it against actual code if meaningful time has passed since 2026-07-17.
 - **Monetization model (UNRESOLVED):** freemium vs. donation-based vs. hybrid — not decided. See §11. To be worked through together; don't let any single sprint's code assume an answer.
 - **Bubble: free vs. Pro (UNRESOLVED):** previously assumed Pro-gated; now open — may ship free. See §9/§11.
 - **Delay-before-unlock / scheduling / bypass list — early-stage idea, NOT scoped, NOT committed.** Concept: add a deliberate delay when unlocking (possibly on a schedule, e.g., certain hours/contexts), with a bypass list for time-sensitive or essential actions (e.g., payments) so the friction doesn't block things that shouldn't be blocked. This is a distinct mechanic from "smart unlock triage" (§9, which *skips* prompting on short unlocks) — triage reduces friction, this idea *adds* friction deliberately, so don't conflate the two when either comes up. Needs real scoping (what triggers it, how the bypass list is defined/maintained, does it interact with the existing prompt+bubble flow or replace it for certain unlocks) before it enters any sprint.

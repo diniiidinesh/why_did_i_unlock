@@ -1,3 +1,12 @@
+> ⚠️ **SUPERSEDED / ARCHIVED — DO NOT USE AS CURRENT.** This is the original
+> v1.0 PRD (Feb 2026), written for a React Native / Expo / Replit stack that was
+> never used. It is kept only for historical reference. The current, accurate PRD
+> is **`docs/PRD.md`**; the authoritative operational context is **`CLAUDE.md`**
+> at the repo root. Do not follow anything in this file for stack, pricing,
+> platform, or setup decisions.
+
+---
+
 **PRODUCT REQUIREMENTS DOCUMENT**
 
 **IntentLock**
