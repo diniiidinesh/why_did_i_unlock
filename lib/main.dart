@@ -3,10 +3,19 @@ import 'package:flutter/services.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 
 const List<String> intentPresets = [
-  'Check messages',
-  'Quick search',
-  'Just browsing',
+  'Payments',
+  'Calls',
+  'Messages',
+  'Food Order',
+  'Commute',
 ];
+
+/// Label for the honest "no real reason" option. Deliberately NOT a plain
+/// "Skip" — it still logs (see [_OverlayRootState._submitNoIntent]), just
+/// without forcing a fake intent or showing a bubble. A too-easy bypass would
+/// undercut the whole friction mechanic; this keeps the friction while being
+/// honest about habitual/purposeless unlocks (itself useful signal).
+const String noIntentLabel = 'Just Like That';
 
 /// Max characters accepted by the custom-intent text field. Kept as a named
 /// constant so raising or lowering the limit later is a one-line change.
@@ -224,6 +233,16 @@ class _OverlayRootState extends State<OverlayRoot> {
     );
   }
 
+  /// Honest "no real reason" path — logs the habitual/purposeless unlock
+  /// (real signal, see docs/BACKLOG.md) but does NOT transition to bubble
+  /// mode: there's no declared task, so a persistent reminder would just be
+  /// nagging. State stays in capture mode with nothing set, so the engine is
+  /// already clean for the next unlock (no reset needed, unlike _dismissBubble).
+  Future<void> _submitNoIntent() async {
+    debugPrint('🤷 No intent declared ("$noIntentLabel") at ${DateTime.now()}');
+    await FlutterOverlayWindow.closeOverlay();
+  }
+
   Future<void> _dismissBubble() async {
     final dismissedAt = DateTime.now();
     final activeFor = _declaredAt == null ? null : dismissedAt.difference(_declaredAt!);
@@ -254,7 +273,10 @@ class _OverlayRootState extends State<OverlayRoot> {
   Widget build(BuildContext context) {
     switch (_mode) {
       case _OverlayMode.capture:
-        return IntentCaptureScreen(onSubmit: _submitIntent);
+        return IntentCaptureScreen(
+          onSubmit: _submitIntent,
+          onNoIntent: _submitNoIntent,
+        );
       case _OverlayMode.bubble:
         return BubbleWidget(intentText: _intentText, onClose: _dismissBubble);
     }
@@ -265,7 +287,14 @@ class IntentCaptureScreen extends StatefulWidget {
   /// Called with (text, source) where source is 'preset' or 'custom'.
   final void Function(String text, String source) onSubmit;
 
-  const IntentCaptureScreen({super.key, required this.onSubmit});
+  /// Called when the user picks the honest "no real reason" option instead.
+  final VoidCallback onNoIntent;
+
+  const IntentCaptureScreen({
+    super.key,
+    required this.onSubmit,
+    required this.onNoIntent,
+  });
 
   @override
   State<IntentCaptureScreen> createState() => _IntentCaptureScreenState();
@@ -279,6 +308,8 @@ class _IntentCaptureScreenState extends State<IntentCaptureScreen> {
     _controller.dispose();
     super.dispose();
   }
+
+  void _submitCustomText() => widget.onSubmit(_controller.text, 'custom');
 
   @override
   Widget build(BuildContext context) {
@@ -308,19 +339,40 @@ class _IntentCaptureScreenState extends State<IntentCaptureScreen> {
                     ),
                 ],
               ),
+              const SizedBox(height: 16),
+              // Separate from the topic presets above: an honest "no real
+              // reason" option, not a plain Skip (still logs — see
+              // _submitNoIntent). Kept visually distinct via extra spacing
+              // rather than mixed into the topic grid.
+              _PresetButton(label: noIntentLabel, onTap: widget.onNoIntent),
               const SizedBox(height: 32),
-              TextField(
-                controller: _controller,
-                maxLength: intentMaxInputLength,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  hintText: 'Type your intent...',
-                  hintStyle: TextStyle(color: Colors.white54),
-                  enabledBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: Colors.white54),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _controller,
+                      maxLength: intentMaxInputLength,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(
+                        hintText: 'Type your intent...',
+                        hintStyle: TextStyle(color: Colors.white54),
+                        enabledBorder: UnderlineInputBorder(
+                          borderSide: BorderSide(color: Colors.white54),
+                        ),
+                      ),
+                      onSubmitted: (_) => _submitCustomText(),
+                    ),
                   ),
-                ),
-                onSubmitted: (value) => widget.onSubmit(value, 'custom'),
+                  const SizedBox(width: 8),
+                  TextButton(
+                    onPressed: _submitCustomText,
+                    child: const Text(
+                      'OK',
+                      style: TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
