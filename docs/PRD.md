@@ -24,8 +24,8 @@
 
 Why Did I Unlock is a digital wellbeing app built around three mechanics:
 
-1. **Intent capture at unlock** — on phone unlock, a prompt asks "What are you unlocking for?" The user states intent via preset, custom text, or voice. *(Planned — not yet built; see §2.)*
-2. **Persistent floating bubble** — the declared intent stays visible as a draggable overlay across all apps until completed. *(Partially built — the overlay mechanism itself works; it does not yet display intent text. See §2.)*
+1. **Intent capture at unlock** — on phone unlock, a prompt asks "What are you unlocking for?" The user states intent via preset or custom text (voice still planned). *(Built — presets + custom text shipped in Sprint 2; see §2.)*
+2. **Persistent floating bubble** — the declared intent stays visible as a draggable overlay across all apps until completed. *(Built — the bubble displays the declared intent text and persists across apps; see §2.)*
 3. **Optional timer accountability** — an optional countdown attached to the declared intent, with visual urgency cues as it runs out. *(Planned.)*
 
 The defensible combination is the **bubble + timer working together** — not the unlock prompt in isolation. This distinction matters because of a specific finding from behavioral research (§1.6) and because the closest competitor already owns the "prompt on unlock" mechanic.
@@ -74,26 +74,27 @@ The PNAS *one sec* randomized controlled trial found that the deliberation promp
 
 ---
 
-## 2. Current Implementation State (ground truth — verified on real device, 2026-07-17)
+## 2. Current Implementation State (ground truth — v0.3.1, verified on real device 2026-07-20)
 
-v1.0 of this PRD asserted things about "Sprint 1" that weren't accurate against the actual codebase. This section has since been verified end-to-end on a physical device in `--release` mode — treat it as trustworthy, but re-verify against code if meaningful time has passed since the date above.
+v1.0 of this PRD asserted things about "Sprint 1" that weren't accurate against the actual codebase. This section has since been verified end-to-end on a physical device in `--release` mode — treat it as trustworthy, but re-verify against code if meaningful time has passed since the date above. For the full technical topology, see **`docs/ARCHITECTURE.md`**.
 
-**Built and confirmed working (Sprint 1 + Sprint 2, real-device `--release` test):**
-- Unlock detection: `UnlockReceiver` → `UnlockListenerService` (foreground service) → `MainActivity` → Flutter `MethodChannel`.
-- Intent-capture screen appears on unlock (presets / custom text).
+**Built and confirmed working (Sprint 1 + Sprint 2 + post-v0.3.0 reliability fixes, real-device `--release`):**
+- Unlock/lock detection: `UnlockReceiver` (for `ACTION_USER_PRESENT` / `ACTION_SCREEN_OFF`) → `UnlockListenerService` (foreground service) → a **persistent background Flutter engine** → Flutter. (This replaced the original `MainActivity`-hosted method channel, which died when the app was swiped from Recents — see below.)
+- Intent-capture screen appears on unlock (presets / custom text), covering the full display.
 - **The floating bubble displays the actual declared intent text** — the earlier decorative purple-circle placeholder has been superseded.
 - Bubble persists across app switches, with one confirmed OS-level exception: it does not render over the Settings app, which is expected Android anti-"tapjacking" behavior (suppressing overlays on sensitive system screens since Android 12) — not a defect.
-- Manual completion works: tapping the bubble and marking an intent done clears it.
-- **Single-active-intent behavior is confirmed and intentional:** unlocking again while an intent is still incomplete does not re-trigger a fresh capture screen — the existing bubble simply persists. A new capture screen only appears once the current intent is completed. This is a real product/behavioral constraint to design around in Sprint 3+ (e.g. smart triage and cooldown logic should compose with this, not assume every unlock gets a fresh prompt).
-- Foreground service survived a background-kill test on a Realme/ColorOS device after a manual app reopen. **OEM battery-optimization exemption and autostart are not yet configured/tested for long-running reliability** — treat background survival as demonstrated short-term, not yet production-hardened.
+- Manual completion works: tapping the bubble's × dismisses/clears it.
+- **Single-active-intent behavior is confirmed and intentional:** unlocking again while an intent is still incomplete does not re-trigger a fresh capture screen — the existing bubble simply persists. A new capture screen only appears once the current intent is dismissed. This is a real product/behavioral constraint to design around in Sprint 3+ (e.g. smart triage and cooldown logic should compose with this, not assume every unlock gets a fresh prompt).
+- **Post-v0.3.0 reliability fixes (merged, verified):** monitoring now survives the app being swiped out of Recents (the persistent background engine, hosted by the foreground service, is decoupled from `MainActivity`); the service restarts after device reboot (`BootReceiver`); and the capture screen covers the full display (an overlay gravity/sizing fix). See `docs/ARCHITECTURE.md` for the resulting three-engine topology.
+- Foreground service survived a background-kill test on a Realme/ColorOS device after a manual app reopen. **OEM battery-optimization exemption and autostart are still not configured/tested for long-running reliability** (aggressive OEMs can block boot-restart and kill the service) — treat background survival as demonstrated but not yet production-hardened on those OEMs. Tracked in `docs/BACKLOG.md` (P1).
 
 **Not yet built:**
 - Voice input.
 - Timer / countdown.
-- Local storage / intent history (so completed intents aren't persisted yet — they clear but aren't logged anywhere).
+- Local storage / intent history (so completed intents aren't persisted yet — they clear but aren't logged anywhere; debug logging exists but isn't stored). This is the next sprint.
 - Dashboard / analytics.
 
-**Current dependencies:** `flutter_overlay_window`, `cupertino_icons`. No state-management, local-storage, or permission-handler package installed yet — anything beyond this should be checked against the current `pubspec.yaml` rather than assumed from this document.
+**Current dependencies:** `flutter_overlay_window`, `cupertino_icons` (runtime); `flutter_launcher_icons` (dev-only). No state-management, local-storage, or permission-handler package installed yet — anything beyond this should be checked against the current `pubspec.yaml` rather than assumed from this document.
 
 ---
 
