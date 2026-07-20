@@ -50,6 +50,21 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="showOverlayOnUnlock"/>
         </service>
+        <!-- exported="true": BOOT_COMPLETED/QUICKBOOT_POWERON are protected
+             system broadcasts third-party apps cannot spoof, so this is safe
+             despite being reachable from outside the app (required by the
+             OS to deliver the broadcast at all; also required explicitly on
+             API 31+ for any component with an intent-filter). -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

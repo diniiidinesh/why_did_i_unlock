@@ -18,8 +18,40 @@ const int intentMaxInputLength = 100;
 const double _bubbleWidthDp = 200;
 const double _bubbleHeightDp = 56;
 
+/// Platform channel shared by native → Dart unlock/lock notifications.
+/// The handler is installed by [backgroundMain] (the persistent background
+/// engine), NOT by the main UI — see the architecture note on backgroundMain.
+const MethodChannel _unlockChannel = MethodChannel('com.whydidiunlock/unlock');
+
 void main() {
   runApp(const MyApp());
+}
+
+/// Headless entry point for the PERSISTENT BACKGROUND ENGINE.
+///
+/// This runs in its own Flutter engine hosted by `UnlockListenerService`
+/// (native), which the foreground service keeps alive independently of any
+/// Activity. That's the whole point: `MainActivity`'s engine is destroyed when
+/// the user swipes the app out of Recents, so the unlock-reaction logic must
+/// NOT live there — it lives here, where it survives task removal. This engine
+/// has `flutter_overlay_window` registered (auto-registered natively), so it
+/// can call showOverlay(); the overlay engine itself cannot (no plugins on it).
+/// See docs/ARCHITECTURE.md for the full engine topology.
+@pragma("vm:entry-point")
+void backgroundMain() {
+  WidgetsFlutterBinding.ensureInitialized();
+  _unlockChannel.setMethodCallHandler((call) async {
+    if (call.method == 'onUnlock') {
+      debugPrint('🔓 UNLOCK EVENT RECEIVED at ${DateTime.now()}');
+      final args = (call.arguments as Map?) ?? const {};
+      final width = (args['width'] as num?)?.toInt() ?? 0;
+      final height = (args['height'] as num?)?.toInt() ?? 0;
+      await _showCaptureScreen(width, height);
+    } else if (call.method == 'onLock') {
+      debugPrint('🔒 LOCK EVENT RECEIVED at ${DateTime.now()}');
+    }
+  });
+  debugPrint('🧠 backgroundMain ready (persistent background engine)');
 }
 
 @pragma("vm:entry-point")
@@ -32,6 +64,58 @@ void overlayMain() {
       home: OverlayRoot(),
     ),
   );
+}
+
+/// Shows the intent-capture overlay on unlock. Lives at top level (not in a
+/// widget) because it runs in the headless background engine — see
+/// [backgroundMain]. [screenWidth]/[screenHeight] are the true display size in
+/// raw device pixels, provided by native (the headless engine can't read
+/// display metrics itself).
+Future<void> _showCaptureScreen(int screenWidth, int screenHeight) async {
+  final hasPermission = await FlutterOverlayWindow.isPermissionGranted();
+  debugPrint('📋 Has overlay permission: $hasPermission');
+  if (!hasPermission) return;
+
+  if (screenWidth <= 0 || screenHeight <= 0) {
+    debugPrint('⚠️ Invalid screen size ($screenWidth x $screenHeight), skipping');
+    return;
+  }
+
+  final alreadyActive = await FlutterOverlayWindow.isActive();
+  if (alreadyActive) {
+    debugPrint('🟡 Overlay already active, skipping re-trigger');
+    return;
+  }
+
+  // Size the window from the native-provided true display size (raw device
+  // pixels — exactly what showOverlay() expects; see CLAUDE.md §5). We do NOT
+  // use PlatformDispatcher here because this runs in the headless background
+  // engine, which has no display surface and reports 0x0. We also avoid the
+  // plugin's WindowSize.fullCover, whose native screenHeight() under-covers
+  // the bottom on this device.
+  //
+  // alignment MUST be topLeft, not center. Confirmed via `dumpsys window
+  // windows`: with center gravity, Android fits the window's "parent" frame
+  // to exclude the nav bar (height 2337 = 2400 - 63px nav bar), then CENTERS
+  // our (taller) requested window inside that shrunk region — shifting it up
+  // ~31px (half the nav-bar inset) so the bottom lands 31px short of the true
+  // display bottom. That's the exposed-bottom bug; it's a gravity/fit
+  // artifact, not a size or position value problem (both were already
+  // correct). topLeft anchors to the true origin instead of centering within
+  // an inset-shrunk region.
+  //
+  // startPosition (0,0): pins the window to the true top-left; without it the
+  // plugin's default position shifts the window up by the status-bar height.
+  await FlutterOverlayWindow.showOverlay(
+    height: screenHeight,
+    width: screenWidth,
+    alignment: OverlayAlignment.topLeft,
+    flag: OverlayFlag.focusPointer,
+    startPosition: const OverlayPosition(0, 0),
+    overlayTitle: 'Why Did I Unlock?',
+    overlayContent: 'Declare your intent',
+  );
+  debugPrint('🟣 showOverlay called (${screenWidth}x$screenHeight capture screen)');
 }
 
 class MyApp extends StatelessWidget {
@@ -54,13 +138,15 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
 
-  static const platform = MethodChannel('com.whydidiunlock/unlock');
+  // NOTE: unlock/lock handling deliberately does NOT live here anymore. It runs
+  // in the persistent background engine (see backgroundMain) so it survives the
+  // app being swiped out of Recents. This screen's only job is to request the
+  // overlay permission on first launch, which needs a real Activity context.
 
   @override
   void initState() {
     super.initState();
     _requestOverlayPermission();
-    _listenForUnlock();
   }
 
   Future<void> _requestOverlayPermission() async {
@@ -68,39 +154,6 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!hasPermission) {
       await FlutterOverlayWindow.requestPermission();
     }
-  }
-
-  void _listenForUnlock() {
-    platform.setMethodCallHandler((call) async {
-      if (call.method == 'onUnlock') {
-        debugPrint('🔓 UNLOCK EVENT RECEIVED at ${DateTime.now()}');
-        _showCaptureScreen();
-      } else if (call.method == 'onLock') {
-        debugPrint('🔒 LOCK EVENT RECEIVED at ${DateTime.now()}');
-      }
-    });
-  }
-
-  Future<void> _showCaptureScreen() async {
-    final hasPermission = await FlutterOverlayWindow.isPermissionGranted();
-    debugPrint('📋 Has overlay permission: $hasPermission');
-    if (!hasPermission) return;
-
-    final alreadyActive = await FlutterOverlayWindow.isActive();
-    if (alreadyActive) {
-      debugPrint('🟡 Overlay already active, skipping re-trigger');
-      return;
-    }
-
-    await FlutterOverlayWindow.showOverlay(
-      height: WindowSize.fullCover,
-      width: WindowSize.matchParent,
-      alignment: OverlayAlignment.center,
-      flag: OverlayFlag.focusPointer,
-      overlayTitle: 'Why Did I Unlock?',
-      overlayContent: 'Declare your intent',
-    );
-    debugPrint('🟣 showOverlay called (capture screen)');
   }
 
   @override
