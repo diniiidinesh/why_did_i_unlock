@@ -74,6 +74,7 @@ None of these are scoped for any specific sprint yet — parked for a future pol
 - `README.md` — repo front door: what the app is, current status, and the map to every other doc. Start here on a fresh clone.
 - `docs/ARCHITECTURE.md` — system design: the three-Flutter-engine topology, native components, event flows, and the "why" behind them. **Read before touching the native layer or overlay flow.**
 - `docs/PRD.md` — the current, Flutter-accurate PRD (see §2). `docs/archive/IntentLock_PRD_v1_original.md` is the original, stale v1.0 (RN/Expo/Replit), kept only for history.
+- `docs/BACKLOG.md` — tactical deferred work (features/fixes/ideas + priorities). Strategic decisions stay in §11/§12 here, not there.
 - `docs/SETUP.md` — Windows dev-environment bring-up (Git → Flutter SDK → Android Studio SDK-only → Claude Code → physical device).
 - `CLAUDE.md` — this file (repo root; Claude Code reads it from here).
 
