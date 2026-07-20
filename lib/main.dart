@@ -94,14 +94,22 @@ Future<void> _showCaptureScreen(int screenWidth, int screenHeight) async {
   // plugin's WindowSize.fullCover, whose native screenHeight() under-covers
   // the bottom on this device.
   //
-  // startPosition (0,0): the plugin's default position shifts the window up by
-  // the status-bar height; combined with our explicit full height that would
-  // leave the bottom short by exactly that amount. Pinning to the origin makes
-  // the height reach the true bottom of the display.
+  // alignment MUST be topLeft, not center. Confirmed via `dumpsys window
+  // windows`: with center gravity, Android fits the window's "parent" frame
+  // to exclude the nav bar (height 2337 = 2400 - 63px nav bar), then CENTERS
+  // our (taller) requested window inside that shrunk region — shifting it up
+  // ~31px (half the nav-bar inset) so the bottom lands 31px short of the true
+  // display bottom. That's the exposed-bottom bug; it's a gravity/fit
+  // artifact, not a size or position value problem (both were already
+  // correct). topLeft anchors to the true origin instead of centering within
+  // an inset-shrunk region.
+  //
+  // startPosition (0,0): pins the window to the true top-left; without it the
+  // plugin's default position shifts the window up by the status-bar height.
   await FlutterOverlayWindow.showOverlay(
     height: screenHeight,
     width: screenWidth,
-    alignment: OverlayAlignment.center,
+    alignment: OverlayAlignment.topLeft,
     flag: OverlayFlag.focusPointer,
     startPosition: const OverlayPosition(0, 0),
     overlayTitle: 'Why Did I Unlock?',
