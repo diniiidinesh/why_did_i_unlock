@@ -1,0 +1,17 @@
+# Normalize line endings: store text files as LF in the repo, check out native.
+# Fixes the recurring "modified" churn on generated_plugin_registrant files
+# from Windows checkouts (CRLF working tree vs LF in repo).
+* text=auto
+
+# Explicit binary markers so git never tries to normalize these.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.jks binary
+*.keystore binary
+*.ttf binary
+*.otf binary
+*.apk binary
+*.aab binary
