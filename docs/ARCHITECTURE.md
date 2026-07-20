@@ -114,6 +114,16 @@ background engine.
   persists between shows; reset it explicitly on dismiss.
 - `startPosition (0,0)` is required for a true full-screen capture window (the plugin's
   default position shifts up by the status-bar height).
+- **`alignment` MUST be `topLeft`, not `center`, for the full-screen capture window.**
+  Confirmed via `adb shell dumpsys window windows`: `OverlayAlignment.center` sets
+  `gr=CENTER`, and combined with the window's `fitTypes=NAVIGATION_BARS`, Android computes
+  a "fit" parent frame that *excludes* the nav bar (e.g. height 2337 on a 2400px-tall
+  display — the 63px difference is the nav bar), then **centers** our full-height window
+  inside that shrunk region. Net effect: the window shifts up by half the nav-bar inset
+  (~31px here), landing that many px short of the true display bottom — the screen size/
+  position values were already correct; this is a gravity/fit artifact, not a size bug.
+  `topLeft` anchors to the true origin and avoids the centering. Verified numerically: the
+  live window `frame` went from `[0,-31][1080,2369]` to exactly `[0,0][1080,2400]`.
 
 ## 6. Known limitations / reliability gaps (not defects introduced here)
 
