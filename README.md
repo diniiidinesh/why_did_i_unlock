@@ -23,6 +23,7 @@ This is a work-in-progress shared informally with friends via sideloaded APK —
 | **[`docs/PRD.md`](docs/PRD.md)** | Current product requirements (Flutter-accurate). |
 | **[`docs/BACKLOG.md`](docs/BACKLOG.md)** | Deferred features/fixes/ideas with priorities. Strategic decisions live in `CLAUDE.md` §11/§12. |
 | **[`docs/SETUP.md`](docs/SETUP.md)** | Windows dev-environment bring-up (toolchain, device). |
+| **[`docs/DOC_UPKEEP.md`](docs/DOC_UPKEEP.md)** | For Claude Code: how to keep these docs current without burning context. |
 | `docs/archive/` | Superseded historical docs (e.g. the original RN/Expo v1.0 PRD) — reference only, not current. |
 
 > If two docs ever disagree, `CLAUDE.md` is the most current and wins.

@@ -1,7 +1,25 @@
 # BACKLOG — Why Did I Unlock
 
 > Deferred engineering/feature work and ideas not yet built. Git-tracked on purpose
-> (survives machine switches). Last updated: 2026-07-20.
+> (survives machine switches). Last updated: 2026-07-21.
+>
+> **TOP OF NEXT THREAD (highest priority, both from on-device testing 2026-07-21):**
+> 1. **[P1] Revamp the capture screen's keyboard handling.** The current fix
+>    (Scaffold + `resizeToAvoidBottomInset` + `SingleChildScrollView`, in
+>    `IntentCaptureScreen.build`) is interim and janky: it just shrinks the
+>    viewport so the whole centered `Column` shifts UP, pushing the preset pills
+>    partly off the top of the screen when the keyboard opens. Text is no longer
+>    *hidden* (the bug it fixed), but the layout jumps. Proper fix needs a screen
+>    redesign — research current Flutter keyboard-avoidance UX best practices
+>    first (e.g. anchor the text input near the bottom so it naturally sits above
+>    the keyboard; or a two-step "tap to type" mode that hides presets while
+>    typing; or scroll-to-focused-field rather than shift-everything). Not a
+>    one-liner — it's a layout rethink of `IntentCaptureScreen`.
+> 2. **[P1] Give "Just Like That" a visible button/pill shape.** Right now it's a
+>    bare `TextButton` (italic underlined text) — Dinesh's feedback: it doesn't
+>    read as tappable. Add a pill/outline (distinct from the topic-preset pills,
+>    but clearly a button) while keeping it visually differentiated as the
+>    "no real reason" option.
 >
 > **Scope:** this file holds *tactical* backlog — features, fixes, polish, ideas.
 > For **strategic open decisions** (monetization model, store brand, iOS strategy,
@@ -17,7 +35,7 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 
 - **[P1] `android:allowBackup="false"`** — currently unset (defaults to `true`). Harmless today (no stored data), but must be set before/with Sprint 3 storage or Android auto-backup will sweep up intent history, breaking the local-first/privacy stance. Do it alongside the storage work.
 - **[P1] OEM autostart onboarding** — aggressive OEMs (Xiaomi/Oppo/Vivo, key India market) block boot auto-restart AND kill the foreground service during normal use unless the user manually grants "Autostart" / disables battery optimization. Not fixable in code — needs a guided in-app screen walking the user through the OEM-specific setting. Fixes both the reboot gap on those OEMs and the general process-kill reliability gap. (Was "Option C" in the reboot discussion.)
-- **[P2] `LOCKED_BOOT_COMPLETED` (direct boot)** — the shipped boot fix uses plain `BOOT_COMPLETED`, delivered only *after* the first post-reboot unlock, so that first unlock isn't caught (self-heals from the 2nd). Direct-boot would close it but runs in device-encrypted-only storage before unlock (interacts with Sprint 3 storage encryption), adds complexity, and is expensive to test. Revisit only if reboot-reliability becomes a real complaint.
+- **[DONE 2026-07-21] `LOCKED_BOOT_COMPLETED` (direct boot)** — SHIPPED. `BootReceiver` + `UnlockListenerService` are now `directBootAware` and handle `LOCKED_BOOT_COMPLETED`, so monitoring starts before the first post-reboot unlock. Verified across 2 real reboots (prompt appeared ~2s after boot, zero manual app-open). The device-encrypted-storage concern turned out moot: our logic only runs on `ACTION_USER_PRESENT`, which fires after unlock when normal storage is already available.
 - **[P2] Graceful degradation when overlay permission is denied/revoked** — currently a silent no-op (confirmed). CLAUDE.md §8 calls for a notification-based fallback instead. Not built.
 
 ## Performance (must run on low-end devices — CLAUDE.md §8)
@@ -27,8 +45,10 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 
 ## Capture-screen / bubble UX
 
-- **[P2] "OK"/submit button on the capture screen** — currently the custom text field only submits via the keyboard's enter/done key; an on-screen button is more discoverable and reduces confusion. Small, Dart-only quick win.
-- **[decision] Skip / "Just Like That" option** — a preset meaning "no real reason, just picked up the phone" that dismisses without forcing a fake intent. Design it as *honest capture that still logs* (valuable data on % purposeless unlocks), NOT a frictionless bypass — a too-easy skip collapses the whole friction mechanic (prompt is already the weakest ingredient per PNAS). Evaluate together with cooldown/triage (Sprint 3). Note tension with the PRD's "Hard Mode" (which *removes* skip).
+- **[DONE 2026-07-21] "OK"/submit button** — SHIPPED next to the text field.
+- **[DONE 2026-07-21] "Just Like That" option** — SHIPPED (logs a purposeless unlock, closes without a bubble). Styling follow-up is item #2 at top of file.
+- **[DONE 2026-07-21] Prompt on/off master toggle** — SHIPPED (HomeScreen switch, `shared_preferences`, `_shouldPrompt()` gate). Scheduling to plug into that same gate is a future item; see `CLAUDE.md` §3-adjacent notes.
+- **[DONE 2026-07-21] Meaningful presets** — Payments/Calls/Messages/Food Order/Commute replaced the vague originals.
 - **[P2] Drag / edge-snap behavior** — the bubble can be dragged to extreme/partly-offscreen edges. Consider Messenger-style edge-snap (`positionGravity` supports left/right/auto) and/or guaranteeing the × stays reachable.
 - **[P2] Adaptive bubble sizing** — width should adapt to intent text up to a max before truncating; consider a smaller-but-legible font. Currently fixed 200×56dp, single line, 14sp, ellipsis.
 - **[P2] Smaller footprint + richer actions** — shrink the bubble's on-screen footprint; consider replacing the single × with separate **Done** and **Snooze** actions.
