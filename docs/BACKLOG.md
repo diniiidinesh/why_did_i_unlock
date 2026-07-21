@@ -1,7 +1,7 @@
 # BACKLOG — Why Did I Unlock
 
 > Deferred engineering/feature work and ideas not yet built. Git-tracked on purpose
-> (survives machine switches). Last updated: 2026-07-21.
+> (survives machine switches).
 >
 > **TOP OF NEXT THREAD** — the prior two P1 items (keyboard revamp + Just Like That
 > pill) have been completed in v0.4.1 (PR #6, awaiting friend-testing feedback

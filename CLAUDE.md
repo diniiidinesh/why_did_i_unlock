@@ -1,7 +1,7 @@
 # CLAUDE.md — Why Did I Unlock
 
 > Operational context for Claude Code. Read this fully at the start of every session.
-> Last updated: 2026-07-21 (rev 6 — v0.4.1 shipping: capture-screen thumb-zone layout revamp, "Just Like That" pill styling. v0.4.0 shipped 2026-07-21: prompt on/off toggle, meaningful presets, "Just Like That", OK button, direct-boot restart; `shared_preferences` added. Sprint 3 storage+cooldown still not built). Owner: Dinesh.
+> Recent state: v0.4.1 (capture-screen thumb-zone layout revamp + "Just Like That" pill) in testing on top of v0.4.0 (prompt on/off toggle, meaningful presets, "Just Like That", OK button, direct-boot restart; `shared_preferences` added). Sprint 3 storage+cooldown not built. Owner: Dinesh. (For *when* things changed, use `git log` — this line is not a hand-maintained changelog.)
 > Working name: **Why Did I Unlock** (originally "IntentLock" in the PRD). The public/store brand is NOT finalized — see §12.
 > New here? Start with `README.md` (front door + doc map). Authoritative docs: this file (operational context), `docs/ARCHITECTURE.md` (system design), `docs/PRD.md` (product).
 > **This file — not Claude Code's local memory — is the durable source of truth across machines.** Claude Code's auto-memory (`~/.claude/projects/.../memory/`) is local-filesystem-only with no cross-device sync; anything that needs to survive a machine switch belongs here or elsewhere in the repo, not only in memory.
@@ -67,18 +67,16 @@ None of these are scoped for any specific sprint yet — parked for a future pol
 
 ## 6. Repository layout / key files
 
+Code & assets:
+
 - `lib/main.dart` — Flutter entry point and app UI (capture screen, bubble, overlay state machine).
 - `android/app/src/main/kotlin/.../` — native Android (unlock/lock detection receiver, overlay service, platform channels).
 - `android/app/src/main/AndroidManifest.xml` — permissions + service/receiver declarations.
 - `android/app/keystore/upload-keystore.jks`, `android/key.properties` — release signing (gitignored, see §5).
 - `assets/icon/icon.png` — placeholder app icon source (purple lock, matches in-app bubble color; not final branding).
 - `pubspec.yaml` — Dart/Flutter dependencies.
-- `README.md` — repo front door: what the app is, current status, and the map to every other doc. Start here on a fresh clone.
-- `docs/ARCHITECTURE.md` — system design: the three-Flutter-engine topology, native components, event flows, and the "why" behind them. **Read before touching the native layer or overlay flow.**
-- `docs/PRD.md` — the current, Flutter-accurate PRD (see §2). `docs/archive/IntentLock_PRD_v1_original.md` is the original, stale v1.0 (RN/Expo/Replit), kept only for history.
-- `docs/BACKLOG.md` — tactical deferred work (features/fixes/ideas + priorities). Strategic decisions stay in §11/§12 here, not there.
-- `docs/SETUP.md` — Windows dev-environment bring-up (Git → Flutter SDK → Android Studio SDK-only → Claude Code → physical device).
-- `CLAUDE.md` — this file (repo root; Claude Code reads it from here).
+
+Docs: for **what each doc is**, see the doc map in `README.md`; for **when to update each**, see `docs/DOC_UPKEEP.md`. Not re-listed here, to keep a single owner per fact. One operational reminder that belongs next to the code: **read `docs/ARCHITECTURE.md` before touching the native layer or overlay flow.**
 
 (Confirm the exact Kotlin package path after cloning and correct this section if it differs.)
 

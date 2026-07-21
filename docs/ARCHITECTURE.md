@@ -1,7 +1,7 @@
 # ARCHITECTURE — Why Did I Unlock
 
 > System design reference. **Keep this updated whenever the engine topology, native
-> components, event flows, or their rationale change.** Last updated: 2026-07-20.
+> components, event flows, or their rationale change.**
 > For product context/decisions see `CLAUDE.md` (repo root); for the current PRD see `docs/PRD.md`.
 
 This app is unusual for a Flutter app: it runs **three separate Flutter engines**
