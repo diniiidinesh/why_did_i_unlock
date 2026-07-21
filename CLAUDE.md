@@ -1,7 +1,7 @@
 # CLAUDE.md — Why Did I Unlock
 
 > Operational context for Claude Code. Read this fully at the start of every session.
-> Last updated: 2026-07-21 (rev 5 — v0.4.0 shipped: prompt on/off toggle, meaningful presets, "Just Like That", OK button, direct-boot restart; `shared_preferences` added. Keyboard-UX revamp + "Just Like That" pill are top of next thread. Sprint 3 storage+cooldown still not built). Owner: Dinesh.
+> Recent state: v0.4.1 (capture-screen thumb-zone layout revamp + "Just Like That" pill) in testing on top of v0.4.0 (prompt on/off toggle, meaningful presets, "Just Like That", OK button, direct-boot restart; `shared_preferences` added). Sprint 3 storage+cooldown not built. Owner: Dinesh. (For *when* things changed, use `git log` — this line is not a hand-maintained changelog.)
 > Working name: **Why Did I Unlock** (originally "IntentLock" in the PRD). The public/store brand is NOT finalized — see §12.
 > New here? Start with `README.md` (front door + doc map). Authoritative docs: this file (operational context), `docs/ARCHITECTURE.md` (system design), `docs/PRD.md` (product).
 > **This file — not Claude Code's local memory — is the durable source of truth across machines.** Claude Code's auto-memory (`~/.claude/projects/.../memory/`) is local-filesystem-only with no cross-device sync; anything that needs to survive a machine switch belongs here or elsewhere in the repo, not only in memory.
@@ -17,7 +17,8 @@ Why Did I Unlock (working name) is an Android-first digital-wellbeing app. Core 
 The defensible combination is **bubble + timer**, NOT the unlock prompt on its own (see §10). Positioning is deliberately drifting from "unlock interceptor" toward "phone session manager."
 
 > **Post-v0.3.0 note (merged to `main` 2026-07-20, merge commit `e7873a5`, tagged `v0.3.1`):** unlock handling moved off `MainActivity` into a **persistent background Flutter engine** so it survives the app being swiped from Recents (was a P0); boot auto-restart (`BootReceiver`); full-screen capture-window sizing/gravity fixes. Three-engine topology is in **`docs/ARCHITECTURE.md`** — read before touching native/overlay. The §2 "→ `MainActivity` → `MethodChannel`" line below is the older v0.3.0 shape, superseded by that doc.
-> **v0.4.0 note (merged to `main` 2026-07-21, PR #5, version `0.4.0+5`):** shipped — meaningful presets (Payments/Calls/Messages/Food Order/Commute), an on-screen OK button, a "Just Like That" honest-no-intent option (logs, no bubble), a **master prompt on/off toggle** (`HomeScreen` switch → `shared_preferences` → single `_shouldPrompt()` gate in the background engine, the seam where future scheduling plugs in), and **direct-boot restart** (`LOCKED_BOOT_COMPLETED` + `directBootAware`, so monitoring is up before the first post-reboot unlock — verified). New dep: `shared_preferences` (federated → needs Windows Developer Mode to build, as `sqflite` will too). **Known-imperfect:** the keyboard-avoidance fix on the capture screen just shifts content up (janky); a proper revamp + a real pill shape for "Just Like That" are the **top of the next thread** — see `docs/BACKLOG.md` header.
+> **v0.4.0 note (merged to `main` 2026-07-21, PR #5, version `0.4.0+5`):** shipped — meaningful presets (Payments/Calls/Messages/Food Order/Commute), an on-screen OK button, a "Just Like That" honest-no-intent option (logs, no bubble), a **master prompt on/off toggle** (`HomeScreen` switch → `shared_preferences` → single `_shouldPrompt()` gate in the background engine, the seam where future scheduling plugs in), and **direct-boot restart** (`LOCKED_BOOT_COMPLETED` + `directBootAware`, so monitoring is up before the first post-reboot unlock — verified). New dep: `shared_preferences` (federated → needs Windows Developer Mode to build, as `sqflite` will too). The interim keyboard-avoidance fix just shifted content up (janky), and "Just Like That" was a bare `TextButton`.
+> **v0.4.1 note (PR #6, pending merge, version `0.4.1+6`):** Polish pass on the capture screen — proper thumb-zone layout revamp (title/presets/"Just Like That"/text field all bottom-anchored to the one-handed reachable zone; text field pinned as footer just above keyboard, so keyboard no longer shoves content off-screen), and "Just Like That" is now a real outlined pill instead of bare italic text. Also syncs `macos/Flutter/GeneratedPluginRegistrant.swift` (had drifted since v0.4.0). Pending friend-testing feedback before merge to `main`.
 
 ## 2. Current state — ground truth (the PRD is partly stale)
 
@@ -66,18 +67,16 @@ None of these are scoped for any specific sprint yet — parked for a future pol
 
 ## 6. Repository layout / key files
 
+Code & assets:
+
 - `lib/main.dart` — Flutter entry point and app UI (capture screen, bubble, overlay state machine).
 - `android/app/src/main/kotlin/.../` — native Android (unlock/lock detection receiver, overlay service, platform channels).
 - `android/app/src/main/AndroidManifest.xml` — permissions + service/receiver declarations.
 - `android/app/keystore/upload-keystore.jks`, `android/key.properties` — release signing (gitignored, see §5).
 - `assets/icon/icon.png` — placeholder app icon source (purple lock, matches in-app bubble color; not final branding).
 - `pubspec.yaml` — Dart/Flutter dependencies.
-- `README.md` — repo front door: what the app is, current status, and the map to every other doc. Start here on a fresh clone.
-- `docs/ARCHITECTURE.md` — system design: the three-Flutter-engine topology, native components, event flows, and the "why" behind them. **Read before touching the native layer or overlay flow.**
-- `docs/PRD.md` — the current, Flutter-accurate PRD (see §2). `docs/archive/IntentLock_PRD_v1_original.md` is the original, stale v1.0 (RN/Expo/Replit), kept only for history.
-- `docs/BACKLOG.md` — tactical deferred work (features/fixes/ideas + priorities). Strategic decisions stay in §11/§12 here, not there.
-- `docs/SETUP.md` — Windows dev-environment bring-up (Git → Flutter SDK → Android Studio SDK-only → Claude Code → physical device).
-- `CLAUDE.md` — this file (repo root; Claude Code reads it from here).
+
+Docs: for **what each doc is**, see the doc map in `README.md`; for **when to update each**, see `docs/DOC_UPKEEP.md`. Not re-listed here, to keep a single owner per fact. One operational reminder that belongs next to the code: **read `docs/ARCHITECTURE.md` before touching the native layer or overlay flow.**
 
 (Confirm the exact Kotlin package path after cloning and correct this section if it differs.)
 
@@ -90,6 +89,7 @@ None of these are scoped for any specific sprint yet — parked for a future pol
 - Prefer editing existing files over adding new ones; keep the dependency count low.
 - Run `flutter analyze` and test on a real device before declaring anything done.
 - **Keep `docs/ARCHITECTURE.md` current.** Whenever the engine topology, native components (services/receivers), event flows, or their rationale change, update that doc in the same change — it's the durable, cross-machine record of how the system actually fits together.
+- **Before updating ANY documentation, read `docs/DOC_UPKEEP.md` first.** It covers token-cheap doc workflows (Grep before Read, batch edits, append notes instead of rewrite, mark `[DONE]` tags). This prevents expensive full-file reads and scattered small edits. Non-negotiable for cost-effective sessions.
 - **Claude Code's local auto-memory does not sync across machines** — treat it as a same-machine convenience only. Anything that needs to survive a laptop switch or be picked up fresh belongs in this file (or elsewhere in the repo), not solely in memory.
 
 ## 8. Engineering principles — must run well on low-end AND high-end devices

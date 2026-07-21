@@ -15,7 +15,10 @@
 | Claude Code local memory | Same-machine convenience only — **does NOT sync across machines** | Keep as pointers to the git-tracked docs, not a second copy. |
 
 Rule: each fact lives in **one** doc; others link to it. Strategic decisions =
-CLAUDE.md §11/§12 only. Don't restate them in BACKLOG/PRD.
+CLAUDE.md §11/§12 only. Don't restate them in BACKLOG/PRD. The **what-each-doc-is**
+descriptions live in README's doc map (the front door); the table above owns only
+the *update trigger* ("Update when") — don't grow it back into a second copy of
+README's descriptions. CLAUDE.md §6 points here rather than re-listing the docs.
 
 ## Token-cheap update procedure
 
@@ -30,7 +33,10 @@ CLAUDE.md §11/§12 only. Don't restate them in BACKLOG/PRD.
    of the decision.
 4. **Prefer appending a dated note** over rewriting a section, when the section
    is long (e.g. CLAUDE.md §2 uses "Post-vX note" blocks rather than rewrites).
-5. **Bump `Last updated:` dates** in each doc's header you touch. One line.
+5. **Do NOT hand-maintain `Last updated:` dates or `rev N` counters** — `git log`
+   is the authoritative timeline and never rots. The one human-facing exception is
+   the **README status headline** (the at-a-glance "where is this project" line);
+   everywhere else, let git track when.
 6. **Version + tag** on merge of a meaningful batch: bump `pubspec.yaml`
    `version:`, update the matching note in CLAUDE.md §2, `git tag -a vX.Y.Z`.
 

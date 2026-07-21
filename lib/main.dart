@@ -379,62 +379,84 @@ class _IntentCaptureScreenState extends State<IntentCaptureScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Scaffold (not a bare Material) so resizeToAvoidBottomInset shifts this
-    // content above the keyboard automatically — a bare Material doesn't do
-    // this, which is why the text field/OK button were rendering behind the
-    // keyboard. SingleChildScrollView so content can scroll rather than
-    // overflow if there still isn't enough room above the keyboard.
+    // Scaffold (not a bare Material) so resizeToAvoidBottomInset shrinks the
+    // available body height when the keyboard opens.
+    //
+    // Layout is thumb-zone-driven (per one-handed mobile UX research: the
+    // bottom/center of the screen is the reachable "easy zone", the top is
+    // the "hard zone" for one-handed thumb use — critical, tappable elements
+    // belong in the lower two-thirds). The title is read-only, so it stays
+    // fixed up top where it's easy to READ. Every TAPPABLE element (presets,
+    // "Just Like That", the text field/OK) is pushed down into the reachable
+    // zone, ending with the text field glued just above the keyboard.
+    //
+    // The presets/no-intent group uses the LayoutBuilder + ConstrainedBox
+    // (minHeight: full available space) + IntrinsicHeight + mainAxisAlignment
+    // .end combo: this is what lets a Column inside a SingleChildScrollView
+    // still bottom-align its content when there's slack space (a bare
+    // Column inside a scroll view always top-aligns, since the scroll view
+    // gives it unbounded height), while still scrolling gracefully — instead
+    // of overflowing — if the keyboard squeezes the available space below
+    // the content's natural height.
     return Scaffold(
       backgroundColor: Colors.black.withValues(alpha: 0.85),
       resizeToAvoidBottomInset: true,
       body: SafeArea(
-        child: SingleChildScrollView(
+        child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Text(
-                'What are you unlocking for?',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white, fontSize: 24),
-              ),
-              const SizedBox(height: 32),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                alignment: WrapAlignment.center,
-                children: [
-                  for (final preset in intentPresets)
-                    _PresetButton(
-                      label: preset,
-                      onTap: () => widget.onSubmit(preset, 'preset'),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              // Deliberately styled DIFFERENTLY from the topic pills above
-              // (no border/pill shape, muted+italic text, preceding caption)
-              // so it visually reads as a different kind of answer — "no real
-              // reason" — not just another category. Still logs (see
-              // _submitNoIntent); not a plain Skip.
-              const Text(
-                'or, if there isn\'t one —',
-                style: TextStyle(color: Colors.white38, fontSize: 13),
-              ),
-              const SizedBox(height: 4),
-              TextButton(
-                onPressed: widget.onNoIntent,
-                style: TextButton.styleFrom(foregroundColor: Colors.white70),
-                child: const Text(
-                  noIntentLabel,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontStyle: FontStyle.italic,
-                    decoration: TextDecoration.underline,
-                  ),
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    return SingleChildScrollView(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                        child: IntrinsicHeight(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              const Text(
+                                'What are you unlocking for?',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: Colors.white, fontSize: 24),
+                              ),
+                              const SizedBox(height: 32),
+                              Wrap(
+                                spacing: 12,
+                                runSpacing: 12,
+                                alignment: WrapAlignment.center,
+                                children: [
+                                  for (final preset in intentPresets)
+                                    _PresetButton(
+                                      label: preset,
+                                      onTap: () => widget.onSubmit(preset, 'preset'),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 24),
+                              // Deliberately styled DIFFERENTLY from the
+                              // topic pills above — muted border/italic
+                              // text, preceding caption — so it visually
+                              // reads as a different kind of answer, "no
+                              // real reason", not just another category.
+                              // Still logs (see _submitNoIntent); not a
+                              // plain Skip.
+                              const Text(
+                                'or, if there isn\'t one —',
+                                style: TextStyle(color: Colors.white38, fontSize: 13),
+                              ),
+                              const SizedBox(height: 8),
+                              _NoIntentButton(onTap: widget.onNoIntent),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
@@ -488,6 +510,33 @@ class _PresetButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       ),
       child: Text(label),
+    );
+  }
+}
+
+/// "Just Like That" — a real pill so it reads as tappable (Dinesh's feedback
+/// on the previous bare italic-underlined TextButton), but styled MUTED
+/// relative to [_PresetButton] (dimmer border/text, no fill) so it still
+/// visually reads as the "no real reason" option rather than another topic.
+class _NoIntentButton extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _NoIntentButton({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton(
+      onPressed: onTap,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: Colors.white70,
+        side: const BorderSide(color: Colors.white24),
+        shape: const StadiumBorder(),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      ),
+      child: const Text(
+        noIntentLabel,
+        style: TextStyle(fontSize: 14, fontStyle: FontStyle.italic),
+      ),
     );
   }
 }

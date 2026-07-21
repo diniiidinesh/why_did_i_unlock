@@ -6,11 +6,13 @@
 
 On every phone unlock, a prompt asks **"What are you unlocking for?"** You declare an intent (a preset or custom text), and it persists as a **floating bubble** across all apps until you dismiss it — a constant, gentle reminder of *why* you picked up your phone. An optional countdown timer is planned. The defensible idea is the **bubble + timer** accountability loop, not the unlock prompt alone.
 
-## Status (2026-07-20)
+## Status (2026-07-21)
 
-- **v0.3.0 shipped** (tagged), verified on a real device: unlock/lock detection, intent-capture screen (presets + custom text), the bubble showing the declared intent, manual dismiss, and debug logging.
-- **Post-v0.3.0 reliability fixes merged to `main`** (not yet tagged): the monitoring now survives the app being swiped from Recents (persistent background engine), restarts after reboot, and the capture screen covers the full display.
-- **Not built yet:** local intent-history storage + smart cooldown (the next sprint, designed), timer, voice input, dashboard, onboarding.
+- **v0.3.0 shipped** (tagged 2026-07-17), verified on a real device: unlock/lock detection, intent-capture screen (presets + custom text), the bubble showing the declared intent, manual dismiss, and debug logging.
+- **v0.3.x** (reliability fixes merged to `main`, tagged `v0.3.1`): monitoring survives app-swipe-out, restarts after reboot, full-display capture screen.
+- **v0.4.0 shipped** (merged to `main` 2026-07-21, PR #5): meaningful presets, OK button, "Just Like That" honest-no-intent option, master prompt on/off toggle, direct-boot auto-restart.
+- **v0.4.1 in testing** (PR #6, pending merge): capture-screen thumb-zone layout revamp, "Just Like That" pill styling — awaiting friend-testing feedback before merge to `main`.
+- **Not built yet:** local intent-history storage + smart cooldown (Sprint 3, fully designed), timer, voice input, dashboard, onboarding.
 
 This is a work-in-progress shared informally with friends via sideloaded APK — not on the Play Store.
 

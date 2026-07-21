@@ -1,25 +1,12 @@
 # BACKLOG — Why Did I Unlock
 
 > Deferred engineering/feature work and ideas not yet built. Git-tracked on purpose
-> (survives machine switches). Last updated: 2026-07-21.
+> (survives machine switches).
 >
-> **TOP OF NEXT THREAD (highest priority, both from on-device testing 2026-07-21):**
-> 1. **[P1] Revamp the capture screen's keyboard handling.** The current fix
->    (Scaffold + `resizeToAvoidBottomInset` + `SingleChildScrollView`, in
->    `IntentCaptureScreen.build`) is interim and janky: it just shrinks the
->    viewport so the whole centered `Column` shifts UP, pushing the preset pills
->    partly off the top of the screen when the keyboard opens. Text is no longer
->    *hidden* (the bug it fixed), but the layout jumps. Proper fix needs a screen
->    redesign — research current Flutter keyboard-avoidance UX best practices
->    first (e.g. anchor the text input near the bottom so it naturally sits above
->    the keyboard; or a two-step "tap to type" mode that hides presets while
->    typing; or scroll-to-focused-field rather than shift-everything). Not a
->    one-liner — it's a layout rethink of `IntentCaptureScreen`.
-> 2. **[P1] Give "Just Like That" a visible button/pill shape.** Right now it's a
->    bare `TextButton` (italic underlined text) — Dinesh's feedback: it doesn't
->    read as tappable. Add a pill/outline (distinct from the topic-preset pills,
->    but clearly a button) while keeping it visually differentiated as the
->    "no real reason" option.
+> **TOP OF NEXT THREAD** — the prior two P1 items (keyboard revamp + Just Like That
+> pill) have been completed in v0.4.1 (PR #6, awaiting friend-testing feedback
+> before merge to `main`). The next priority is **Sprint 3: local intent-history
+> storage + smart cooldown** — fully designed (see `CLAUDE.md` §3), ready to build.
 >
 > **Scope:** this file holds *tactical* backlog — features, fixes, polish, ideas.
 > For **strategic open decisions** (monetization model, store brand, iOS strategy,
@@ -49,6 +36,8 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 - **[DONE 2026-07-21] "Just Like That" option** — SHIPPED (logs a purposeless unlock, closes without a bubble). Styling follow-up is item #2 at top of file.
 - **[DONE 2026-07-21] Prompt on/off master toggle** — SHIPPED (HomeScreen switch, `shared_preferences`, `_shouldPrompt()` gate). Scheduling to plug into that same gate is a future item; see `CLAUDE.md` §3-adjacent notes.
 - **[DONE 2026-07-21] Meaningful presets** — Payments/Calls/Messages/Food Order/Commute replaced the vague originals.
+- **[DONE 2026-07-21] Capture-screen keyboard handling revamp** — The interim v0.4.0 fix just shifted the whole column up, pushing presets off-screen. Now uses thumb-zone layout: title/presets/"Just Like That" bottom-anchor within scrollable space (LayoutBuilder + ConstrainedBox + IntrinsicHeight + mainAxisAlignment.end), text field pinned as footer just above keyboard. In PR #6, pending merge.
+- **[DONE 2026-07-21] "Just Like That" pill styling** — Was a bare italic `TextButton`; now a real outlined pill (muted relative to topic presets so it still reads as the distinct "no real reason" option). In PR #6, pending merge.
 - **[P2] Drag / edge-snap behavior** — the bubble can be dragged to extreme/partly-offscreen edges. Consider Messenger-style edge-snap (`positionGravity` supports left/right/auto) and/or guaranteeing the × stays reachable.
 - **[P2] Adaptive bubble sizing** — width should adapt to intent text up to a max before truncating; consider a smaller-but-legible font. Currently fixed 200×56dp, single line, 14sp, ellipsis.
 - **[P2] Smaller footprint + richer actions** — shrink the bubble's on-screen footprint; consider replacing the single × with separate **Done** and **Snooze** actions.
