@@ -11,16 +11,23 @@ import android.util.Log
  * the app is completely asleep after any restart until the user manually
  * reopens it.
  *
- * Listens for the standard BOOT_COMPLETED plus the OEM "quick boot" variants
- * some manufacturers send instead of (or alongside) it. This does NOT help on
- * OEMs (Xiaomi/Oppo/Vivo) that block auto-start entirely unless the user has
- * manually granted it in that OEM's own settings — that's a separate,
- * not-yet-built onboarding task (P1 backlog). See docs/ARCHITECTURE.md.
+ * Listens for LOCKED_BOOT_COMPLETED (fires BEFORE the first post-reboot
+ * unlock, direct-boot-aware components only — see the directBootAware note
+ * in AndroidManifest.xml) plus the standard BOOT_COMPLETED and OEM "quick
+ * boot" variants as a fallback/redundant trigger (harmless if it fires
+ * twice on one boot — UnlockListenerService's engine-cache guard and normal
+ * Service.onCreate() semantics make the second call a no-op).
+ *
+ * This does NOT help on OEMs (Xiaomi/Oppo/Vivo) that block auto-start
+ * entirely unless the user has manually granted it in that OEM's own
+ * settings — that's a separate, not-yet-built onboarding task (P1 backlog).
+ * See docs/ARCHITECTURE.md.
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         Log.d("WDIUBoot", "📦 onReceive fired: ${intent.action}")
         when (intent.action) {
+            Intent.ACTION_LOCKED_BOOT_COMPLETED,
             Intent.ACTION_BOOT_COMPLETED,
             "android.intent.action.QUICKBOOT_POWERON",
             "com.htc.intent.action.QUICKBOOT_POWERON" -> {

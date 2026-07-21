@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 const List<String> intentPresets = [
   'Payments',
@@ -32,6 +33,31 @@ const double _bubbleHeightDp = 56;
 /// engine), NOT by the main UI — see the architecture note on backgroundMain.
 const MethodChannel _unlockChannel = MethodChannel('com.whydidiunlock/unlock');
 
+/// SharedPreferences key for the master on/off toggle. Kept as its own
+/// standalone stored value — not folded into a hypothetical "settings blob"
+/// — so future schedule-based rules (e.g. quiet hours) can be added as
+/// separate stored state later without changing what this switch means.
+/// shared_preferences (not sqflite) because this is a single flag, not the
+/// intent-history log; it works fine from the headless background engine,
+/// since — unlike the overlay engine — it has full plugin registration.
+const String promptsEnabledKey = 'prompts_enabled';
+
+/// Whether the capture screen should be shown right now. Today this only
+/// checks the master toggle above; this is the seam where future
+/// schedule-based rules would ALSO be checked, as additional conditions —
+/// not merged into the master toggle's own meaning.
+///
+/// Uses SharedPreferencesAsync (not SharedPreferences.getInstance()), which
+/// caches a static per-isolate singleton on first use — a real bug here,
+/// since the toggle is written from HomeScreen's engine but read from the
+/// separate persistent background engine's isolate. The cached copy in the
+/// background isolate never saw writes from the other engine. Async reads
+/// the platform directly on every call, no isolate-local caching.
+Future<bool> _shouldPrompt() async {
+  final prefs = SharedPreferencesAsync();
+  return await prefs.getBool(promptsEnabledKey) ?? true;
+}
+
 void main() {
   runApp(const MyApp());
 }
@@ -52,6 +78,12 @@ void backgroundMain() {
   _unlockChannel.setMethodCallHandler((call) async {
     if (call.method == 'onUnlock') {
       debugPrint('🔓 UNLOCK EVENT RECEIVED at ${DateTime.now()}');
+      // Gate only the prompt — monitoring/logging above still runs either
+      // way, so turning this off doesn't stop the service, just the popup.
+      if (!await _shouldPrompt()) {
+        debugPrint('🔕 Prompts disabled, skipping');
+        return;
+      }
       final args = (call.arguments as Map?) ?? const {};
       final width = (args['width'] as num?)?.toInt() ?? 0;
       final height = (args['height'] as num?)?.toInt() ?? 0;
@@ -150,12 +182,17 @@ class _HomeScreenState extends State<HomeScreen> {
   // NOTE: unlock/lock handling deliberately does NOT live here anymore. It runs
   // in the persistent background engine (see backgroundMain) so it survives the
   // app being swiped out of Recents. This screen's only job is to request the
-  // overlay permission on first launch, which needs a real Activity context.
+  // overlay permission on first launch (needs a real Activity context) and
+  // host the prompts on/off toggle — there's no dedicated Settings screen yet,
+  // so it lives here rather than building one just for a single switch.
+
+  bool _promptsEnabled = true;
 
   @override
   void initState() {
     super.initState();
     _requestOverlayPermission();
+    _loadPromptsEnabled();
   }
 
   Future<void> _requestOverlayPermission() async {
@@ -165,14 +202,43 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _loadPromptsEnabled() async {
+    final enabled = await _shouldPrompt();
+    if (mounted) setState(() => _promptsEnabled = enabled);
+  }
+
+  Future<void> _togglePrompts(bool value) async {
+    setState(() => _promptsEnabled = value);
+    await SharedPreferencesAsync().setBool(promptsEnabledKey, value);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      body: const Center(
-        child: Text(
-          'Why Did I Unlock?',
-          style: TextStyle(color: Colors.white, fontSize: 24),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text(
+              'Why Did I Unlock?',
+              style: TextStyle(color: Colors.white, fontSize: 24),
+            ),
+            const SizedBox(height: 32),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text(
+                  'Unlock prompts',
+                  style: TextStyle(color: Colors.white70, fontSize: 16),
+                ),
+                Switch(
+                  value: _promptsEnabled,
+                  onChanged: _togglePrompts,
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -313,10 +379,16 @@ class _IntentCaptureScreenState extends State<IntentCaptureScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.black.withValues(alpha: 0.85),
-      child: SafeArea(
-        child: Padding(
+    // Scaffold (not a bare Material) so resizeToAvoidBottomInset shifts this
+    // content above the keyboard automatically — a bare Material doesn't do
+    // this, which is why the text field/OK button were rendering behind the
+    // keyboard. SingleChildScrollView so content can scroll rather than
+    // overflow if there still isn't enough room above the keyboard.
+    return Scaffold(
+      backgroundColor: Colors.black.withValues(alpha: 0.85),
+      resizeToAvoidBottomInset: true,
+      body: SafeArea(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -339,13 +411,30 @@ class _IntentCaptureScreenState extends State<IntentCaptureScreen> {
                     ),
                 ],
               ),
-              const SizedBox(height: 16),
-              // Separate from the topic presets above: an honest "no real
-              // reason" option, not a plain Skip (still logs — see
-              // _submitNoIntent). Kept visually distinct via extra spacing
-              // rather than mixed into the topic grid.
-              _PresetButton(label: noIntentLabel, onTap: widget.onNoIntent),
-              const SizedBox(height: 32),
+              const SizedBox(height: 24),
+              // Deliberately styled DIFFERENTLY from the topic pills above
+              // (no border/pill shape, muted+italic text, preceding caption)
+              // so it visually reads as a different kind of answer — "no real
+              // reason" — not just another category. Still logs (see
+              // _submitNoIntent); not a plain Skip.
+              const Text(
+                'or, if there isn\'t one —',
+                style: TextStyle(color: Colors.white38, fontSize: 13),
+              ),
+              const SizedBox(height: 4),
+              TextButton(
+                onPressed: widget.onNoIntent,
+                style: TextButton.styleFrom(foregroundColor: Colors.white70),
+                child: const Text(
+                  noIntentLabel,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontStyle: FontStyle.italic,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
