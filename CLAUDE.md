@@ -91,6 +91,7 @@ None of these are scoped for any specific sprint yet — parked for a future pol
 - Prefer editing existing files over adding new ones; keep the dependency count low.
 - Run `flutter analyze` and test on a real device before declaring anything done.
 - **Keep `docs/ARCHITECTURE.md` current.** Whenever the engine topology, native components (services/receivers), event flows, or their rationale change, update that doc in the same change — it's the durable, cross-machine record of how the system actually fits together.
+- **Before updating ANY documentation, read `docs/DOC_UPKEEP.md` first.** It covers token-cheap doc workflows (Grep before Read, batch edits, append notes instead of rewrite, mark `[DONE]` tags). This prevents expensive full-file reads and scattered small edits. Non-negotiable for cost-effective sessions.
 - **Claude Code's local auto-memory does not sync across machines** — treat it as a same-machine convenience only. Anything that needs to survive a laptop switch or be picked up fresh belongs in this file (or elsewhere in the repo), not solely in memory.
 
 ## 8. Engineering principles — must run well on low-end AND high-end devices
