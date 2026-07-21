@@ -34,9 +34,18 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- directBootAware: must be startable from LOCKED_BOOT_COMPLETED
+             (before first unlock) — see BootReceiver below. Its own logic
+             (unlock/lock detection, showing the overlay) only ever runs in
+             response to ACTION_USER_PRESENT, which can't fire until the
+             device is actually unlocked — by which point normal (credential-
+             encrypted) storage is already available, so no device-protected-
+             storage handling is needed for the toggle or future Sprint 3
+             storage. Only registering earlier closes the real gap. -->
         <service
             android:name=".UnlockListenerService"
             android:exported="false"
+            android:directBootAware="true"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
@@ -50,16 +59,23 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="showOverlayOnUnlock"/>
         </service>
-        <!-- exported="true": BOOT_COMPLETED/QUICKBOOT_POWERON are protected
-             system broadcasts third-party apps cannot spoof, so this is safe
-             despite being reachable from outside the app (required by the
-             OS to deliver the broadcast at all; also required explicitly on
-             API 31+ for any component with an intent-filter). -->
+        <!-- exported="true": these are all protected system broadcasts
+             third-party apps cannot spoof, so this is safe despite being
+             reachable from outside the app (required by the OS to deliver
+             the broadcast at all; also required explicitly on API 31+ for
+             any component with an intent-filter).
+             directBootAware="true": LOCKED_BOOT_COMPLETED is delivered
+             BEFORE the device's first post-reboot unlock, to direct-boot-
+             aware components only — non-direct-boot-aware apps (the
+             previous state) simply don't receive BOOT_COMPLETED until after
+             that first unlock, which was the actual gap being closed here. -->
         <receiver
             android:name=".BootReceiver"
             android:exported="true"
-            android:enabled="true">
+            android:enabled="true"
+            android:directBootAware="true">
             <intent-filter>
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED"/>
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>
                 <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
                 <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
