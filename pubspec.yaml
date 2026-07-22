@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 0.4.1+6
+version: 0.5.0+7
 
 environment:
   sdk: ^3.11.5
@@ -36,6 +36,8 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter_overlay_window: ^0.5.0
   shared_preferences: ^2.3.2
+  sqflite: ^2.4.3
+  path: ^1.9.1
 
 dev_dependencies:
   flutter_test:
@@ -48,6 +50,8 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.3
+  sqflite_common_ffi: ^2.4.2
+  shared_preferences_platform_interface: ^2.4.2
 
 # Dev-only tool config for flutter_launcher_icons — generates android/app icon
 # resources from assets/icon/icon.png. Placeholder icon, not final branding
