@@ -1,0 +1,350 @@
+Sprint 3 on-device debug log — captured 2026-07-22, session paused (credits exhausted, resume later)
+Branch: sprint3-storage-triage-history
+Build: after the _withTimeout() defensive fix (isPermissionGranted/isActive/lastCompletedAt wrapped),
+       debug bisection prints already removed.
+
+=================================================================================
+ANALYSIS — READ THIS FIRST BEFORE RE-DEBUGGING
+=================================================================================
+
+FINDING (new, higher priority than the earlier "silent hang" flake): the overlay's
+shareData() write path works exactly ONCE per app-process lifetime, then silently
+stops delivering.
+
+Evidence: every dismiss/"Just Like That" AFTER THE FIRST ONE in this log is
+immediately followed by:
+
+  W/FlutterJNI( 1097): Tried to send a platform message to Flutter, but FlutterJNI
+  was detached from native C++. Could not send. Channel: x-slayer/overlay_messenger.
+  Response ID: N
+
+...and has NO matching "💾 Stored event" line. Only the very first dismiss (line 36
+below, "Just Like That" at 03:02:57) actually produced a stored row.
+
+This is NOT a triage/cooldown logic bug. It's a downstream symptom: `lastCompletedAt()`
+correctly reads the DB, but the DB genuinely never receives another write after the
+first one, so once >60s pass since that single stored event, the cooldown legitimately
+and correctly clears on every subsequent check — it just looks like "cooldown stopped
+working" because there's no new completed_at to enforce it against.
+
+HYPOTHESIS: the overlay engine is cached and reused across showOverlay()/closeOverlay()
+cycles (already documented in ARCHITECTURE.md §1/§5 — this is intentional, the engine's
+Dart-side widget state survives closeOverlay()). But something about repeated
+close+reopen cycles is detaching the underlying FlutterJNI native binding for that
+engine's `x-slayer/overlay_messenger` channel specifically — i.e. the DART-side overlay
+isolate survives, but its NATIVE-side JNI handle to send messages via BasicMessageChannel
+does not survive a close+reopen. Since shareData() is (correctly, per the earlier
+fire-and-forget fix) never awaited, this failure is completely silent from Dart's
+perspective — no exception, no rejected Future, just a native log warning nobody sees
+unless they're tailing logcat.
+
+POSSIBLE RELATION TO THE EARLIER "SILENT HANG" FLAKE (documented separately in
+BACKLOG.md): both may be manifestations of the same underlying instability in the
+overlay engine's plugin-native binding after repeated show/close cycles — worth
+investigating together, not necessarily as two separate bugs.
+
+NEXT STEPS FOR WHOEVER PICKS THIS UP:
+1. Reproduce: build+run, do ONE dismiss/JLK (should store fine), then do a SECOND one
+   and confirm the "FlutterJNI was detached" warning appears with no stored event.
+2. Check whether re-registering/re-attaching the overlay engine's plugin (or forcing a
+   fresh overlay engine per cycle instead of the cached one) fixes it — this may mean
+   revisiting the "cached engine is intentional" design in ARCHITECTURE.md §1, OR
+   finding a way to re-establish just the messenger channel without discarding widget
+   state.
+3. Check flutter_overlay_window's GitHub issues for "FlutterJNI detached" / "messenger
+   channel" — this smells like a known upstream plugin limitation, not necessarily
+   something fixable purely in our Dart code.
+4. Given this means SILENT DATA LOSS on every capture after the first one, this should
+   be treated as a P0 blocker for calling Sprint 3's storage "done" — not a P2 flake.
+
+=================================================================================
+RAW LOG (chronological, as captured from `flutter run --release -d A063`)
+=================================================================================
+
+Resolving dependencies...
+Downloading packages...
+  cli_util 0.4.2 (0.5.1 available)
+  hooks 2.0.2 (2.1.0 available)
+  matcher 0.12.19 (0.12.20 available)
+  meta 1.18.0 (1.19.0 available)
+  native_toolchain_c 0.19.2 (0.19.3 available)
+  record_use 0.6.0 (1.0.0 available)
+  test_api 0.7.11 (0.7.13 available)
+  vector_math 2.2.0 (2.4.0 available)
+Got dependencies!
+8 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Launching lib\main.dart on A063 in release mode...
+Running Gradle task 'assembleRelease'...                           43.5s
+√ Built build\app\outputs\flutter-apk\app-release.apk (17.2MB)
+Installing build\app\outputs\flutter-apk\app-release.apk...      2,975ms
+
+Flutter run key commands.
+h List all available interactive commands.
+c Clear the screen
+q Quit (terminate the application on the device).
+
+I/flutter ( 1097): [IMPORTANT:flutter/shell/platform/android/android_context_vk_impeller.cc(62)] Using the Impeller rendering backend (Vulkan).
+I/flutter ( 1097): [IMPORTANT:flutter/shell/platform/android/android_context_vk_impeller.cc(62)] Using the Impeller rendering backend (Vulkan).
+I/flutter ( 1097): [IMPORTANT:flutter/shell/platform/android/android_context_gl_impeller.cc(104)] Using the Impeller rendering backend (OpenGLES).
+I/flutter ( 1097): [IMPORTANT:flutter/shell/platform/android/android_context_gl_impeller.cc(104)] Using the Impeller rendering backend (OpenGLES).
+I/flutter ( 1097): 🧠 backgroundMain ready (persistent background engine)
+I/flutter ( 1097): [IMPORTANT:flutter/shell/platform/android/android_context_vk_impeller.cc(62)] Using the Impeller rendering backend (Vulkan).
+I/flutter ( 1097): [IMPORTANT:flutter/shell/platform/android/android_context_gl_impeller.cc(104)] Using the Impeller rendering backend (OpenGLES).
+I/flutter ( 1097): 🔓 UNLOCK EVENT RECEIVED at 2026-07-22 03:02:48.193825
+I/flutter ( 1097): 📋 Has overlay permission: true
+I/flutter ( 1097): 🎲 Triage: prompting (cooldown clear, probability hit p=0.5)
+I/flutter ( 1097): 🟣 showOverlay called (1080x2400 capture screen)
+I/flutter ( 1097): 🤷 No intent declared ("Just Like That") at 2026-07-22 03:02:57.442343
+I/flutter ( 1097): 💾 Stored event: kind=IntentKind.noIntent text="Just Like That"          <<< ONLY SUCCESSFUL WRITE IN THIS ENTIRE RUN
+I/flutter ( 1097): 🔒 LOCK EVENT RECEIVED at 2026-07-22 03:03:05.211677
+I/flutter ( 1097): 🔓 UNLOCK EVENT RECEIVED at 2026-07-22 03:03:07.282437
+I/flutter ( 1097): 📋 Has overlay permission: true
+I/flutter ( 1097): 🎲 Triage: skipping — COOLDOWN active (elapsed 0:00:09.850199 < 0:01:00.000000)
+I/flutter ( 1097): 🔒 LOCK EVENT RECEIVED at 2026-07-22 03:03:22.208972
+I/flutter ( 1097): 🔓 UNLOCK EVENT RECEIVED at 2026-07-22 03:03:24.602152
+I/flutter ( 1097): 📋 Has overlay permission: true
+I/flutter ( 1097): [IMPORTANT:flutter/shell/platform/android/android_context_vk_impeller.cc(62)] Using the Impeller rendering backend (Vulkan).
+I/flutter ( 1097): 🎲 Triage: skipping — COOLDOWN active (elapsed 0:00:27.244284 < 0:01:00.000000)
+I/flutter ( 1097): [IMPORTANT:flutter/shell/platform/android/android_context_gl_impeller.cc(104)] Using the Impeller rendering backend (OpenGLES).
+I/flutter ( 1097): 🔒 LOCK EVENT RECEIVED at 2026-07-22 03:03:32.790372
+I/flutter ( 1097): 🔓 UNLOCK EVENT RECEIVED at 2026-07-22 03:03:35.216617
+I/flutter ( 1097): 📋 Has overlay permission: true
+I/flutter ( 1097): 🎲 Triage: skipping — COOLDOWN active (elapsed 0:00:37.780723 < 0:01:00.000000)
+I/flutter ( 1097): 🔒 LOCK EVENT RECEIVED at 2026-07-22 03:03:39.303952
+I/flutter ( 1097): 🔒 LOCK EVENT RECEIVED at 2026-07-22 03:04:24.532075
+I/flutter ( 1097): 🔓 UNLOCK EVENT RECEIVED at 2026-07-22 03:04:26.895194
+I/flutter ( 1097): 📋 Has overlay permission: true
+I/flutter ( 1097): 🎲 Triage: skipping — PROBABILITY miss (p=0.5)      <<< cooldown already cleared (>60s since 03:02:57)
+I/flutter ( 1097): 🔒 LOCK EVENT RECEIVED at 2026-07-22 03:04:30.176054
+I/flutter ( 1097): 🔓 UNLOCK EVENT RECEIVED at 2026-07-22 03:04:33.075661
+I/flutter ( 1097): 📋 Has overlay permission: true
+I/flutter ( 1097): 🎲 Triage: prompting (cooldown clear, probability hit p=0.5)
+I/flutter ( 1097): 🟣 showOverlay called (1080x2400 capture screen)
+I/flutter ( 1097): 🤷 No intent declared ("Just Like That") at 2026-07-22 03:04:36.772601
+W/FlutterJNI( 1097): Tried to send a platform message to Flutter, but FlutterJNI was detached from native C++. Could not send. Channel: x-slayer/overlay_messenger. Response ID: 9   <<< FIRST FAILURE, no "Stored event" follows
+I/flutter ( 1097): [IMPORTANT:flutter/shell/platform/android/android_context_vk_impeller.cc(62)] Using the Impeller rendering backend (Vulkan).
+I/flutter ( 1097): [IMPORTANT:flutter/shell/platform/android/android_context_gl_impeller.cc(104)] Using the Impeller rendering backend (OpenGLES).
+I/flutter ( 1097): 🔒 LOCK EVENT RECEIVED at 2026-07-22 03:04:44.397630
+I/flutter ( 1097): 🔓 UNLOCK EVENT RECEIVED at 2026-07-22 03:04:47.294895
+I/flutter ( 1097): 📋 Has overlay permission: true
+I/flutter ( 1097): 🎲 Triage: skipping — PROBABILITY miss (p=0.5)
+I/flutter ( 1097): 🔒 LOCK EVENT RECEIVED at 2026-07-22 03:05:27.525611
+I/flutter ( 1097): 🔓 UNLOCK EVENT RECEIVED at 2026-07-22 03:05:30.065207
+I/flutter ( 1097): 📋 Has overlay permission: true
+I/flutter ( 1097): 🎲 Triage: prompting (cooldown clear, probability hit p=0.5)
+I/flutter ( 1097): 🟣 showOverlay called (1080x2400 capture screen)
+I/flutter ( 1097): 🤷 No intent declared ("Just Like That") at 2026-07-22 03:05:31.956942
+W/FlutterJNI( 1097): Tried to send a platform message to Flutter, but FlutterJNI was detached from native C++. Could not send. Channel: x-slayer/overlay_messenger. Response ID: 9
+I/flutter ( 1097): 🔒 LOCK EVENT RECEIVED at 2026-07-22 03:05:59.754357
+I/flutter ( 1097): 🔓 UNLOCK EVENT RECEIVED at 2026-07-22 03:06:02.261102
+I/flutter ( 1097): 📋 Has overlay permission: true
+I/flutter ( 1097): 🎲 Triage: prompting (cooldown clear, probability hit p=0.5)
+I/flutter ( 1097): 🟣 showOverlay called (1080x2400 capture screen)
+I/flutter ( 1097): 🤷 No intent declared ("Just Like That") at 2026-07-22 03:06:13.470836
+W/FlutterJNI( 1097): Tried to send a platform message to Flutter, but FlutterJNI was detached from native C++. Could not send. Channel: x-slayer/overlay_messenger. Response ID: 10
+I/flutter ( 1097): 🔒 LOCK EVENT RECEIVED at 2026-07-22 03:06:15.000981
+I/flutter ( 1097): 🔓 UNLOCK EVENT RECEIVED at 2026-07-22 03:06:17.696337
+I/flutter ( 1097): 📋 Has overlay permission: true
+I/flutter ( 1097): 🎲 Triage: prompting (cooldown clear, probability hit p=0.5)
+I/flutter ( 1097): 🟣 showOverlay called (1080x2400 capture screen)
+I/flutter ( 1097): 📝 Intent declared: "Messages" (source: preset) at 2026-07-22 03:06:38.026868
+I/flutter ( 1097): ✅ Intent dismissed: "Messages" (source: preset) declared at 2026-07-22 03:06:38.026868, dismissed at 2026-07-22 03:06:39.164098, active for 0:00:01.137230
+W/FlutterJNI( 1097): Tried to send a platform message to Flutter, but FlutterJNI was detached from native C++. Could not send. Channel: x-slayer/overlay_messenger. Response ID: 12
+I/flutter ( 1097): 🔒 LOCK EVENT RECEIVED at 2026-07-22 03:06:40.530274
+I/flutter ( 1097): 🔓 UNLOCK EVENT RECEIVED at 2026-07-22 03:06:43.491516
+I/flutter ( 1097): 📋 Has overlay permission: true
+I/flutter ( 1097): 🎲 Triage: prompting (cooldown clear, probability hit p=0.5)
+I/flutter ( 1097): 🟣 showOverlay called (1080x2400 capture screen)
+I/flutter ( 7079): [IMPORTANT:flutter/shell/platform/android/android_context_vk_impeller.cc(62)] Using the Impeller rendering backend (Vulkan).
+W/FlutterJNI( 7079): FlutterJNI.loadLibrary called more than once
+D/FlutterGeolocator( 7079): Creating service.
+D/FlutterGeolocator( 7079): Binding to location service.
+W/FlutterJNI( 7079): FlutterJNI.init called more than once
+D/FlutterGeolocator( 7079): Flutter engine connected. Connected engine count 1
+D/FlutterGeolocator( 7079): Flutter engine disconnected. Connected engine count 0
+E/FlutterGeolocator( 7079): Geolocator position updates stopped
+D/FlutterGeolocator( 7079): Stopping location service.
+D/FlutterGeolocator( 7079): Unbinding from location service.
+D/FlutterGeolocator( 7079): Destroying location service.
+D/FlutterGeolocator( 7079): Stopping location service.
+D/FlutterGeolocator( 7079): Destroyed location service.
+I/flutter ( 1097): 📝 Intent declared: "Calls" (source: preset) at 2026-07-22 03:06:47.912658
+I/flutter ( 1097): 🔒 LOCK EVENT RECEIVED at 2026-07-22 03:07:02.475306
+I/flutter ( 1097): 🔓 UNLOCK EVENT RECEIVED at 2026-07-22 03:07:06.121999
+I/flutter ( 1097): 📋 Has overlay permission: true
+I/flutter ( 1097): 🟡 Overlay already active (or isActive() timed out) — skipping re-trigger
+I/flutter ( 1097): ✅ Intent dismissed: "Calls" (source: preset) declared at 2026-07-22 03:06:47.912658, dismissed at 2026-07-22 03:07:08.868377, active for 0:00:20.955719
+W/FlutterJNI( 1097): Tried to send a platform message to Flutter, but FlutterJNI was detached from native C++. Could not send. Channel: x-slayer/overlay_messenger. Response ID: 13
+I/flutter ( 1097): 🔒 LOCK EVENT RECEIVED at 2026-07-22 03:07:11.007964
+I/flutter ( 1097): 🔓 UNLOCK EVENT RECEIVED at 2026-07-22 03:07:13.670093
+I/flutter ( 1097): 📋 Has overlay permission: true
+I/flutter ( 1097): 🎲 Triage: skipping — PROBABILITY miss (p=0.5)
+I/flutter ( 1097): 🔒 LOCK EVENT RECEIVED at 2026-07-22 03:07:33.710585
+I/flutter ( 1097): 🔓 UNLOCK EVENT RECEIVED at 2026-07-22 03:07:38.812118
+I/flutter ( 1097): 📋 Has overlay permission: true
+I/flutter ( 1097): 🎲 Triage: prompting (cooldown clear, probability hit p=0.5)
+I/flutter ( 1097): 🟣 showOverlay called (1080x2400 capture screen)
+I/flutter ( 1097): 🤷 No intent declared ("Just Like That") at 2026-07-22 03:07:42.481398
+W/FlutterJNI( 1097): Tried to send a platform message to Flutter, but FlutterJNI was detached from native C++. Could not send. Channel: x-slayer/overlay_messenger. Response ID: 14
+I/flutter ( 1097): 🔒 LOCK EVENT RECEIVED at 2026-07-22 03:07:44.516663
+I/flutter ( 1097): 🔓 UNLOCK EVENT RECEIVED at 2026-07-22 03:07:47.992488
+I/flutter ( 1097): 📋 Has overlay permission: true
+I/flutter ( 1097): 🎲 Triage: prompting (cooldown clear, probability hit p=0.5)
+I/flutter ( 1097): 🟣 showOverlay called (1080x2400 capture screen)
+I/flutter ( 1097): 🤷 No intent declared ("Just Like That") at 2026-07-22 03:07:50.486660
+W/FlutterJNI( 1097): Tried to send a platform message to Flutter, but FlutterJNI was detached from native C++. Could not send. Channel: x-slayer/overlay_messenger. Response ID: 15
+I/flutter ( 1097): 🔒 LOCK EVENT RECEIVED at 2026-07-22 03:07:51.906643
+I/flutter ( 1097): 🔓 UNLOCK EVENT RECEIVED at 2026-07-22 03:07:55.080111
+I/flutter ( 1097): 📋 Has overlay permission: true
+I/flutter ( 1097): 🎲 Triage: prompting (cooldown clear, probability hit p=0.5)
+I/flutter ( 1097): 🟣 showOverlay called (1080x2400 capture screen)
+I/flutter ( 1097): 🤷 No intent declared ("Just Like That") at 2026-07-22 03:07:57.948814
+W/FlutterJNI( 1097): Tried to send a platform message to Flutter, but FlutterJNI was detached from native C++. Could not send. Channel: x-slayer/overlay_messenger. Response ID: 16
+I/flutter ( 1097): 🔒 LOCK EVENT RECEIVED at 2026-07-22 03:07:59.422777
+I/flutter ( 1097): 🔓 UNLOCK EVENT RECEIVED at 2026-07-22 03:08:03.977623
+I/flutter ( 1097): 📋 Has overlay permission: true
+I/flutter ( 1097): 🎲 Triage: prompting (cooldown clear, probability hit p=0.5)
+I/flutter ( 1097): 🟣 showOverlay called (1080x2400 capture screen)
+I/flutter ( 1097): 📝 Intent declared: "Food Order" (source: preset) at 2026-07-22 03:08:12.778950
+I/flutter ( 1097): ✅ Intent dismissed: "Food Order" (source: preset) declared at 2026-07-22 03:08:12.778950, dismissed at 2026-07-22 03:08:14.735187, active for 0:00:01.956237
+W/FlutterJNI( 1097): Tried to send a platform message to Flutter, but FlutterJNI was detached from native C++. Could not send. Channel: x-slayer/overlay_messenger. Response ID: 17
+I/flutter ( 1097): 🔒 LOCK EVENT RECEIVED at 2026-07-22 03:08:16.069093
+I/flutter ( 1097): 🔓 UNLOCK EVENT RECEIVED at 2026-07-22 03:08:18.794850
+I/flutter ( 1097): 📋 Has overlay permission: true
+I/flutter ( 1097): 🎲 Triage: prompting (cooldown clear, probability hit p=0.5)
+I/flutter ( 1097): 🟣 showOverlay called (1080x2400 capture screen)
+I/flutter ( 1097): 📝 Intent declared: "Calls" (source: preset) at 2026-07-22 03:09:10.223356
+I/flutter ( 1097): ✅ Intent dismissed: "Calls" (source: preset) declared at 2026-07-22 03:09:10.223356, dismissed at 2026-07-22 03:09:11.767931, active for 0:00:01.544575
+W/FlutterJNI( 1097): Tried to send a platform message to Flutter, but FlutterJNI was detached from native C++. Could not send. Channel: x-slayer/overlay_messenger. Response ID: 18
+I/flutter ( 1097): 🔒 LOCK EVENT RECEIVED at 2026-07-22 03:09:13.990639
+
+=================================================================================
+UPDATE 2 (same day, after the IsolateNameServer fix) — P0 WRITE PATH FIXED;
+SEPARATE isActive() HANG NOW BETTER CHARACTERIZED
+=================================================================================
+
+P0 RESOLVED: replaced the flutter_overlay_window shareData()/overlayListener
+transport with a same-process IsolateNameServer SendPort/ReceivePort (background
+isolate is the sole registrant; overlay isolate looks up the port and sends).
+On-device: events stored on the 2nd/3rd/4th dismiss/"Just Like That", INCLUDING
+across the app-open (History screen) cycle that broke the old transport. No more
+"FlutterJNI detached ... x-slayer/overlay_messenger" on writes. See lib/main.dart
+_intentWritePortName / _relayIntentEvent / backgroundMain port registration.
+
+REMAINING (separate) BUG: _showCaptureScreen stalls after "Has overlay permission:
+true" on some unlocks (correlated with having opened the app). Log evidence:
+  13:33:10 UNLOCK → "Has overlay permission: true" → (nothing)
+  13:33:20 UNLOCK → "Has overlay permission: true" → (nothing)
+  13:34:32 UNLOCK → "Has overlay permission: true" → (nothing)
+CRUCIAL CLUE: _showCaptureScreen wraps isActive() in _withTimeout(5s). The first
+stuck unlock is 90+ seconds old, yet NO "⏱️ isActive() timed out" line ever
+appears. A Timer-based Future.timeout() WOULD fire within 5s for a normal hanging
+Dart Future (and the event loop is demonstrably running — later unlocks still get
+processed). So the stall is NOT an awaitable Dart Future — it's stuck in the
+plugin's NATIVE platform-channel handling of isActive() ('isOverlayActive' on
+x-slayer/overlay_channel), below where a Dart timeout can reach.
+
+Same trigger as the (now-fixed) write bug: opening the app → the ephemeral main UI
+engine attaches the flutter_overlay_window plugin and disrupts the background
+engine's shared/static plugin state. Strongly suspected same root class.
+
+PROPOSED FIX (sidestep, same philosophy that fixed the write path — stop depending
+on the flaky plugin call): remove FlutterOverlayWindow.isActive() from the hot
+path entirely. Track overlay-open state ourselves in the background isolate: set a
+bool true right before/after showOverlay(), and have the OVERLAY isolate send a
+"closed" signal over the now-proven IsolateNameServer port whenever it closes
+(_dismissBubble / _submitNoIntent / any closeOverlay). The background isolate reads
+its own bool instead of calling isActive(). Not yet implemented as of this update.
+
+=================================================================================
+UPDATE 3 — THE REAL "sticky, doesn't heal after opening the app" BUG: FOUND & FIXED
+=================================================================================
+
+Distinct from both earlier bugs (shareData transport = fixed via IsolateNameServer;
+isActive() native hang = fixed via self-tracked _overlayIsActive). This one is a
+sqflite connection-sharing bug.
+
+SMOKING GUN (on-device 16:28, PID 13833): overlay showed + intent declared/dismissed
+fine, IsolateNameServer relay delivered the message intact, but the insert failed:
+  ! Ignoring malformed overlay message (DatabaseException(database_closed 1)):
+    {clientId:..., kind: intent, source: custom, text: Resting, ...}
+("malformed" is a misnomer — the message was valid; the DB was closed. The catch-all
+in backgroundMain's port listener just labels any insert failure that way.)
+
+ROOT CAUSE: sqflite opens databases in singleInstance mode BY DEFAULT. The History
+screen (main UI engine) called IntentStore.open() on the same file the background
+engine already had open → both got the SAME shared native connection. History screen's
+dispose() → close() closed that shared connection → the background writer's DB is now
+closed → every subsequent write throws database_closed, permanently, until process
+restart. Exactly matches "broke when I opened the app, didn't heal."
+
+FIX: IntentStore.open(ownConnection: bool). Background writer keeps the default shared
+connection (singleInstance: true). History screen now opens with ownConnection: true →
+singleInstance: false → its OWN independent native connection it can close on dispose
+without touching the writer. Two connections to one WAL file = exactly what WAL was
+chosen for (one writer + concurrent readers). This is sqflite's own documented approach
+for opening a DB from multiple isolates. flutter analyze clean, all 27 tests green.
+Awaiting on-device re-verification of the same app-open stress sequence.
+
+=================================================================================
+UPDATE 4 — REBOOT BUG (case 25): IntentStore.open() failing once, permanently,
+with no retry — breaks BOTH cooldown AND all future writes: FOUND & FIXED
+=================================================================================
+
+Reported symptom (owner, real device reboot 2026-07-22 17:xx): a capture prompt was
+left open across a device reboot; after boot, no cooldown ever kicked in again — every
+unlock either triaged on probability alone or prompted immediately, never blocked by
+the 1-minute floor.
+
+Reproduced via `flutter run --release -d A063` (a fresh engine start, same class of
+event as a reboot's direct-boot service start). Log evidence, PID 4169:
+
+  E/flutter ( 4169): Unhandled Exception: DatabaseException(open_failed
+    /data/user/0/com.whydidiunlock.why_did_i_unlock/databases/intents.db)
+  ...
+  #7 IntentStore.open (package:why_did_i_unlock/intent_store.dart:156)
+  #8 backgroundMain.<anonymous closure> (package:why_did_i_unlock/main.dart:260)
+
+Every subsequent unlock in that same process then showed cooldown as always-clear
+(`lastCompletedAt` always null) — matching the reported symptom exactly.
+
+ROOT CAUSE: `backgroundMain()` called `_intentStore = await IntentStore.open();`
+exactly ONCE, unawaited and with no try/catch, inside an IIFE that also registered the
+write-relay listener only after a successful open. When that one attempt threw:
+  - `_intentStore` stayed null for the rest of the process's life (no retry, ever).
+  - `_showCaptureScreen`'s cooldown check read `_intentStore == null` as "no prior
+    event" — a deliberate design choice for the brief window right after a NORMAL
+    engine start, but never meant to survive permanently — so cooldown silently broke
+    forever, not just once.
+  - The write-relay `intentWritePort.listen(...)` never even ran (it was inside the
+    same failed block), so every future write was ALSO silently dropped, not just
+    cooldown-adjacent reads. A single bad open() call permanently disabled storage.
+
+WHY open() failed in the first place: `backgroundMain` is the direct-boot service
+entry point — it can start at LOCKED_BOOT_COMPLETED, BEFORE the user's first
+post-reboot unlock, while Android's credential-encrypted storage (where
+`getDatabasesPath()` resolves by default) is still locked. The very first open()
+attempt raced that lock and lost. By the time the user actually unlocks (the moment
+the cooldown check is needed), storage is guaranteed available again — but the old
+code never tried a second time. (The `flutter run --release` repro hit the same
+exception via a different trigger — most likely the databases/ directory not yet
+existing on a fresh install/relaunch before any engine had created it — same code
+defect, different environmental cause.)
+
+FIX (lib/main.dart): replaced the one-shot open with `_ensureIntentStore()` — idempotent,
+retries on every call rather than trusting a stale failure. Called from THREE places:
+(1) best-effort unawaited at backgroundMain start (as before), (2) inside the write
+listener before every insert (so a write is retried even if the listener attaches before
+the store is ready), (3) at the top of _showCaptureScreen's triage block (so the exact
+moment storage is guaranteed unlocked — the user's next real unlock — gets a fresh
+attempt). The listener itself is now attached unconditionally and immediately (not
+gated behind open() succeeding), so a same-VM backgroundMain restart can't orphan it
+on a stale port either. Also added a defensive `Directory(...).create(recursive: true)`
+in IntentStore.open() (lib/intent_store.dart) as a belt-and-suspenders for the
+fresh-install-directory-missing trigger specifically.
+
+flutter analyze clean, all 27 tests green. Awaiting on-device re-verification: repeat
+the reboot-with-prompt-open sequence (case 25 in docs/TEST_PLAN.md) and confirm cooldown
+now blocks re-prompts within 1 minute of the post-reboot unlock, and that writes still
+succeed.

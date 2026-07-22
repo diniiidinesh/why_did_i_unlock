@@ -1,7 +1,16 @@
+import 'dart:async';
+import 'dart:isolate';
+import 'dart:math';
+import 'dart:ui' show IsolateNameServer;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'history_screen.dart';
+import 'intent_store.dart';
+import 'prompt_policy.dart';
 
 const List<String> intentPresets = [
   'Payments',
@@ -58,6 +67,42 @@ Future<bool> _shouldPrompt() async {
   return await prefs.getBool(promptsEnabledKey) ?? true;
 }
 
+/// Time-suppressed cooldown floor + probability gate — see the Sprint 3 plan
+/// rationale (prompting every unlock causes habituation; a fixed cadence is
+/// itself predictable enough to be tuned out). No settings UI yet; both
+/// values are named constants so a future presets UI is a small change, not
+/// a rework (mirrors how `intentMaxInputLength` was made a constant).
+const Duration intentCooldown = Duration(minutes: 1);
+const double promptProbability = 0.5;
+
+final Random _clientIdRandom = Random();
+
+/// Generates a client-side event id at declare/no-intent time (in the
+/// overlay isolate, which has no plugins registered and therefore no access
+/// to any platform-backed id source). Only needs to be practically
+/// collision-free for one device's local idempotency dedup, not globally
+/// unique — declared_at ms + a random suffix is enough for that.
+String _generateClientId(DateTime declaredAt) {
+  return '${declaredAt.millisecondsSinceEpoch}-${_clientIdRandom.nextInt(1 << 32)}';
+}
+
+IntentSource _intentSourceFromString(String source) {
+  return source == 'preset' ? IntentSource.preset : IntentSource.custom;
+}
+
+/// Checked individually (not wrapped in a single CompositePromptPolicy) so
+/// _showCaptureScreen can log EXACTLY which gate skipped a given unlock —
+/// cooldown-active and probability-missed look identical from the outside
+/// otherwise, which made a long run of skips impossible to diagnose (a
+/// genuinely long unlucky probability streak is indistinguishable from a
+/// stuck/bugged cooldown unless logged separately). Single shared instances
+/// (not rebuilt per unlock) so ProbabilityPromptPolicy's internal Random
+/// carries state across calls rather than reseeding from scratch each time.
+/// CompositePromptPolicy itself is still available (and unit-tested) in
+/// prompt_policy.dart for anywhere an opaque AND-of-policies is wanted.
+final TimeCooldownPolicy _cooldownPolicy = TimeCooldownPolicy(intentCooldown);
+final ProbabilityPromptPolicy _probabilityPolicy = ProbabilityPromptPolicy(promptProbability);
+
 void main() {
   runApp(const MyApp());
 }
@@ -72,9 +117,119 @@ void main() {
 /// has `flutter_overlay_window` registered (auto-registered natively), so it
 /// can call showOverlay(); the overlay engine itself cannot (no plugins on it).
 /// See docs/ARCHITECTURE.md for the full engine topology.
+/// The Sprint 3 write path's DB handle. Opened once, lazily, by
+/// [backgroundMain] (this engine is the sole writer — see CLAUDE.md §3 /
+/// ARCHITECTURE.md). Nullable because opening is async and must not block
+/// (or be raced by) the unlock method-channel handler registration below;
+/// [_showCaptureScreen]'s cooldown check (wired in a later step) treats a
+/// still-null store as "no prior event" and allows the prompt.
+IntentStore? _intentStore;
+
+/// Name for a same-process `IsolateNameServer` port used to relay
+/// completed-intent events from the overlay isolate to THIS persistent
+/// background isolate — see [backgroundMain] / the overlay's `_dismissBubble`
+/// and `_submitNoIntent`.
+///
+/// This REPLACES flutter_overlay_window's `shareData()`/`overlayListener`
+/// bridge, which was found (on-device, 2026-07-22 — see
+/// docs/debug/sprint3-session-log-2026-07-22.txt) to silently drop every
+/// write after the first one in a process's lifetime. Root cause, confirmed
+/// against the plugin's native source: that bridge routes through a single
+/// static native field (`WindowSetup.messenger`) set by whichever *engine*
+/// last called the plugin's `onAttachedToEngine` — including the ephemeral
+/// main UI engine. Opening the app (e.g. to view the History screen) makes
+/// the main UI engine attach the plugin and steal that static field; once
+/// its `FlutterJNI` later detaches, every subsequent `shareData()` call
+/// targets a dead engine and is dropped with a native-only log warning
+/// (`FlutterJNI was detached from native C++`) — invisible to Dart, no
+/// exception, no rejected Future.
+///
+/// `IsolateNameServer` ports are pure Dart, same-process, and registered
+/// ONLY by this isolate — the main UI engine's lifecycle can't hijack or
+/// kill the target, because there IS no "which engine owns this" ambiguity
+/// like the plugin's single static field has. `SendPort.send()` is also
+/// inherently synchronous/fire-and-forget, so the earlier "never await
+/// shareData()" gotcha (CLAUDE.md §3) doesn't exist for this transport —
+/// there's no reply to await in the first place.
+const String _intentWritePortName = 'com.whydidiunlock.intent_write_port';
+
+/// Relays a completed-intent event from the overlay isolate to the
+/// background isolate's write port (see [_intentWritePortName]). Looked up
+/// fresh on every call (not cached) since the background engine's port is
+/// only guaranteed to exist once `backgroundMain` has actually run — cheap
+/// process-local lookup, not a platform channel call, so there's no cost to
+/// avoid caching. `SendPort.send()` is synchronous and fire-and-forget by
+/// construction — no reply to await, so no `unawaited()` needed here (unlike
+/// the `shareData()` call this replaces).
+void _relayIntentEvent(IntentEvent event) {
+  final port = IsolateNameServer.lookupPortByName(_intentWritePortName);
+  if (port == null) {
+    debugPrint('⚠️ Could not find intent-write port — background engine not ready? Event dropped: ${event.toMessage()}');
+    return;
+  }
+  port.send(event.toMessage());
+}
+
+/// Name for a second same-process port: the overlay isolate signals THIS
+/// isolate whenever it fully closes (dismiss / "Just Like That" — NOT the
+/// close+reopen resize inside `_submitIntent`, which is still "active").
+///
+/// Replaces `FlutterOverlayWindow.isActive()`, which was found (on-device,
+/// 2026-07-22 — see docs/debug/sprint3-session-log-2026-07-22.txt) to hang
+/// in native code after the app had been opened once, in a way a Dart-level
+/// `.timeout()` could not catch (the hang is below the Dart await, inside
+/// the plugin's native platform-channel handling) — same root class as the
+/// shareData() bug above: the ephemeral main UI engine attaching the plugin
+/// disrupts state the background engine depends on. We now track "is the
+/// overlay showing" ourselves instead of asking the plugin.
+const String _overlayClosedPortName = 'com.whydidiunlock.overlay_closed_port';
+
+/// True from the moment `_showCaptureScreen` calls `showOverlay()` until the
+/// overlay isolate signals it fully closed. Lives in the background isolate
+/// (the only place that reads it, in `_showCaptureScreen`); set true
+/// synchronously BEFORE the `showOverlay()` await (not after) to close the
+/// race where a second `onUnlock` could arrive while the first is still
+/// awaiting that call.
+bool _overlayIsActive = false;
+
+/// Called from the overlay isolate right after a REAL `closeOverlay()` (i.e.
+/// dismiss or "Just Like That" — not the close+reopen resize in
+/// `_submitIntent`, which must NOT report closed). Mirrors [_relayIntentEvent]:
+/// looked up fresh, not cached; `send()` is synchronous/fire-and-forget.
+void _signalOverlayClosed() {
+  final port = IsolateNameServer.lookupPortByName(_overlayClosedPortName);
+  if (port == null) {
+    debugPrint('⚠️ Could not find overlay-closed port — background engine not ready?');
+    return;
+  }
+  port.send(true);
+}
+
 @pragma("vm:entry-point")
 void backgroundMain() {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Registered synchronously, before any async work, so the overlay isolate
+  // can always find this port once backgroundMain has started running.
+  // Cleared first because a START_STICKY service restart re-runs this entry
+  // point, and a name can only map to one port at a time — without this, a
+  // restart would throw registering a name that's still mapped to the
+  // now-dead previous engine's port.
+  IsolateNameServer.removePortNameMapping(_intentWritePortName);
+  final intentWritePort = ReceivePort();
+  IsolateNameServer.registerPortWithName(intentWritePort.sendPort, _intentWritePortName);
+
+  // Same reasoning as intentWritePort above, for the overlay-closed signal
+  // that replaces FlutterOverlayWindow.isActive(). This listener can attach
+  // immediately (no DB dependency), unlike intentWritePort's.
+  IsolateNameServer.removePortNameMapping(_overlayClosedPortName);
+  final overlayClosedPort = ReceivePort();
+  IsolateNameServer.registerPortWithName(overlayClosedPort.sendPort, _overlayClosedPortName);
+  overlayClosedPort.listen((_) {
+    _overlayIsActive = false;
+    debugPrint('🔵 Overlay closed signal received');
+  });
+
   _unlockChannel.setMethodCallHandler((call) async {
     if (call.method == 'onUnlock') {
       debugPrint('🔓 UNLOCK EVENT RECEIVED at ${DateTime.now()}');
@@ -92,8 +247,92 @@ void backgroundMain() {
       debugPrint('🔒 LOCK EVENT RECEIVED at ${DateTime.now()}');
     }
   });
+
+  // The listener attaches to intentWritePort IMMEDIATELY and unconditionally
+  // — NOT gated behind a successful IntentStore.open() — for two reasons:
+  // (1) a single-subscription ReceivePort buffers messages sent before
+  // .listen() runs, so attaching early never loses a write; (2) if
+  // backgroundMain's entry point re-runs in an already-live engine (see the
+  // removePortNameMapping comment above), this guarantees the listener is on
+  // the CURRENT port even if _intentStore (a top-level static) is already
+  // non-null from before. Each message's handler calls _ensureIntentStore()
+  // itself, so a store that failed to open at boot gets retried per write
+  // too, not just on the next unlock.
+  intentWritePort.listen((message) async {
+    try {
+      final event = IntentEvent.fromMessage(message as Map);
+      final store = await _ensureIntentStore();
+      if (store == null) {
+        debugPrint('⚠️ Dropping event — IntentStore unavailable: $message');
+        return;
+      }
+      await store.insertEvent(event);
+      debugPrint('💾 Stored event: kind=${event.kind} text="${event.text}"');
+    } catch (e) {
+      debugPrint('⚠️ Ignoring malformed overlay message ($e): $message');
+    }
+  });
+
+  // Best-effort early open — NOT awaited, so backgroundMain stays
+  // synchronous up to the handler registrations above. If this attempt
+  // fails (see _ensureIntentStore's doc comment for why it reliably can on
+  // a real device), _showCaptureScreen and the write listener above each
+  // retry it lazily at the moment they actually need it, instead of the
+  // permanent null this used to leave behind after one failed attempt.
+  unawaited(_ensureIntentStore());
+
   debugPrint('🧠 backgroundMain ready (persistent background engine)');
 }
+
+/// Opens `_intentStore` if it isn't already open, retrying on every call
+/// rather than giving up after one failure. Real, observed failure mode
+/// (on-device, 2026-07-22): `backgroundMain` runs at `LOCKED_BOOT_COMPLETED`
+/// — i.e. it can start BEFORE the user's first post-reboot unlock, while
+/// Android's credential-encrypted storage (where `getDatabasesPath()`
+/// resolves by default) is still locked. The original code called
+/// `IntentStore.open()` exactly once, unawaited and uncaught, at engine
+/// start: that first attempt raced storage being locked, threw
+/// `DatabaseException(open_failed ...)`, and — because nothing ever tried
+/// again — left `_intentStore` null for the rest of the process's life. Every
+/// later cooldown check then read `_intentStore == null` as "no prior event"
+/// (a deliberate design choice for the brief window right after a NORMAL
+/// engine start — see the comment in `_showCaptureScreen` — but never meant
+/// to be permanent), so the cooldown floor silently stopped working, AND
+/// every subsequent write was dropped since the insert listener could never
+/// stand up a store either. Calling this from both the write-listener and
+/// `_showCaptureScreen` means the very next real event (the user's first
+/// post-reboot unlock, by which point storage is guaranteed unlocked) gets a
+/// fresh attempt instead of trusting a stale failure from before boot
+/// finished.
+Future<IntentStore?> _ensureIntentStore() async {
+  if (_intentStore != null) return _intentStore;
+  // Coalesce concurrent opens. Two events arriving close together (e.g. the
+  // write-listener and an unlock's triage check) both pass the null check
+  // above before the first open() resolves, so without this guard both call
+  // IntentStore.open() — observed on-device as "💽 IntentStore opened" logged
+  // twice on the first post-boot unlock. Sharing one in-flight future means
+  // exactly one open() runs; late callers await the same result. Cleared in
+  // catch so a FAILED open (the direct-boot storage-locked case) is retried
+  // with a fresh future next time rather than re-awaiting the dead one.
+  try {
+    final opening = _intentStoreOpening ??= IntentStore.open();
+    final store = await opening;
+    if (_intentStore == null) {
+      _intentStore = store;
+      debugPrint('💽 IntentStore opened');
+    }
+    _intentStoreOpening = null;
+  } catch (e) {
+    _intentStoreOpening = null;
+    debugPrint('⚠️ IntentStore.open() failed, will retry when next needed: $e');
+  }
+  return _intentStore;
+}
+
+/// In-flight `IntentStore.open()` future, shared by concurrent
+/// [_ensureIntentStore] callers so only one open runs at a time. Null when no
+/// open is in progress. See [_ensureIntentStore].
+Future<IntentStore>? _intentStoreOpening;
 
 @pragma("vm:entry-point")
 void overlayMain() {
@@ -107,26 +346,81 @@ void overlayMain() {
   );
 }
 
+/// Wraps a plugin/DB call that has a real, observed failure mode: a native
+/// reply or DB operation that silently never completes (the same class of
+/// bug as the `shareData()` fire-and-forget issue — see CLAUDE.md §3 /
+/// ARCHITECTURE.md §5 — but on a different call). Without this, a single
+/// stuck `await` here wedges this specific `_showCaptureScreen` invocation
+/// forever; because a fresh one is spawned on every unlock (Dart doesn't
+/// serialize re-entrant async handler calls), the failure accumulates
+/// silently across unlocks rather than crashing loudly — exactly the
+/// "no prompt, no error, no log" symptom found in testing. On timeout, log
+/// which call was responsible and return null so the caller can degrade
+/// gracefully (skip just this one unlock) instead of leaving it stuck.
+Future<T?> _withTimeout<T>(String label, Future<T> future) async {
+  try {
+    return await future.timeout(const Duration(seconds: 5));
+  } on TimeoutException {
+    debugPrint('⏱️ $label timed out after 5s — skipping this unlock rather than risk a permanent stall');
+    return null;
+  }
+}
+
 /// Shows the intent-capture overlay on unlock. Lives at top level (not in a
 /// widget) because it runs in the headless background engine — see
 /// [backgroundMain]. [screenWidth]/[screenHeight] are the true display size in
 /// raw device pixels, provided by native (the headless engine can't read
 /// display metrics itself).
 Future<void> _showCaptureScreen(int screenWidth, int screenHeight) async {
-  final hasPermission = await FlutterOverlayWindow.isPermissionGranted();
+  final hasPermission = await _withTimeout('isPermissionGranted()', FlutterOverlayWindow.isPermissionGranted());
   debugPrint('📋 Has overlay permission: $hasPermission');
-  if (!hasPermission) return;
+  if (hasPermission != true) return;
 
   if (screenWidth <= 0 || screenHeight <= 0) {
     debugPrint('⚠️ Invalid screen size ($screenWidth x $screenHeight), skipping');
     return;
   }
 
-  final alreadyActive = await FlutterOverlayWindow.isActive();
-  if (alreadyActive) {
+  // Self-tracked instead of FlutterOverlayWindow.isActive() — that plugin
+  // call was found (on-device, 2026-07-22) to hang in native code in a way
+  // even a Dart-level .timeout() couldn't catch, once the app had been
+  // opened. See _overlayIsActive / _overlayClosedPortName for the full story
+  // and docs/debug/sprint3-session-log-2026-07-22.txt for the evidence.
+  if (_overlayIsActive) {
     debugPrint('🟡 Overlay already active, skipping re-trigger');
     return;
   }
+
+  // Prompt triage: a deterministic cooldown floor (never re-prompt within
+  // intentCooldown of the last event), then a probability gate above it
+  // (unpredictable timing resists the habituation a fixed cadence causes —
+  // see the Sprint 3 plan / CLAUDE.md §9). _ensureIntentStore retries the
+  // open if a prior attempt failed (e.g. it raced credential-encrypted
+  // storage being locked pre-first-unlock, see that function's doc comment)
+  // instead of trusting a stale null forever; a still-null result here (a
+  // genuinely unavailable store, not just "hasn't opened yet") is treated as
+  // "no prior event," so the cooldown floor doesn't block this unlock rather
+  // than silently wedging the prompt entirely. Checked (and logged) as two
+  // separate steps — see _cooldownPolicy / _probabilityPolicy above for why:
+  // a long streak of skips is either "cooldown is stuck" (a real bug) or
+  // "unlucky probability draws" (working as intended), and a single
+  // clubbed-together log line can't tell you which, which is exactly what
+  // made an early test run look broken.
+  final store = await _ensureIntentStore();
+  final lastCompletedAt = store == null
+      ? null
+      : await _withTimeout('IntentStore.lastCompletedAt()', store.lastCompletedAt());
+  final ctx = PromptContext(now: DateTime.now(), lastCompletedAt: lastCompletedAt);
+  if (!_cooldownPolicy.shouldPrompt(ctx)) {
+    final elapsed = lastCompletedAt == null ? null : ctx.now.difference(lastCompletedAt);
+    debugPrint('🎲 Triage: skipping — COOLDOWN active (elapsed $elapsed < $intentCooldown)');
+    return;
+  }
+  if (!_probabilityPolicy.shouldPrompt(ctx)) {
+    debugPrint('🎲 Triage: skipping — PROBABILITY miss (p=$promptProbability)');
+    return;
+  }
+  debugPrint('🎲 Triage: prompting (cooldown clear, probability hit p=$promptProbability)');
 
   // Size the window from the native-provided true display size (raw device
   // pixels — exactly what showOverlay() expects; see CLAUDE.md §5). We do NOT
@@ -147,6 +441,12 @@ Future<void> _showCaptureScreen(int screenWidth, int screenHeight) async {
   //
   // startPosition (0,0): pins the window to the true top-left; without it the
   // plugin's default position shifts the window up by the status-bar height.
+  //
+  // Set BEFORE the await, not after: closes the race where a second
+  // onUnlock could arrive (a fresh async call — Dart doesn't serialize
+  // re-entrant handler invocations) while this call is still awaiting
+  // showOverlay(), and both would otherwise see _overlayIsActive == false.
+  _overlayIsActive = true;
   await FlutterOverlayWindow.showOverlay(
     height: screenHeight,
     width: screenWidth,
@@ -238,6 +538,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ],
             ),
+            const SizedBox(height: 24),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const HistoryScreen()),
+                );
+              },
+              child: const Text(
+                'View history',
+                style: TextStyle(color: Colors.white70, fontSize: 16),
+              ),
+            ),
           ],
         ),
       ),
@@ -259,6 +571,7 @@ class _OverlayRootState extends State<OverlayRoot> {
   String _intentText = '';
   String _intentSource = '';
   DateTime? _declaredAt;
+  String? _intentClientId;
 
   Future<void> _submitIntent(String text, String source) async {
     final trimmed = text.trim();
@@ -273,6 +586,7 @@ class _OverlayRootState extends State<OverlayRoot> {
       _intentText = trimmed;
       _intentSource = source;
       _declaredAt = declaredAt;
+      _intentClientId = _generateClientId(declaredAt);
       _mode = _OverlayMode.bubble;
     });
 
@@ -305,8 +619,26 @@ class _OverlayRootState extends State<OverlayRoot> {
   /// nagging. State stays in capture mode with nothing set, so the engine is
   /// already clean for the next unlock (no reset needed, unlike _dismissBubble).
   Future<void> _submitNoIntent() async {
-    debugPrint('🤷 No intent declared ("$noIntentLabel") at ${DateTime.now()}');
+    final now = DateTime.now();
+    debugPrint('🤷 No intent declared ("$noIntentLabel") at $now');
+
+    // Relayed to the background engine (the sole DB writer — see CLAUDE.md
+    // §3) via the same-process IsolateNameServer port — see
+    // _intentWritePortName for why this replaced shareData().
+    final event = IntentEvent(
+      clientId: _generateClientId(now),
+      kind: IntentKind.noIntent,
+      source: null,
+      text: noIntentLabel,
+      declaredAt: now,
+      completedAt: now,
+    );
+    _relayIntentEvent(event);
+
     await FlutterOverlayWindow.closeOverlay();
+    // Tells the background isolate this is a REAL close (not the
+    // close+reopen resize in _submitIntent) — see _overlayIsActive.
+    _signalOverlayClosed();
   }
 
   Future<void> _dismissBubble() async {
@@ -317,7 +649,23 @@ class _OverlayRootState extends State<OverlayRoot> {
       'declared at $_declaredAt, dismissed at $dismissedAt, active for $activeFor',
     );
 
+    // Same relay as _submitNoIntent above. _declaredAt/_intentClientId are
+    // always non-null here: this is only reachable from bubble mode, which
+    // _submitIntent only enters after setting both.
+    final event = IntentEvent(
+      clientId: _intentClientId!,
+      kind: IntentKind.intent,
+      source: _intentSourceFromString(_intentSource),
+      text: _intentText,
+      declaredAt: _declaredAt!,
+      completedAt: dismissedAt,
+    );
+    _relayIntentEvent(event);
+
     await FlutterOverlayWindow.closeOverlay();
+    // Tells the background isolate this is a REAL close (not the
+    // close+reopen resize in _submitIntent) — see _overlayIsActive.
+    _signalOverlayClosed();
     // The plugin caches the overlay's Flutter engine and only detaches the
     // view on closeOverlay() — the engine (and therefore this State's _mode +
     // _intentText) survives. Without this reset, the next unlock reattaches
@@ -331,6 +679,7 @@ class _OverlayRootState extends State<OverlayRoot> {
         _intentText = '';
         _intentSource = '';
         _declaredAt = null;
+        _intentClientId = null;
       });
     }
   }

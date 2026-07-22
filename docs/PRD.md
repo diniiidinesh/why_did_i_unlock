@@ -90,11 +90,10 @@ v1.0 of this PRD asserted things about "Sprint 1" that weren't accurate against 
 
 **Not yet built:**
 - Voice input.
-- Timer / countdown.
-- Local storage / intent history (so completed intents aren't persisted yet — they clear but aren't logged anywhere; debug logging exists but isn't stored). This is the next sprint.
-- Dashboard / analytics.
+- Timer / countdown — the actual bubble+timer differentiator (§1.3/CLAUDE.md §10); next priority after Sprint 3 merges.
+- Dashboard / aggregate analytics (local intent-history storage + a minimal history view shipped in Sprint 3 — see §4.1/Feature status below).
 
-**Current dependencies:** `flutter_overlay_window`, `cupertino_icons` (runtime); `flutter_launcher_icons` (dev-only). No state-management, local-storage, or permission-handler package installed yet — anything beyond this should be checked against the current `pubspec.yaml` rather than assumed from this document.
+**Current dependencies:** `flutter_overlay_window`, `cupertino_icons`, `shared_preferences`, `sqflite`, `path` (runtime); `flutter_launcher_icons`, `sqflite_common_ffi`, `shared_preferences_platform_interface` (dev-only, tests). No state-management or permission-handler package installed yet — anything beyond this should be checked against the current `pubspec.yaml` rather than assumed from this document.
 
 ---
 
@@ -121,7 +120,7 @@ v1.0 of this PRD asserted things about "Sprint 1" that weren't accurate against 
 | Overlay/Bubble | `flutter_overlay_window` package, backed by Android `SYSTEM_ALERT_WINDOW` | Built (decorative bubble only — see §2). |
 | Unlock Detection | Native Kotlin: `BroadcastReceiver` for `ACTION_USER_PRESENT` → foreground service → Flutter via `MethodChannel` | Built. |
 | State Management | **OPEN — not yet chosen.** v1.0 named Riverpod as a candidate; that was aspirational, not a decision. Choose when the app's state needs actually require it, not preemptively. | Not built |
-| Local Storage | **OPEN — not yet chosen.** `sqflite` is a plausible Flutter-native candidate for local intent history; not installed or decided. | Not built |
+| Local Storage | **`sqflite`.** `intent_log` table: `kind` (intent/no_intent) + `source` (preset/custom) as separate columns, `text`, `declared_at`/`completed_at`, idempotent `client_id`. WAL journal mode (background engine writes, history screen reads concurrently). See `CLAUDE.md` §3 / `docs/ARCHITECTURE.md` §5 for the write-path architecture and two real Android-specific bugs found building it. | Built (Sprint 3, branch not yet merged) |
 | Voice Input | Android `SpeechRecognizer` API (on-device, no network) — plausible approach, not yet implemented | Not built |
 | Analytics | None. Per product principle (§8), no analytics or network calls in the base/free experience regardless of monetization outcome. | N/A by design |
 
@@ -143,7 +142,7 @@ v1.0 of this PRD asserted things about "Sprint 1" that weren't accurate against 
 - The **SYSTEM_ALERT_WINDOW + AccessibilityService** permission stack is the single most policy-pressured surface on Android 12–16, and represents the biggest existential platform risk to this app.
 - **Prefer `UsageStatsManager` over `AccessibilityService`** wherever the same signal can be obtained — Accessibility usage draws heavy Play Store review scrutiny and carries real risk of app removal.
 - **Onboarding must not front-load a permission cliff.** Demanding overlay (and potentially accessibility) permissions on day one is a known high-drop-off pattern. Whether the bubble itself ends up free or paywalled is a separate, currently open question (§8) — either way, the onboarding sequencing principle holds: earn the permission ask, don't front-load it.
-- **Smart unlock triage:** prompting on every single unlock risks friction fatigue. Very short/quick unlocks should likely be skippable, with cooldown/triage configurable. *(Distinct from the delay-before-unlock idea in §9 — triage reduces friction, that idea deliberately adds it; don't conflate the two.)*
+- **Smart unlock triage — built (Sprint 3):** a deterministic 1-minute cooldown floor (never re-prompt within `intentCooldown` of the last event) combined with a 50% probability gate above it, not a fixed cadence alone. The probability layer is deliberate, not just a simpler cooldown: research on security-warning habituation (Vance & Anderson, fMRI study, MISQ 2018) shows identical repeated prompts get neurologically tuned out after ~2 exposures, while unpredictable timing resists that. Competitor Intenty ships a full time/instance/probability customization UI in response to their own users' friction-fatigue complaints — that UI is explicitly NOT built here yet (not this app's differentiator, no usage data to pick better defaults); the underlying policy architecture (`lib/prompt_policy.dart`) is extensible to one later. *(Distinct from the delay-before-unlock idea in §9 — triage reduces friction, that idea deliberately adds it; don't conflate the two.)*
 
 ### 4.4 Non-Functional Requirements — device-performance floor
 
@@ -179,7 +178,7 @@ This app runs a persistent overlay and a foreground service, which is exactly wh
 4. (Optional, future) User attaches a timer.
 5. Prompt dismisses; the floating bubble now displays the declared intent (this is the piece that closes the gap identified in §2 — a bubble with actual content, not the decorative placeholder).
 6. User proceeds; bubble persists across all apps.
-7. User taps the bubble, marks it done; intent is logged (once storage exists).
+7. User taps the bubble, marks it done; intent is logged to the local `intent_log` (Sprint 3, built).
 
 ### Flow 3: Timer Expiry *(Planned, P1 — not scoped for the current sprint)*
 
@@ -199,8 +198,8 @@ Countdown reaches visual thresholds (e.g., approaching expiry → expired), bubb
 | Bubble displaying declared intent | **Built & confirmed** | Sprint 2. Bubble now shows actual intent text; decorative placeholder is superseded. |
 | Manual Completion (mark intent done) | **Built & confirmed** | Sprint 2. Tapping bubble → mark done → bubble clears, verified working. |
 | Single-active-intent behavior | **Built & confirmed (by design)** | A fresh unlock while an intent is incomplete does not re-trigger capture — existing bubble persists until completed. Design a decision for Sprint 3+ features to respect, not a bug. |
-| Intent History (local log) | **Planned** | Needs a storage decision first (§4.1) — intents currently clear on completion without being logged anywhere. |
-| Cooldown / smart triage | **Planned** | See §4.3. |
+| Intent History (local log) | **Built (Sprint 3, branch not yet merged)** | `sqflite` `intent_log` — see §4.1. A minimal read-only history screen exists off `HomeScreen`; no dashboard/aggregate view yet. |
+| Cooldown / smart triage | **Built (Sprint 3, branch not yet merged)** | Cooldown + probability composite, not cooldown alone — see §4.3. |
 
 ### P1 — Should have (post-MVP core loop)
 

@@ -3,10 +3,17 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <!-- allowBackup="false": Sprint 3 introduces the first on-disk user data
+         (the sqflite intent_log). Without this, Android's default auto-backup
+         would sweep declared intent text into cloud/adb backups, conflicting
+         with the local-first/privacy stance (CLAUDE.md §11). Was previously
+         unset (defaulting to true), tracked as a P1 in docs/BACKLOG.md to do
+         alongside storage landing — this is that. -->
     <application
         android:label="Why Did I Unlock"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false">
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -14,7 +14,7 @@ exists to make the "why" durable.
 | Engine | Host (native) | Dart entry point | Lifetime | Plugins registered? | Job |
 |---|---|---|---|---|---|
 | **Main UI** | `MainActivity` (`FlutterActivity`) | `main()` → `MyApp` → `HomeScreen` | Ephemeral — dies when the Activity/task is destroyed (incl. swipe-away) | Yes (auto) | Show the settings/permission screen. Request the overlay permission (needs an Activity). Nothing else. |
-| **Background** | `UnlockListenerService` (foreground service) | `backgroundMain()` | **Persistent** — lives as long as the foreground service (survives task removal) | Yes (auto) | The "brain": receive unlock/lock events, decide whether to show the capture screen, call `showOverlay()`. Future home of Sprint 3 storage writes. |
+| **Background** | `UnlockListenerService` (foreground service) | `backgroundMain()` | **Persistent** — lives as long as the foreground service (survives task removal) | Yes (auto) | The "brain": receive unlock/lock events, run prompt triage, call `showOverlay()`. Also the sole writer of the Sprint 3 `intent_log` DB — opens it once, subscribes `overlayListener`, inserts on every relayed event. |
 | **Overlay** | `OverlayService` (from `flutter_overlay_window`) | `overlayMain()` → `OverlayRoot` | Cached; created lazily on first `showOverlay`, persists for the process | **No** (only the overlay plugin's own channel) | Render the capture screen and the bubble. Runs the capture→bubble state machine. |
 
 ### Why three, and why this split
@@ -33,9 +33,9 @@ exists to make the "why" durable.
   - The overlay engine **cannot call `showOverlay()` on itself** — that's why the
     background engine (not the overlay engine) drives showing the capture screen.
   - The overlay engine **cannot call `sqflite`** (or any plugin) directly. Sprint 3's
-    completed-intent DB write must be relayed from the overlay isolate to a
-    plugin-registered engine (background or main) via `FlutterOverlayWindow.shareData()`
-    / `overlayListener`.
+    intent-log writes are relayed from the overlay isolate to the **background**
+    engine (confirmed the correct target, not "main" — see below) via
+    `FlutterOverlayWindow.shareData()` / `overlayListener`.
 - **Keeping the UI engine ephemeral is deliberate**, not a bug: the settings screen's
   isolate has no reason to persist while the app is closed. The app's dominant lifecycle
   state is "closed but monitoring," so the persistent footprint is a *minimal* headless
@@ -69,7 +69,16 @@ exists to make the "why" durable.
   (no args). Handler installed by `backgroundMain`.
 - **`flutter_overlay_window` internal channels** (`x-slayer/*`): `showOverlay`,
   `closeOverlay`, `resizeOverlay`, `updateFlag`, `isActive`, plus `shareData` /
-  `overlayListener` for overlay↔main-app messaging (the path Sprint 3 storage will use).
+  `overlayListener` for overlay↔main-app messaging — this is the Sprint 3 intent-log
+  write path (`OverlayRoot._dismissBubble` / `_submitNoIntent` call `shareData()` with
+  an `IntentEvent.toMessage()` Map; `backgroundMain` subscribes `overlayListener` and
+  calls `IntentStore.insertEvent`). **Critical: `shareData()` calls from the overlay
+  isolate must be fire-and-forget (`unawaited(...)`), never `await`ed — see §5.**
+  Routing is native-side static-field-based (`WindowSetup.messenger`, set by whichever
+  engine last called the plugin's `onAttachedToEngine` — background attaches after
+  MainActivity in the normal launch path, so background wins); confirmed via a
+  real-device spike (native source read + swipe-from-Recents test) that this reaches
+  the background engine reliably, including after the main UI engine is destroyed.
 
 ## 4. Event flows
 
@@ -91,9 +100,20 @@ close+reopen is required because flipping the window flag in place doesn't relea
 focus (would block touches in other apps). Screen/pill sizing is in **raw device pixels**
 (the plugin quirk); the pill dp is × `devicePixelRatio`.
 
-**Dismiss bubble:** `OverlayRoot._dismissBubble` → `closeOverlay()` then resets its own
-state back to capture mode (the overlay engine is cached and its widget state survives
-`closeOverlay`, so an explicit reset is required or a stale bubble reappears).
+**Dismiss bubble:** `OverlayRoot._dismissBubble` → builds an `IntentEvent` (kind=intent)
+→ `unawaited(shareData(...))` (Sprint 3 write relay — fire-and-forget, see §5) →
+`closeOverlay()` then resets its own state back to capture mode (the overlay engine is
+cached and its widget state survives `closeOverlay`, so an explicit reset is required
+or a stale bubble reappears). `_submitNoIntent` (the "Just Like That" path) does the
+same `shareData()` relay with kind=no_intent before its own `closeOverlay()`.
+
+**Overlay message → stored row (Sprint 3):** `shareData(event.toMessage())` (overlay
+isolate) → native `OverlayService`'s `overlayMessageChannel` forwards via the static
+`WindowSetup.messenger` → background engine's `overlayListener` stream →
+`IntentEvent.fromMessage()` (validates: non-empty/length-capped text, valid kind/source
+combination, `declaredAt <= completedAt`; malformed messages are logged and dropped,
+never crash the isolate) → `IntentStore.insertEvent()` (`INSERT OR IGNORE` on
+`client_id`, idempotent against any retry/duplicate).
 
 **Lock:** `ACTION_SCREEN_OFF` → `UnlockReceiver` → `onPhoneLocked()` → `onLock` → logged
 (no UI action today).
@@ -124,18 +144,109 @@ background engine.
   position values were already correct; this is a gravity/fit artifact, not a size bug.
   `topLeft` anchors to the true origin and avoids the centering. Verified numerically: the
   live window `frame` went from `[0,-31][1080,2369]` to exactly `[0,0][1080,2400]`.
+- **`shareData()` from the overlay isolate MUST be fire-and-forget — never `await` it.**
+  Verified in the plugin's native source (`OverlayService.java`): the overlay-side
+  `overlayMessageChannel.setMessageHandler` forwards the message via
+  `WindowSetup.messenger.send(message)` and **never calls `reply.reply(...)`**.
+  `BasicMessageChannel.send()`'s Dart `Future` only resolves on a native reply, so
+  awaiting it hangs forever. This is not theoretical — awaiting it in
+  `_dismissBubble()` during Sprint 3 development silently broke the bubble's × button
+  outright (the function never reached `closeOverlay()`, and the bubble became
+  permanently unclosable). Wrap every `shareData()` call from overlay-isolate code in
+  `unawaited(...)`.
+- **On Android specifically, `PRAGMA journal_mode=WAL` must run via `db.rawQuery()`,
+  not `db.execute()`.** Android's sqflite backend rejects `execute()` for any statement
+  that returns a result row (the PRAGMA returns the resulting mode) with
+  `DatabaseException(unknown error (code 0 SQLITE_OK): Queries can be performed using
+  SQLiteDatabase query or rawQuery methods only.)`. Desktop unit tests using
+  `sqflite_common_ffi` do NOT catch this — that backend tolerates `execute()` for it —
+  so this only ever surfaces as a real on-device crash, never in a desktop `flutter
+  test` run. **A clean `flutter test` pass does not prove a new sqflite code path
+  works on-device; always do at least one real-device write/read cycle.**
+- **`FlutterOverlayWindow.isActive()` can hang in native code in a way even a Dart
+  `.timeout()` can't catch**, once the app has been opened at least once during the
+  process's lifetime. Observed on-device 2026-07-22: `_showCaptureScreen` silently
+  stalled after logging `Has overlay permission: true`, with no further output —
+  `.timeout()` wraps the `Future`, but the native call never returned control to Dart
+  at all, so the timeout's own completion was starved too. **Fixed by not calling it**:
+  replaced with a self-tracked `bool _overlayIsActive` in the background isolate, set
+  `true` right before `showOverlay()` and cleared by an explicit "overlay closed"
+  signal sent from the overlay isolate (`_overlayClosedPortName`, an `IsolateNameServer`
+  port, same mechanism as the write relay) right after a real `closeOverlay()`. No
+  plugin native call in the hot path at all.
+- **sqflite's `singleInstance: true` (the default) shares ONE native connection across
+  every `open()` call for the same file path, even across different Dart isolates.**
+  Sprint 3's History screen (main UI engine) and the background writer both open
+  `intents.db`; with the default, they got the SAME connection, so the History screen's
+  `dispose()` → `close()` closed the writer's connection too — every subsequent
+  background write then threw `DatabaseException(database_closed)`, permanently, until
+  the process restarted. Fixed via `IntentStore.open({ownConnection: false})`: the
+  background writer keeps the default shared/`singleInstance` connection; the History
+  screen passes `ownConnection: true` (→ `singleInstance: false`) for its own
+  independent connection it can freely open/close. Two connections to one file is
+  exactly what WAL mode (already in place, see above) is for.
+- **The background engine can start before Android's credential-encrypted storage is
+  unlocked, causing the first `IntentStore.open()` to fail — and if that failure isn't
+  retried, storage (and anything that reads it) breaks permanently for the rest of the
+  process.** `backgroundMain()` is the direct-boot service entry point (§6): it can run
+  at `LOCKED_BOOT_COMPLETED`, before the user's first post-reboot unlock, while the
+  default app-data storage location `getDatabasesPath()` resolves to is still locked.
+  Observed on-device 2026-07-22: `FileSystemException: ... (OS Error: Required key not
+  available, errno = 126)` — `ENOKEY`, i.e. the CE-storage key isn't available yet. The
+  original code called `IntentStore.open()` exactly once, unawaited and uncaught, at
+  engine start — that single failed attempt left `_intentStore` null forever, which
+  silently broke BOTH the cooldown check (`lastCompletedAt` read as "no prior event",
+  always) AND all future writes (the insert listener was only registered after a
+  successful open, so it never ran). Fixed via an idempotent `_ensureIntentStore()`
+  retried at three points — best-effort at boot, before every write, and at the top of
+  every triage check — so the user's next real unlock (the exact moment storage is
+  guaranteed available again) gets a fresh attempt instead of trusting a stale failure
+  from before boot finished. A concurrent-open guard (a shared in-flight `Future`)
+  prevents two simultaneous callers from both calling `open()` when the store is still
+  null.
 
 ## 6. Known limitations / reliability gaps (not defects introduced here)
 
-- **First unlock right after a reboot may be missed.** Plain `BOOT_COMPLETED` is delivered
-  by the OS only *after* the first post-reboot unlock, and can be delayed further under
-  heavy boot load. Self-heals from the 2nd unlock. Closing this fully needs
-  `LOCKED_BOOT_COMPLETED` / direct-boot (backlogged — interacts with storage encryption
-  context; expensive to test).
+- **First-unlock-after-reboot gap: CLOSED (v0.4.0).** `BootReceiver` +
+  `UnlockListenerService` are `directBootAware` and handle `LOCKED_BOOT_COMPLETED`
+  (fires before the device's first post-reboot unlock), so monitoring starts before
+  that unlock rather than after it. Verified across 2 real reboots. (Historical note:
+  this section used to say this gap was open/backlogged — it isn't anymore.)
 - **Aggressive OEMs (Xiaomi/Oppo/Vivo)** may block boot auto-start and kill the foreground
   service during normal use unless the user grants "Autostart" / disables battery
   optimization. Not fixable in code — needs a guided onboarding screen (P1 backlog).
 - **Full process kill:** `START_STICKY` restarts the service, but unlocks during the gap
-  are missed; `am force-stop` disables restart entirely until manual relaunch.
+  are missed; `am force-stop` disables restart entirely until manual relaunch. This is
+  also the known edge case Sprint 3's storage doesn't solve: if the app process is
+  killed between a bubble dismiss and the background engine's DB write completing,
+  that event is lost — same class of gap, not a new one.
 - **Memory:** up to 3 engines while the app is open (UI + background + overlay), dropping
   to ~2 (background + overlay) when closed. Battery soak vs. the <2%/day target is untested.
+
+## 7. Testing gotchas (Sprint 3 — sqflite + widget tests)
+
+- **`sqflite_common_ffi` does its real work on a background Isolate — genuine async I/O,
+  not a fake-Timer-based Future.** `testWidgets`' default automated test zone can
+  deadlock a `setState()` triggered by that kind of real callback: a widget that opens
+  a store and loads data in `initState()` will hang **forever** at `pumpWidget()` (not
+  throw, not time out quickly) if the real isolate round-trip isn't given real-zone
+  treatment. Confirmed by direct reproduction during Sprint 3 (`history_screen_test.dart`
+  hung indefinitely; bisected line-by-line with debug prints to confirm the store's
+  `recentEvents()` call itself completed fine — the hang was specifically in the
+  framework not processing the resulting `setState`).
+  - **Fix:** wrap any real async I/O (store opens, inserts, the post-`pumpWidget` wait
+    for a widget's async load to finish) in `tester.runAsync(() async { ... })` —
+    Flutter's documented escape hatch for genuine async work (isolates, real Timers,
+    file I/O) inside a widget test. Then `await tester.pump()` to let the framework
+    process the now-completed state change.
+  - Separately: don't use `pumpAndSettle()` on a screen showing a `CircularProgressIndicator`
+    — its indeterminate animation schedules frames forever, so "wait until no more
+    frames are scheduled" never resolves (its own internal timeout is 10 *minutes*, not
+    seconds, so this reads as a hang, not a quick failure). Use explicit `pump()` calls
+    instead.
+- **A stale/orphaned Gradle daemon can make a build look permanently stuck** at
+  `Running Gradle task 'assembleRelease'` with zero progress for many minutes, even
+  though a fresh daemon would finish the same build in well under a minute. Check the
+  daemon's own log (`~/.gradle/daemon/<ver>/daemon-<pid>.out.log`) for "finished
+  executing the build" before concluding it's a real hang; `cd android && ./gradlew
+  --stop` then retry if it's stale. Also in CLAUDE.md §7.

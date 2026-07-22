@@ -111,6 +111,35 @@ If `flutter pub get` fails on an SDK-constraint error, your Flutter is too old f
 
 ---
 
+## Troubleshooting: a build looks stuck
+
+If `flutter run --release` sits at `Running Gradle task 'assembleRelease'...` with
+**zero progress for several minutes**, don't assume it's just a slow build (a real one
+finishes in well under a minute on this project once Gradle's daemon is warm) — it's
+more likely a **stale/orphaned Gradle daemon** left behind by a previously
+killed/interrupted `flutter run`. Check the daemon's own log before waiting it out or
+killing anything:
+
+```powershell
+Get-ChildItem "$env:USERPROFILE\.gradle\daemon\*\daemon-*.out.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content -Tail 20
+```
+
+If that log already shows `finished executing the build` while your terminal still
+shows no progress, Gradle itself is done — the stall is elsewhere (install/launch to
+the device). If the log shows no recent activity at all, the daemon is genuinely stuck:
+
+```powershell
+cd android
+./gradlew --stop
+cd ..
+flutter run --release -d <device-id>
+```
+
+This cost real debugging time during Sprint 3 before being root-caused — check this
+first next time a build "hangs."
+
+---
+
 ## Expected `flutter doctor` results
 
 Green required: **Flutter**, **Android toolchain**, **Connected device** (after step 6).

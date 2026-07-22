@@ -3,10 +3,20 @@
 > Deferred engineering/feature work and ideas not yet built. Git-tracked on purpose
 > (survives machine switches).
 >
-> **TOP OF NEXT THREAD** — the prior two P1 items (keyboard revamp + Just Like That
-> pill) have been completed in v0.4.1 (PR #6, awaiting friend-testing feedback
-> before merge to `main`). The next priority is **Sprint 3: local intent-history
-> storage + smart cooldown** — fully designed (see `CLAUDE.md` §3), ready to build.
+> **Sprint 3 shipped (v0.5.0+7, merged to `main` 2026-07-22).** Local intent-history
+> storage (`sqflite`, `intent_log`), prompt-frequency triage (1-min cooldown + 50% prob),
+> and minimal read-only history view are all built, tested (27/27 pass, all manual
+> on-device cases verified), and live. Four real bugs found and fixed during the build
+> are now documented as gotchas in `ARCHITECTURE.md` §5 and `CLAUDE.md` §3:
+> (1) `shareData()` must be fire-and-forget, never awaited, from overlay isolate.
+> (2) `FlutterOverlayWindow.isActive()` native hang — replaced with self-tracked
+>     `_overlayIsActive` bool + overlay-closed signal.
+> (3) sqflite's `singleInstance: true` meant History screen's close closed the writer's
+>     connection; fixed via `ownConnection` parameter.
+> (4) Direct-boot service can start before credential-encrypted storage is unlocked
+>     (`errno 126 ENOKEY`), causing permanent `_intentStore` null; fixed via idempotent
+>     `_ensureIntentStore()` retry at write-time + triage-check-time.
+> Full analysis: `docs/debug/sprint3-session-log-2026-07-22.txt` UPDATEs 1–4.
 >
 > **Scope:** this file holds *tactical* backlog — features, fixes, polish, ideas.
 > For **strategic open decisions** (monetization model, store brand, iOS strategy,
@@ -20,15 +30,25 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 
 ## Reliability / correctness
 
-- **[P1] `android:allowBackup="false"`** — currently unset (defaults to `true`). Harmless today (no stored data), but must be set before/with Sprint 3 storage or Android auto-backup will sweep up intent history, breaking the local-first/privacy stance. Do it alongside the storage work.
+- **[DONE 2026-07-22] `android:allowBackup="false"`** — SHIPPED alongside Sprint 3 storage (was unset/defaulting to `true`). Prevents Android auto-backup from sweeping up intent history.
 - **[P1] OEM autostart onboarding** — aggressive OEMs (Xiaomi/Oppo/Vivo, key India market) block boot auto-restart AND kill the foreground service during normal use unless the user manually grants "Autostart" / disables battery optimization. Not fixable in code — needs a guided in-app screen walking the user through the OEM-specific setting. Fixes both the reboot gap on those OEMs and the general process-kill reliability gap. (Was "Option C" in the reboot discussion.)
 - **[DONE 2026-07-21] `LOCKED_BOOT_COMPLETED` (direct boot)** — SHIPPED. `BootReceiver` + `UnlockListenerService` are now `directBootAware` and handle `LOCKED_BOOT_COMPLETED`, so monitoring starts before the first post-reboot unlock. Verified across 2 real reboots (prompt appeared ~2s after boot, zero manual app-open). The device-encrypted-storage concern turned out moot: our logic only runs on `ACTION_USER_PRESENT`, which fires after unlock when normal storage is already available.
 - **[P2] Graceful degradation when overlay permission is denied/revoked** — currently a silent no-op (confirmed). CLAUDE.md §8 calls for a notification-based fallback instead. Not built.
+
+## Storage / history (Sprint 3 — DONE)
+
+- **[DONE 2026-07-22] Overlay write path, IsolateNameServer relay, and concurrent-open guard** — Bugs 1–4 found and fixed (see summary above). Write path now reliably delivers every event across multiple dismiss cycles, even after swipe-away and reboot. Verified end-to-end with 27 automated tests + 24 manual on-device cases.
+- **[DONE 2026-07-22] Prompt-frequency triage** — cooldown (1 min) + probability (50%) composite, both verified working correctly against real event data. Triage gate plugs into `_showCaptureScreen`, inputs validated fresh per unlock.
+- **[DONE 2026-07-22] Minimal history view** — `lib/history_screen.dart` reads from the DB, renders events newest-first, styles no-intent rows distinctly. Verified against real multi-event data on-device.
+- **[P2] Triage customization UI** — settings screen exposing cooldown/probability (and eventually instance-based) tuning, mirroring the intent-preset UI pattern. Architecture is ready for this (`CompositePromptPolicy` in `lib/prompt_policy.dart`) — deferred because it's competitor Intenty's turf, not this app's differentiator, and there's no usage data yet to pick better defaults than the current 1min/50%.
+- **[explore] Instance-based triage strategy** (e.g. "skip every Nth unlock") — a third `PromptPolicy` implementation alongside cooldown/probability; same architecture, not yet built.
+- **[P2] `status` (completed-vs-abandoned) on `intent_log`** — deferred until the UI actually supports more than one dismiss gesture (still just the × badge).
 
 ## Performance (must run on low-end devices — CLAUDE.md §8)
 
 - **[P2] Overlay engine pre-warm** — first capture screen after unlock is slow (cold-starts the overlay's second Flutter engine); the dismiss close+reopen adds a native round-trip. Investigate pre-warming at app start. Ties to the ~500ms unlock-path target.
 - **[P2] Untested surfaces** — landscape/rotation (capture screen + pill), low-end-device pass (≤3GB, older Android — only tested on a modern Nothing Phone so far), battery soak vs. the <2%/day target.
+- **[P2] Overlay engine cold-start latency** — the overlay's second Flutter engine spins up on each `showOverlay()` call, adding observable (device-dependent, but ~1–2s on some runs per on-device tests 2026-07-22) latency between unlock→capture-screen-visible. Pre-warming the overlay engine at app startup (best-effort, non-blocking) could eliminate that. Known architectural limitation (CLAUDE.md §8); deferred to Sprint 4 since the core functionality works, just slowly.
 
 ## Capture-screen / bubble UX
 
@@ -38,6 +58,7 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 - **[DONE 2026-07-21] Meaningful presets** — Payments/Calls/Messages/Food Order/Commute replaced the vague originals.
 - **[DONE 2026-07-21] Capture-screen keyboard handling revamp** — The interim v0.4.0 fix just shifted the whole column up, pushing presets off-screen. Now uses thumb-zone layout: title/presets/"Just Like That" bottom-anchor within scrollable space (LayoutBuilder + ConstrainedBox + IntrinsicHeight + mainAxisAlignment.end), text field pinned as footer just above keyboard. In PR #6, pending merge.
 - **[DONE 2026-07-21] "Just Like That" pill styling** — Was a bare italic `TextButton`; now a real outlined pill (muted relative to topic presets so it still reads as the distinct "no real reason" option). In PR #6, pending merge.
+- **[explore] Randomize preset pill order** — Presets appear in fixed order every unlock; muscle-memory tapping ("I always hit the second pill because it's Calls") is low-deliberation behavior. Prompt-timing randomization (shipped via probability gate) fights habituation by making timing unpredictable, which the research shows is neurologically effective and harmless. Position-randomization fights muscle memory but risks backfire: if pills are hard to locate, users might skip thinking and just hit "Just Like That" from friction rather than honesty — fixing one habituation by inducing another. Only builds if position-randomness is bounded (shuffle within session? vary per boot?) not truly random per-unlock. Needs UX evaluation first.
 - **[P2] Drag / edge-snap behavior** — the bubble can be dragged to extreme/partly-offscreen edges. Consider Messenger-style edge-snap (`positionGravity` supports left/right/auto) and/or guaranteeing the × stays reachable.
 - **[P2] Adaptive bubble sizing** — width should adapt to intent text up to a max before truncating; consider a smaller-but-legible font. Currently fixed 200×56dp, single line, 14sp, ellipsis.
 - **[P2] Smaller footprint + richer actions** — shrink the bubble's on-screen footprint; consider replacing the single × with separate **Done** and **Snooze** actions.
@@ -45,7 +66,7 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 
 ## Settings / configurability
 
-- **[P2] Configurable durations via a Settings screen** — cooldown duration (Sprint 3 ships it hardcoded at **1 minute**) and, once built, timer duration should become user-configurable via presets + custom (e.g. 5/10/15 min), mirroring the intent-preset UI. Sprint 3 keeps the cooldown a named constant so wiring a future presets UI is small, not a rework.
+- **[P2] Configurable durations via a Settings screen** — cooldown (shipped hardcoded at **1 minute**), probability (shipped hardcoded at **50%**), and, once built, timer duration should become user-configurable via presets + custom (e.g. 5/10/15 min), mirroring the intent-preset UI. Both Sprint 3 triage values are named constants + a `CompositePromptPolicy` so wiring a future presets UI is small, not a rework. See also the "Triage customization UI" item above.
 - **[decision] Bubble customization (color/size/opacity)** — deferred correctly: needs (a) a preferences-persistence layer (likely `shared_preferences`, distinct from the `sqflite` intent log) and (b) monetization clarity, since this was a candidate Pro-gated feature and free-vs-Pro is undecided (CLAUDE.md §11). Don't build gating before the model is chosen.
 
 ## Exploratory (bigger bets — need scoping before they enter any sprint)
@@ -59,5 +80,6 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 ## Also tracked elsewhere (pointers, not duplicated here)
 
 - **Strategic open decisions** (monetization, branding, iOS, bubble free-vs-Pro, delay-before-unlock): `CLAUDE.md` §11/§12.
-- **Committed next-sprint scope** (sqflite storage + cooldown design): `CLAUDE.md` §3.
-- **Known architectural limitations** (reboot first-unlock gap, OEM kill, 3-engine memory): `docs/ARCHITECTURE.md` §6.
+- **Sprint 3 as-built design** (storage schema, triage composite, bugs found/fixed): `CLAUDE.md` §3.
+- **Known architectural limitations** (OEM kill, process-kill write gap, 3-engine memory): `docs/ARCHITECTURE.md` §6.
+- **Plugin + testing gotchas** (shareData fire-and-forget, Android WAL PRAGMA, sqflite widget-test deadlocks, stale Gradle daemons): `docs/ARCHITECTURE.md` §5/§7.
