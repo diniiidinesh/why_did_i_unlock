@@ -294,6 +294,43 @@ class PresetLimitExceeded implements Exception {
   String toString() => 'PresetLimitExceeded: $message';
 }
 
+/// The minimal message relayed from the overlay isolate at DISMISSAL time —
+/// deliberately NOT a full [IntentEvent]. The declared fields (kind, source,
+/// text, declaredAt) were already persisted by the earlier "declare" relay
+/// (see [IntentStore.insertOpenIntent]); dismissal only needs to locate that
+/// row by its client-generated key and mark it complete. See
+/// docs/DATA_MODEL.md §4.
+class IntentDismissal {
+  final String clientId;
+  final DateTime completedAt;
+
+  const IntentDismissal({required this.clientId, required this.completedAt});
+
+  /// Mirrors [IntentEvent.fromMessage]'s validation style — throws
+  /// [FormatException] on any structurally invalid message; callers should
+  /// catch and drop rather than let a bad message crash the background
+  /// isolate.
+  factory IntentDismissal.fromMessage(Map<dynamic, dynamic> message) {
+    final clientId = message['clientId'];
+    final completedAtMs = message['completedAt'];
+    if (clientId is! String || clientId.isEmpty) {
+      throw const FormatException('clientId missing or not a non-empty String');
+    }
+    if (completedAtMs is! int) {
+      throw const FormatException('completedAt must be int (ms epoch)');
+    }
+    return IntentDismissal(
+      clientId: clientId,
+      completedAt: DateTime.fromMillisecondsSinceEpoch(completedAtMs, isUtc: true),
+    );
+  }
+
+  Map<String, dynamic> toMessage() => {
+        'clientId': clientId,
+        'completedAt': completedAt.millisecondsSinceEpoch,
+      };
+}
+
 const String _dbFileName = 'intents.db';
 const int _schemaVersion = 2;
 

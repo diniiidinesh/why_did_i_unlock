@@ -118,21 +118,51 @@ IntentStore? _intentStore;
 /// there's no reply to await in the first place.
 const String _intentWritePortName = 'com.whydidiunlock.intent_write_port';
 
-/// Relays a completed-intent event from the overlay isolate to the
-/// background isolate's write port (see [_intentWritePortName]). Looked up
-/// fresh on every call (not cached) since the background engine's port is
-/// only guaranteed to exist once `backgroundMain` has actually run — cheap
-/// process-local lookup, not a platform channel call, so there's no cost to
-/// avoid caching. `SendPort.send()` is synchronous and fire-and-forget by
-/// construction — no reply to await, so no `unawaited()` needed here (unlike
-/// the `shareData()` call this replaces).
-void _relayIntentEvent(IntentEvent event) {
+/// Low-level send over the intent-write port (see [_intentWritePortName]).
+/// Looked up fresh on every call (not cached) since the background engine's
+/// port is only guaranteed to exist once `backgroundMain` has actually run —
+/// cheap process-local lookup, not a platform channel call, so there's no
+/// cost to avoid caching. `SendPort.send()` is synchronous and
+/// fire-and-forget by construction — no reply to await, so no `unawaited()`
+/// needed here (unlike the `shareData()` call this transport replaced).
+///
+/// Three typed wrappers below (`_relayDeclaredIntent` /
+/// `_relayDismissal` / `_relayNoIntent`) are the only callers — each tags its
+/// message with a `type` field so `backgroundMain`'s listener knows which
+/// [IntentStore] method to call, since the three shapes need different
+/// handling (see docs/DATA_MODEL.md §4 on why declaration and dismissal are
+/// separate writes now, not one).
+void _sendToBackground(Map<String, dynamic> message) {
   final port = IsolateNameServer.lookupPortByName(_intentWritePortName);
   if (port == null) {
-    debugPrint('⚠️ Could not find intent-write port — background engine not ready? Event dropped: ${event.toMessage()}');
+    debugPrint('⚠️ Could not find intent-write port — background engine not ready? Message dropped: $message');
     return;
   }
-  port.send(event.toMessage());
+  port.send(message);
+}
+
+/// Relayed from `_submitIntent` at DECLARATION time — creates the `open` row
+/// (via `IntentStore.insertOpenIntent` in the listener). This is what makes
+/// an intent survive a process death before it's dismissed: the row already
+/// exists the moment the user declares it, not only once they dismiss the
+/// bubble. See docs/DATA_MODEL.md §4.
+void _relayDeclaredIntent(IntentEvent event) {
+  _sendToBackground({...event.toMessage(), 'type': 'declare'});
+}
+
+/// Relayed from `_dismissBubble` at DISMISSAL time — marks the existing
+/// `open` row `done` (via `IntentStore.markIntentDone`). Deliberately a
+/// minimal [IntentDismissal], not a full event — see that class's doc.
+void _relayDismissal(IntentDismissal dismissal) {
+  _sendToBackground({...dismissal.toMessage(), 'type': 'dismiss'});
+}
+
+/// Relayed from `_submitNoIntent` — an atomic admission with no separate
+/// declare/dismiss step (via `IntentStore.insertEvent`, unchanged from
+/// Sprint 3). See that method's doc for why "Just Like That" doesn't go
+/// through the open/done lifecycle the other two message types do.
+void _relayNoIntent(IntentEvent event) {
+  _sendToBackground({...event.toMessage(), 'type': 'noIntent'});
 }
 
 /// Name for a second same-process port: the overlay isolate signals THIS
@@ -223,30 +253,77 @@ void backgroundMain() {
   // non-null from before. Each message's handler calls _ensureIntentStore()
   // itself, so a store that failed to open at boot gets retried per write
   // too, not just on the next unlock.
+  //
+  // Branches on the `type` tag added by _relayDeclaredIntent /
+  // _relayDismissal / _relayNoIntent — see those functions' docs for why the
+  // three shapes need different IntentStore calls (docs/DATA_MODEL.md §4).
   intentWritePort.listen((message) async {
     try {
-      final event = IntentEvent.fromMessage(message as Map);
+      final map = message as Map;
       final store = await _ensureIntentStore();
       if (store == null) {
-        debugPrint('⚠️ Dropping event — IntentStore unavailable: $message');
+        debugPrint('⚠️ Dropping relayed message — IntentStore unavailable: $map');
         return;
       }
-      await store.insertEvent(event);
-      debugPrint('💾 Stored event: kind=${event.kind} text="${event.text}"');
+      switch (map['type']) {
+        case 'declare':
+          final event = IntentEvent.fromMessage(map);
+          await store.insertOpenIntent(event);
+          debugPrint('📂 Intent opened: text="${event.text}"');
+        case 'dismiss':
+          final dismissal = IntentDismissal.fromMessage(map);
+          await store.markIntentDone(clientId: dismissal.clientId, completedAt: dismissal.completedAt);
+          debugPrint('✅ Intent marked done: clientId=${dismissal.clientId}');
+        case 'noIntent':
+          final event = IntentEvent.fromMessage(map);
+          await store.insertEvent(event);
+          debugPrint('💾 Stored no-intent event: text="${event.text}"');
+        default:
+          debugPrint('⚠️ Unknown relay message type (${map['type']}) — dropped: $map');
+      }
     } catch (e) {
       debugPrint('⚠️ Ignoring malformed overlay message ($e): $message');
     }
   });
 
-  // Best-effort early open — NOT awaited, so backgroundMain stays
-  // synchronous up to the handler registrations above. If this attempt
-  // fails (see _ensureIntentStore's doc comment for why it reliably can on
-  // a real device), _showCaptureScreen and the write listener above each
-  // retry it lazily at the moment they actually need it, instead of the
-  // permanent null this used to leave behind after one failed attempt.
-  unawaited(_ensureIntentStore());
+  // Best-effort early open + abandoned-intent sweep — NOT awaited, so
+  // backgroundMain stays synchronous up to the handler registrations above.
+  // Subsumes the plain early-open this replaced: _sweepAbandonedIntents
+  // calls _ensureIntentStore as its own first step, so warming the store and
+  // sweeping stale `open` rows happen together rather than as two separate
+  // concerns. If this attempt fails (see _ensureIntentStore's doc comment
+  // for why it reliably can on a real device), _showCaptureScreen and the
+  // write listener above each retry the open lazily when they next need it —
+  // the sweep itself is simply skipped for this engine start if so, since a
+  // failed store open means there's nothing to sweep yet anyway.
+  unawaited(_sweepAbandonedIntents());
 
   debugPrint('🧠 backgroundMain ready (persistent background engine)');
+}
+
+/// Sweeps any intent left `open` by a process that died before dismissing it
+/// (reboot, OEM kill — docs/DATA_MODEL.md §3 cases 7/8) to `abandoned`.
+/// Called once per background-engine start, never per-unlock or per-write: a
+/// fresh engine start is exactly the moment any `open` row from a PREVIOUS
+/// process can no longer be dismissed by whatever declared it (that
+/// process's overlay-isolate widget state is gone), so it's the right and
+/// only point to reclassify it. Wrapped in try/catch — a sweep failure must
+/// never crash engine startup, and there's always a later opportunity: the
+/// next engine start sweeps whatever's still lingering.
+Future<void> _sweepAbandonedIntents() async {
+  try {
+    final store = await _ensureIntentStore();
+    if (store == null) {
+      debugPrint('⚠️ Skipping abandoned-intent sweep — IntentStore unavailable');
+      return;
+    }
+    final swept = await _withTimeout('IntentStore.sweepOpenToAbandoned()', store.sweepOpenToAbandoned());
+    if (swept != null && swept > 0) {
+      debugPrint('🧹 Swept $swept abandoned intent(s)');
+    }
+  } catch (e) {
+    debugPrint('⚠️ Failed to sweep abandoned intents (non-fatal): $e');
+  }
 }
 
 /// Opens `_intentStore` if it isn't already open, retrying on every call
@@ -624,6 +701,13 @@ class _OverlayRootState extends State<OverlayRoot> {
     if (trimmed.isEmpty) return;
 
     final declaredAt = DateTime.now();
+    // Computed ONCE and reused for both the widget state and the relay
+    // below — calling _generateClientId twice (once here, once inside the
+    // old setState callback) would mint two DIFFERENT ids for the same
+    // intent, since it includes a random suffix. That would break the
+    // dismiss-time relay's ability to find this row at all (markIntentDone
+    // is keyed on clientId).
+    final clientId = _generateClientId(declaredAt);
     debugPrint(
       '📝 Intent declared: "$trimmed" (source: $source) at $declaredAt',
     );
@@ -632,9 +716,25 @@ class _OverlayRootState extends State<OverlayRoot> {
       _intentText = trimmed;
       _intentSource = source;
       _declaredAt = declaredAt;
-      _intentClientId = _generateClientId(declaredAt);
+      _intentClientId = clientId;
       _mode = _OverlayMode.bubble;
     });
+
+    // Relayed at DECLARATION time, not dismissal — this is what lets the
+    // intent survive a process death before the bubble is ever dismissed
+    // (reboot, OEM kill): the row already exists the moment the user
+    // declares it. See docs/DATA_MODEL.md §4 and _relayDeclaredIntent's doc.
+    // completedAt is a required IntentEvent field but is IGNORED by
+    // insertOpenIntent (which uses declaredAt as its own placeholder), so
+    // declaredAt is passed for both — there is no real completion yet.
+    _relayDeclaredIntent(IntentEvent(
+      clientId: clientId,
+      kind: IntentKind.intent,
+      source: _intentSourceFromString(source),
+      text: trimmed,
+      declaredAt: declaredAt,
+      completedAt: declaredAt,
+    ));
 
     // Read density BEFORE the awaits (avoids using context across an async gap).
     // showOverlay() sizes the window in raw device pixels, so convert dp -> px.
@@ -670,7 +770,9 @@ class _OverlayRootState extends State<OverlayRoot> {
 
     // Relayed to the background engine (the sole DB writer — see CLAUDE.md
     // §3) via the same-process IsolateNameServer port — see
-    // _intentWritePortName for why this replaced shareData().
+    // _intentWritePortName for why this replaced shareData(). Atomic — no
+    // separate declare/dismiss step, since there's no bubble to later
+    // dismiss (see _relayNoIntent's doc).
     final event = IntentEvent(
       clientId: _generateClientId(now),
       kind: IntentKind.noIntent,
@@ -679,7 +781,7 @@ class _OverlayRootState extends State<OverlayRoot> {
       declaredAt: now,
       completedAt: now,
     );
-    _relayIntentEvent(event);
+    _relayNoIntent(event);
 
     await FlutterOverlayWindow.closeOverlay();
     // Tells the background isolate this is a REAL close (not the
@@ -695,18 +797,13 @@ class _OverlayRootState extends State<OverlayRoot> {
       'declared at $_declaredAt, dismissed at $dismissedAt, active for $activeFor',
     );
 
-    // Same relay as _submitNoIntent above. _declaredAt/_intentClientId are
+    // Only clientId + completedAt relayed here — kind/source/text/declaredAt
+    // were already persisted by _submitIntent's declare-time relay above;
+    // this just marks that same row (matched by clientId) done. See
+    // IntentDismissal's doc and docs/DATA_MODEL.md §4. _intentClientId is
     // always non-null here: this is only reachable from bubble mode, which
-    // _submitIntent only enters after setting both.
-    final event = IntentEvent(
-      clientId: _intentClientId!,
-      kind: IntentKind.intent,
-      source: _intentSourceFromString(_intentSource),
-      text: _intentText,
-      declaredAt: _declaredAt!,
-      completedAt: dismissedAt,
-    );
-    _relayIntentEvent(event);
+    // _submitIntent only enters after setting it.
+    _relayDismissal(IntentDismissal(clientId: _intentClientId!, completedAt: dismissedAt));
 
     await FlutterOverlayWindow.closeOverlay();
     // Tells the background isolate this is a REAL close (not the
