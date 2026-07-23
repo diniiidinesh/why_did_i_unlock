@@ -921,7 +921,9 @@ class _OverlayRootState extends State<OverlayRoot> {
     IsolateNameServer.removePortNameMapping(_overlayConfigPortName);
     final configPort = ReceivePort();
     IsolateNameServer.registerPortWithName(configPort.sendPort, _overlayConfigPortName);
+    debugPrint('🔧 Overlay: config reply port registered');
     configPort.listen((message) {
+      debugPrint('📥 Overlay: received config reply: $message');
       final map = message as Map;
       final rawPresets = (map['presets'] as List?) ?? const [];
       if (mounted) {
@@ -930,6 +932,9 @@ class _OverlayRootState extends State<OverlayRoot> {
               .map((p) => CapturePreset(id: (p as Map)['id'] as int, label: p['label'] as String))
               .toList();
         });
+        debugPrint('📥 Overlay: _presets now has ${_presets.length} entr${_presets.length == 1 ? 'y' : 'ies'}');
+      } else {
+        debugPrint('⚠️ Overlay: config reply arrived but widget was unmounted, dropped');
       }
     });
     // Port registration above MUST complete before this request is sent —
@@ -948,6 +953,7 @@ class _OverlayRootState extends State<OverlayRoot> {
   /// screen rather than staying stale for this cached engine's entire
   /// lifetime.
   void _requestPresets() {
+    debugPrint('📮 Overlay: sending requestPresets');
     _sendToBackground({'type': 'requestPresets'});
   }
 
