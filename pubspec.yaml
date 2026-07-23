@@ -38,6 +38,11 @@ dependencies:
   shared_preferences: ^2.3.2
   sqflite: ^2.4.3
   path: ^1.9.1
+  # About screen (Sprint 4, T5): mailto feedback + placeholder privacy-policy/Play
+  # links. No new permission or network dependency on its own — url_launcher just
+  # hands the URI to the OS (an email app / browser), matching the local-first
+  # stance (CLAUDE.md SS11) since the app itself still makes no network calls.
+  url_launcher: ^6.3.1
 
 dev_dependencies:
   flutter_test:
