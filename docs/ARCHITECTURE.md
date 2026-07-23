@@ -353,3 +353,64 @@ background engine.
   daemon's own log (`~/.gradle/daemon/<ver>/daemon-<pid>.out.log`) for "finished
   executing the build" before concluding it's a real hang; `cd android && ./gradlew
   --stop` then retry if it's stale. Also in CLAUDE.md §7.
+
+## 8. Debugging playbook — recognizing recurring bug classes
+
+This codebase has now hit the same handful of root causes repeatedly, in different
+disguises. Written 2026-07-24 after two more instances were found in one testing
+session (both in `docs/BACKLOG.md`: the stale overlay-preset-cache bug, and the
+manual-trigger-pollutes-cooldown bug) — so the pattern, not just the individual bugs,
+is documented here for whoever debugs the next one.
+
+### 8.1 "It works, but only after I do X (reopen the app / reboot / wait)"
+
+This exact shape of symptom has a name in this codebase: **a long-lived cached engine
+is holding stale state, and nothing re-fetches it.** Three real bugs have had this
+shape:
+
+- The `shareData()` transport hijack (Sprint 3) — worked once, then silently died
+  until reboot.
+- The config-relay race (T11) — worked until one lost message, then permanently
+  empty until reboot.
+- The stale-preset-cache bug (Sprint 4, `docs/BACKLOG.md`) — worked until an edit
+  in Manage Options, then permanently stale until reboot.
+
+**Why reboot is always the "fix":** the overlay engine (`docs/ARCHITECTURE.md` §1) is
+cached and only destroyed by a full process kill — not by `closeOverlay()`, not by
+reopening the main UI app (a different engine entirely), not by repeated real unlocks.
+A reboot is simply the most reliable way a tester stumbles into killing that cached
+process. **If a symptom "only happens once per install" or "only clears on reboot,"
+suspect a value that's fetched once (at `initState`, or once at engine start) and
+never refreshed — find where that fetch happens, and check every code path that
+SHOULD invalidate it but doesn't call it again.** In `lib/main.dart`, search for
+`_requestPresets()`, `_ensureIntentStore()`, and any `IsolateNameServer`
+`ReceivePort`/`registerPortWithName` pair as the places this class of bug tends to
+live.
+
+### 8.2 "A test-only action affected real behavior"
+
+The manual-trigger-pollutes-cooldown bug is the general shape: **a code path
+explicitly built to be test-only (`_showCaptureScreenManually`, T6's "show me the
+prompt now") protected itself against ONE side effect (`_logUnlock`, so it wouldn't
+inflate `unlock_log` stats) but not against ANOTHER (the relayed answer still writing
+to `intent_log`, which cooldown reads from).** The lesson: when adding a "just for
+testing" entry point, grep for **every** downstream write/read it can reach, not just
+the first one that comes to mind — `docs/DATA_MODEL.md`'s tables (`unlock_log`,
+`intent_log`, `intent_preset`) are the exhaustive list of state that can leak between
+a test action and real behavior. If a new manual/debug trigger is ever added, ask
+"what does answering this prompt eventually write to, and does anything downstream
+(cooldown, insight queries, export) read that without caring where it came from?"
+
+### 8.3 Reading the logs — the emoji convention
+
+`debugPrint` calls throughout `lib/main.dart` are prefixed with an emoji by rough
+category, consistently enough to `grep`/scan for a specific class of event:
+🔓/🔒 unlock/lock events · 🟣 overlay window shown · 🎲 triage decision (cooldown/
+probability) · 📮/📤/📥 config-relay (presets) traffic · 💽 store opened · 🧹 abandoned-
+intent sweep · 📝/✅/🤷 intent declared/dismissed/no-intent · 🧪 manual test trigger ·
+⚠️ a recoverable/logged failure · ⏱️ a `_withTimeout` guard firing (should be
+**~never** — see §5's `plugin_timeout` note). A capture-screen-not-appearing report
+should always start by grepping for 🔓 (did the unlock even reach `backgroundMain`?),
+then 🎲 (was it skipped, and why?), then 🟣 (did `showOverlay()` actually get called?)
+— that ordering isolates which of the three layers (native → background → overlay)
+the problem is in before touching any code.

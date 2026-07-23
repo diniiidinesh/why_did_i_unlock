@@ -6,14 +6,14 @@
 
 On every phone unlock, a prompt asks **"What are you unlocking for?"** You declare an intent (a preset or custom text), and it persists as a **floating bubble** across all apps until you dismiss it — a constant, gentle reminder of *why* you picked up your phone. An optional countdown timer is planned. The defensible idea is the **bubble + timer** accountability loop, not the unlock prompt alone.
 
-## Status (2026-07-22)
+## Status (2026-07-24)
 
 - **v0.3.0 shipped** (tagged 2026-07-17), verified on a real device: unlock/lock detection, intent-capture screen (presets + custom text), the bubble showing the declared intent, manual dismiss, and debug logging.
 - **v0.3.x** (reliability fixes merged to `main`, tagged `v0.3.1`): monitoring survives app-swipe-out, restarts after reboot, full-display capture screen.
-- **v0.4.0 shipped** (merged to `main`, PR #5): meaningful presets, OK button, "Just Like That" honest-no-intent option, master prompt on/off toggle, direct-boot auto-restart.
-- **v0.4.1 shipped** (merged to `main`, PR #6): capture-screen thumb-zone layout revamp, "Just Like That" pill styling.
-- **Sprint 3 built, on branch** (`sprint3-storage-triage-history`, not yet merged): local intent-history storage (`sqflite`), cooldown+probability prompt triage, a minimal history view. See `CLAUDE.md` §3 for the as-built design.
-- **Not built yet:** timer/countdown (the actual bubble+timer differentiator, next priority), voice input, dashboard/aggregate analytics, onboarding, triage settings UI.
+- **v0.4.0 / v0.4.1 shipped** (merged to `main`, PRs #5/#6): meaningful presets, OK button, "Just Like That" honest-no-intent option, master prompt on/off toggle, direct-boot auto-restart, capture-screen thumb-zone layout.
+- **v0.5.0 shipped** (Sprint 3, merged to `main`): local intent-history storage (`sqflite`), cooldown+probability prompt triage, a minimal history view.
+- **v0.6.0 shipped** (Sprint 4 app shell, merged to `main` 2026-07-24): 5-step onboarding, Settings/Status & troubleshooting/About/Manage-options screens, schema v2 (`unlock_log`, declare/dismiss lifecycle, presets as a real table), windowed insight queries, close-capture-on-lock, a one-tap battery-optimization-exemption dialog, `minSdk`/`targetSdk` pinned to 29/36 for Play submission. Two known bugs found during integration are tracked in `docs/BACKLOG.md` (stale overlay preset cache until reboot; a manual test trigger arming real cooldown) — see that file before touching triage or the config relay.
+- **Not built yet:** timer/countdown (the actual bubble+timer differentiator, next priority), voice input, CSV export (T17), Home insight cards (T18), the two known bugs above, a store listing (brand name still unresolved — `CLAUDE.md` §12).
 
 This is a work-in-progress shared informally with friends via sideloaded APK — not on the Play Store.
 

@@ -128,7 +128,8 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 
 ## Settings / configurability
 
-- **[P2] Configurable durations via a Settings screen** — cooldown (shipped hardcoded at **1 minute**), probability (shipped hardcoded at **50%**), and, once built, timer duration should become user-configurable via presets + custom (e.g. 5/10/15 min), mirroring the intent-preset UI. Both Sprint 3 triage values are named constants + a `CompositePromptPolicy` so wiring a future presets UI is small, not a rework. See also the "Triage customization UI" item above.
+- **[DONE 2026-07-24] T13 — Settings screen** — `lib/settings_screen.dart` (Cursor), merged into `sprint4-app-shell` and wired into `HomeScreen`'s nav (Cursor's commit left it self-contained/unwired; Claude Code added the link). Prompts on/off, cooldown/probability as curated preset chips + validated Custom entry (clamped, with a SnackBar on out-of-range input — defense in depth on top of `AppSettings`'s own clamping), quiet-hours toggle + time pickers, links to Manage options and the privacy policy. Supersedes the item below.
+- ~~**[P2] Configurable durations via a Settings screen**~~ — done via T13 above. Timer duration isn't configurable yet since the timer feature itself doesn't exist (`CLAUDE.md` §3/§10) — revisit when it ships.
 - **[decision] Bubble customization (color/size/opacity)** — deferred correctly: needs (a) a preferences-persistence layer (likely `shared_preferences`, distinct from the `sqflite` intent log) and (b) monetization clarity, since this was a candidate Pro-gated feature and free-vs-Pro is undecided (CLAUDE.md §11). Don't build gating before the model is chosen.
 
 ## T6 "no prompt at all" investigation (2026-07-23) — likely resolved, needs one confirmation

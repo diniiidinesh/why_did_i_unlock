@@ -17,7 +17,7 @@ const String appDisplayName = 'Why Did I Unlock';
 /// dependency count low, `CLAUDE.md` §7) — must be bumped by hand alongside
 /// `pubspec.yaml`'s `version:` when that changes. [AboutScreen.version]
 /// exists specifically so tests don't depend on this staying in sync.
-const String appVersion = '0.5.0+7';
+const String appVersion = '0.6.0+8';
 
 /// Real contact address is still an open `[P1]` in `docs/BACKLOG.md`
 /// ("dedicated contact email, not plus-addressing"). Deliberately an
