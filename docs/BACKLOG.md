@@ -106,12 +106,12 @@ doing nothing) as one cause, not several.
   `ManualPromptTrigger` — Dart allows this, no compile break, but the richer signal is
   unused until Status reads it).
 
-## Docs housekeeping (assessed 2026-07-23, not yet actioned)
+## Docs housekeeping (assessed 2026-07-23)
 
-- **[P2] `TEST_PLAN.md` case numbering is fragmented** — 1–9, 5e/5f/5g sub-cases, 10–12, 13–18, 20–27, 30–35, 40–42, 45–58, grown organically across sub-sections. Not broken, just hard to scan. A renumbering pass is possible but risks breaking hand-written cross-references elsewhere — needs care, not urgency.
-- **[P2] `ARCHITECTURE.md` §3 (Channels)** has grown into a long nested bullet list (four `IsolateNameServer` ports, each a paragraph) — consider a table like §2 already uses, for scannability.
-- **[P2] `README.md` doc-map audit** — unverified whether `docs/debug/` and `docs/PRIVACY_POLICY.md` have rows (added `docs/erd/` and `docs/PLAY_SUBMISSION.md` this session; less certain about these two). Five-minute check, one file.
-- **[P2] `DATA_MODEL.md` §11/§12 numbering** — fixed a mixup here once this session; worth one glance to confirm it stayed fixed.
+- **[P2] `TEST_PLAN.md` case numbering is fragmented** — 1–9, 5e/5f/5g sub-cases, 10–12, 13–18, 20–27, 30–35, 40–42, 45–58, grown organically across sub-sections. Not broken, just hard to scan. A renumbering pass is possible but risks breaking hand-written cross-references elsewhere — needs care, not urgency. **Still open.**
+- **[P2] `ARCHITECTURE.md` §3 (Channels)** has grown into a long nested bullet list (five `IsolateNameServer` ports now, each a paragraph) — consider a table like §2 already uses, for scannability. **Still open.**
+- **[DONE 2026-07-23] `README.md` doc-map audit** — real gaps found and fixed: `docs/DATA_MODEL.md` had **no row at all** despite being one of the most-referenced docs; `docs/PRIVACY_POLICY.md` and `docs/debug/` were also missing. The `docs/erd/` row's description was stale too (said "not updated after sign-off," contradicting the update-log policy actually adopted). All fixed in one pass.
+- **[DONE 2026-07-23] `DATA_MODEL.md` §11/§12 numbering** — checked, sequential 1–12, stayed correct since the earlier fix.
 
 ## Exploratory (bigger bets — need scoping before they enter any sprint)
 
