@@ -84,23 +84,43 @@ Run with a second terminal open on `flutter logs -d A063`. Cases 30–33 are the
 **upgrade-safety gate** — run them before anything else, because every later case
 assumes the migration landed correctly.
 
-Reading the DB directly (several cases below need it):
-```bash
-adb shell "run-as com.whydidiunlock.why_did_i_unlock sqlite3 databases/intents.db 'SELECT skip_reason, COUNT(*) FROM unlock_log GROUP BY skip_reason;'"
+Reading the DB directly (several cases below need it): the on-device `sqlite3` CLI is
+**not reliably present** — confirmed absent on the test device (`run-as: exec failed for
+sqlite3: No such file or directory`). Use the pull-and-query-locally approach instead,
+which needs nothing installed beyond what's already a project dependency
+(`sqflite_common_ffi`):
+```powershell
+$adb = "<path to adb.exe>"
+$pkg = "com.whydidiunlock.why_did_i_unlock"
+cmd /c "`"$adb`" exec-out run-as $pkg cat databases/intents.db > `"$env:TEMP\pulled_intents.db`""
+cmd /c "`"$adb`" exec-out run-as $pkg cat databases/intents.db-wal > `"$env:TEMP\pulled_intents.db-wal`""
+cmd /c "`"$adb`" exec-out run-as $pkg cat databases/intents.db-shm > `"$env:TEMP\pulled_intents.db-shm`""
 ```
+**Pull all three files, not just `intents.db`** — this database runs in WAL mode, so
+recent writes can sit in the `-wal` sidecar until SQLite checkpoints them into the main
+file. Pulling `intents.db` alone can show a false "empty" result (confirmed on-device
+2026-07-23: `intents.db` alone was a stale, correctly-seeded-but-otherwise-empty
+45KB file across an entire test session, while its `-wal` sidecar held 280KB of the
+actual unlock/intent history). Query the pulled file with a throwaway Dart script using
+`sqflite_common_ffi` (same package this project's own tests already depend on) —
+`databaseFactoryFfi.openDatabase(path)` picks up the sibling `-wal`/`-shm` files
+automatically as long as they share the base filename and sit in the same directory.
+Requires **`run-as`, which needs a debuggable build** (`flutter run` without
+`--release` — a release build's `android:debuggable=false` blocks `run-as` entirely,
+which is expected, not a bug: see `CLAUDE.md` §5's security review).
 
 | # | Case | Status | Expected behaviour / what to look for |
 |---|---|---|---|
 | **30** | **Upgrade install over v0.5.0+7** (do NOT uninstall first) | ❌ | App opens, no crash. This is the only way to exercise the real `onUpgrade` — the automated migration test builds its v1 file in `sqflite_common_ffi`, which is exactly the backend that has previously masked an Android-only SQL failure. |
 | 31 | After #30, open History | ❌ | Every pre-upgrade event still listed, unchanged. Confirms existing rows survived with `status` defaulted to `done`. |
 | 32 | After #30, verify the new tables exist | ❌ | `sqlite3 … '.tables'` shows `intent_log`, `unlock_log`, `intent_preset`; `SELECT COUNT(*) FROM intent_preset` = 5. |
-| 33 | Fresh install (uninstall first) | ❌ | Exercises `onCreate` (a different path from #30 — it runs v1 schema + v2 migration in one shot). Prompt still appears on next unlock; presets seeded. |
-| **34** | **Normal unlock → prompt shown** | ❌ | Log: `🎲 Triage: prompting` then `🟣 showOverlay called`. DB: a `unlock_log` row with `prompt_shown=1`, `skip_reason` NULL. |
-| 35 | Unlock blocked by cooldown | ❌ | Log: `COOLDOWN active (elapsed … < 0:01:00)`. DB: row with `skip_reason='cooldown'`. |
-| 36 | Unlock blocked by probability | ❌ | Log: `PROBABILITY miss (p=0.5)`. DB: row with `skip_reason='probability'`. **Cooldown and probability must remain separately identifiable** — that distinction is what made an earlier "looks broken" run diagnosable. |
-| 37 | Prompts toggled OFF in-app → unlock | ❌ | **Behaviour change:** previously produced no trace at all; now logs `🔕 Prompts disabled` **and writes a row** with `skip_reason='prompts_disabled'`. No prompt appears. |
-| 38 | Unlock while a bubble/capture screen is already live | ❌ | Log: `🟡 Overlay already active`. DB: `skip_reason='overlay_active'`. |
-| 39 | Revoke "Display over other apps", then unlock | ❌ | Log: `📋 Has overlay permission: false`. DB: `skip_reason='no_permission'`. This row is the highest-value one in the table — it's silent breakage becoming visible. |
+| 33 | Fresh install (uninstall first) | ✅ | Verified on-device 2026-07-23: fresh `intent_preset` table seeded with all 5 defaults, enabled, `deleted_at` null. Confirms `onCreate` (schema-creation-plus-seed-in-one-shot path, distinct from `onUpgrade`) works correctly. |
+| **34** | **Normal unlock → prompt shown** | ✅ | Verified on-device 2026-07-23: `unlock_log` shows multiple rows with `prompt_shown=1, skip_reason=null`, each with a matching `intent_log` row from that session. |
+| 35 | Unlock blocked by cooldown | ✅ | Verified on-device 2026-07-23: 5 separate `unlock_log` rows with `skip_reason='cooldown'` across the session. |
+| 36 | Unlock blocked by probability | ✅ | Verified on-device 2026-07-23: 3 separate `unlock_log` rows with `skip_reason='probability'`. |
+| 37 | Prompts toggled OFF in-app → unlock | ❌ | Not yet run. |
+| 38 | Unlock while a bubble/capture screen is already live | ✅ | Verified on-device 2026-07-23: one `unlock_log` row with `skip_reason='overlay_active'`, landing right after a declared-but-undismissed intent, exactly the scenario expected. |
+| 39 | Revoke "Display over other apps", then unlock | ✅ | Verified on-device 2026-07-23 — arose naturally before the fresh install's permission was granted: `unlock_log` row 1 shows `skip_reason='no_permission'`. |
 | **40** | **Quiet hours suppresses prompts** | ❌ | No Settings UI until T13, so set it by hand: `adb shell "run-as … sqlite3"` won't work (it's `shared_preferences`, not sqflite) — easiest is to wait for T13, or temporarily flip `AppSettings.defaultQuietHoursEnabled` to `true` in a debug build. Expect `🌙 Quiet hours active`, `skip_reason='quiet_hours'`. |
 | 41 | **Overnight quiet-hours window across midnight** | ❌ | With a 22:00–07:00 window: suppressed at 23:00 **and** at 03:00; NOT suppressed at 12:00. The wraparound logic is unit-tested, but confirm the device's local timezone resolves as expected (the policy uses local `DateTime`, not UTC). |
 | 42 | Declare → dismiss still works end-to-end | ❌ | Regression check: `_submitIntent`/`_dismissBubble` are untouched by T9, so behaviour must be identical to v0.5.0+7. Row written, bubble appears and closes. |
@@ -118,17 +138,18 @@ separate messages (`declare` then `dismiss`) instead of one full event sent at d
 Read `docs/DATA_MODEL.md` §4 before running these if the "why" isn't obvious from the
 case descriptions alone.
 
-```bash
-adb shell "run-as com.whydidiunlock.why_did_i_unlock sqlite3 databases/intents.db 'SELECT client_id, status, text, declared_at, completed_at FROM intent_log ORDER BY id DESC LIMIT 5;'"
-```
+Pull `intents.db` + `-wal` + `-shm` per the technique at the top of the Sprint 4 section
+above and query locally — the on-device `sqlite3` CLI isn't reliably available, and
+pulling `intents.db` alone can show a false-empty result if writes are still sitting in
+the WAL sidecar (hit exactly this on 2026-07-23; see that section's note).
 
 | # | Case | Status | Expected behaviour |
 |---|---|---|---|
-| 47 | Declare an intent (tap a preset) | ❌ | Log: `📝 Intent declared` then `📂 Intent opened`. DB: a row appears **immediately**, `status='open'`, `completed_at` equal to `declared_at` (the placeholder) — before the bubble is ever dismissed. |
-| 48 | Dismiss that bubble | ❌ | Log: `✅ Intent dismissed` then `✅ Intent marked done`. DB: the **same row** (same `client_id`) now `status='done'`, `completed_at` updated to the real dismiss time, `declared_at` unchanged. |
-| **49** | **Declare an intent, then force-stop or reboot before dismissing** | ❌ | The row from #47 must NOT disappear. On the next app/engine start, log shows `🧹 Swept 1 abandoned intent(s)` (or more, if several were open). DB: that row now `status='abandoned'`, text/timestamps intact. **This is the core guarantee T10 exists for** — compare against pre-Sprint-4 behaviour, where this exact sequence lost the intent entirely. |
-| 50 | "Just Like That" still works unchanged | ❌ | Log: `🤷 No intent declared` then `💾 Stored no-intent event`. DB: one row, `status='done'` immediately — no `open` row ever appears for this path (it's atomic, not declare-then-dismiss). Regression check: confirms the no-intent path wasn't accidentally routed through the new two-message logic. |
-| 51 | Declare, dismiss, declare again (two intents in sequence) | ❌ | Two distinct rows, both `status='done'`, different `client_id`s. Confirms the per-intent `clientId` generated in `_submitIntent` isn't reused or leaked across intents. |
+| 47 | Declare an intent (tap a preset) | ✅ | Verified on-device 2026-07-23: row appears immediately with `status='open'`, `completed_at` equal to `declared_at` (the placeholder), well before dismissal. |
+| 48 | Dismiss that bubble | ✅ | Verified on-device 2026-07-23: same `client_id`, `status` flips to `done`, `completed_at` updated to the real dismiss time, `declared_at` unchanged. Confirmed across 3 separate declare→dismiss cycles in one session. |
+| **49** | **Declare an intent, then force-stop or reboot before dismissing** | 🟡 | **Half confirmed on-device 2026-07-23 — the critical half.** Declared an intent, force-stopped before dismissing: the row survived as `status='open'` rather than vanishing (the core guarantee). **Not yet confirmed:** the `open`→`abandoned` sweep itself. Force-stop kills the process and disables `START_STICKY` auto-restart until manual relaunch (`ARCHITECTURE.md` §6) — the sweep only runs on the next `backgroundMain` start, which hasn't happened yet since the force-stop. **Next step: reopen the app, then re-pull and confirm this row now reads `status='abandoned'`.** |
+| 50 | "Just Like That" still works unchanged | ❌ | Not yet run — no `kind='no_intent'` row appears anywhere in the session pulled 2026-07-23. |
+| 51 | Declare, dismiss, declare again (two intents in sequence) | ✅ | Verified on-device 2026-07-23: 3 distinct completed declare→dismiss cycles in one session, each with its own `client_id`, none reused or leaked. |
 | 52 | A `dismiss` message with no prior `declare` reaching the store (simulate: kill the app between tapping a preset and the relay landing) | ❌ | Hard to force deliberately on-device; if observed naturally, expect no crash and no row — `markIntentDone`'s `WHERE status='open'` clause matches nothing, silently. Log would show `✅ Intent marked done` (the relay call succeeded) but the DB row never existed to begin with. Note if this ever happens; not expected to reproduce easily. |
 | **53** | **"Show me the prompt now" (Status screen, T6) — blocked until T6 lands** | ⛔ | Tap the button while prompts are disabled/in cooldown/in quiet hours → the capture screen still appears (bypasses triage by design). No `unlock_log` row is written for it (check via the case-30 `sqlite3` query — count should not increase). Tap it twice quickly → second tap is a no-op, logged `🧪 Manual prompt trigger: overlay already active, skipping` (same guard a real double-unlock hits). Revoke overlay permission first → tapping logs `🧪 Manual prompt trigger: permission not granted, cannot show` and nothing appears — confirms the button surfaces a real permission problem rather than silently succeeding. |
 
@@ -150,11 +171,11 @@ works at all, not just that the data is correct.
 
 | # | Case | Status | Expected behaviour |
 |---|---|---|---|
-| **54** | **First unlock after a fresh install/reboot (cold overlay engine)** | ❌ | Capture screen shows the 5 seeded default presets. Log: `📤 Sent 5 preset(s) to overlay` (background) with no `⚠️ Could not find overlay-config reply port` warning before it — confirms the overlay's port was registered before the reply was sent, not raced. |
+| **54** | **First unlock after a fresh install/reboot (cold overlay engine)** | ✅ | Verified on-device 2026-07-23: preset declares from the very first session all show correct `preset_id` values, which is only possible if the config relay delivered presets successfully on the overlay engine's first cold start. Log line itself (`📤 Sent N preset(s) to overlay`) not independently screenshotted this pass — the DB evidence is conclusive regardless. |
 | 55 | Rename a preset (once T16 lands — until then, edit `intent_preset.label` directly via `sqlite3`), then lock and unlock | ❌ | The capture screen shows the NEW label on this next unlock — confirms the re-request-on-return-to-capture-mode path, not just the cold-start one. |
 | 56 | Disable a preset (or edit `intent_preset.enabled=0` via `sqlite3`), then unlock | ❌ | That preset's pill no longer appears; the rest render unchanged. |
-| 57 | Declare an intent from a preset pill, check the DB | ❌ | `adb shell "run-as com.whydidiunlock.why_did_i_unlock sqlite3 databases/intents.db 'SELECT text, preset_id FROM intent_log ORDER BY id DESC LIMIT 1;'"` — `preset_id` is populated (non-null), matching the tapped preset's `id`. This is the regression check for the T10-era gap where `presetId` was always null because presets weren't relayed yet. |
-| 58 | Declare from the custom text field (not a preset pill) | ❌ | Same query as #57 — `preset_id` is `NULL`. Confirms custom text never gets a spurious preset link. |
+| 57 | Declare an intent from a preset pill, check the DB | ✅ | Verified on-device 2026-07-23: 3 preset-sourced declares, each `preset_id` correctly matching the tapped preset (`Commute`→5, `Food Order`→4 twice). Closes the T10-era gap where `presetId` was always null. |
+| 58 | Declare from the custom text field (not a preset pill) | ✅ | Verified on-device 2026-07-23: a custom-text declare (typed "Messages" rather than tapping the preset) correctly recorded `source='custom'`, `preset_id=null` — confirms custom text never gets a spurious preset link even when it happens to match a preset's label. |
 
 **What would look broken but isn't:** a very brief (sub-second, likely imperceptible)
 render of the capture screen with **no pills at all** — just the text field and "Just
