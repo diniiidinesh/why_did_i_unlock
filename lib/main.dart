@@ -6,8 +6,8 @@ import 'dart:ui' show IsolateNameServer;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
+import 'app_settings.dart';
 import 'history_screen.dart';
 import 'intent_store.dart';
 import 'prompt_policy.dart';
@@ -42,38 +42,16 @@ const double _bubbleHeightDp = 56;
 /// engine), NOT by the main UI — see the architecture note on backgroundMain.
 const MethodChannel _unlockChannel = MethodChannel('com.whydidiunlock/unlock');
 
-/// SharedPreferences key for the master on/off toggle. Kept as its own
-/// standalone stored value — not folded into a hypothetical "settings blob"
-/// — so future schedule-based rules (e.g. quiet hours) can be added as
-/// separate stored state later without changing what this switch means.
-/// shared_preferences (not sqflite) because this is a single flag, not the
-/// intent-history log; it works fine from the headless background engine,
-/// since — unlike the overlay engine — it has full plugin registration.
-const String promptsEnabledKey = 'prompts_enabled';
-
-/// Whether the capture screen should be shown right now. Today this only
-/// checks the master toggle above; this is the seam where future
-/// schedule-based rules would ALSO be checked, as additional conditions —
-/// not merged into the master toggle's own meaning.
-///
-/// Uses SharedPreferencesAsync (not SharedPreferences.getInstance()), which
-/// caches a static per-isolate singleton on first use — a real bug here,
-/// since the toggle is written from HomeScreen's engine but read from the
-/// separate persistent background engine's isolate. The cached copy in the
-/// background isolate never saw writes from the other engine. Async reads
-/// the platform directly on every call, no isolate-local caching.
-Future<bool> _shouldPrompt() async {
-  final prefs = SharedPreferencesAsync();
-  return await prefs.getBool(promptsEnabledKey) ?? true;
-}
-
-/// Time-suppressed cooldown floor + probability gate — see the Sprint 3 plan
-/// rationale (prompting every unlock causes habituation; a fixed cadence is
-/// itself predictable enough to be tuned out). No settings UI yet; both
-/// values are named constants so a future presets UI is a small change, not
-/// a rework (mirrors how `intentMaxInputLength` was made a constant).
-const Duration intentCooldown = Duration(minutes: 1);
-const double promptProbability = 0.5;
+/// Single, isolate-safe access point for every stored setting (prompts
+/// on/off, cooldown, probability, quiet hours — see `lib/app_settings.dart`).
+/// Stateless and cheap to construct (every method opens a fresh
+/// `SharedPreferencesAsync` internally, never a cached instance — see that
+/// file's class doc for why a cached copy is a real, previously-hit bug when
+/// a setting is written from the main UI engine and read from this
+/// persistent background engine's separate isolate). One shared `const`
+/// instance rather than `AppSettings()` at every call site purely for
+/// readability; it carries no state to share.
+const AppSettings _appSettings = AppSettings();
 
 final Random _clientIdRandom = Random();
 
@@ -89,19 +67,6 @@ String _generateClientId(DateTime declaredAt) {
 IntentSource _intentSourceFromString(String source) {
   return source == 'preset' ? IntentSource.preset : IntentSource.custom;
 }
-
-/// Checked individually (not wrapped in a single CompositePromptPolicy) so
-/// _showCaptureScreen can log EXACTLY which gate skipped a given unlock —
-/// cooldown-active and probability-missed look identical from the outside
-/// otherwise, which made a long run of skips impossible to diagnose (a
-/// genuinely long unlucky probability streak is indistinguishable from a
-/// stuck/bugged cooldown unless logged separately). Single shared instances
-/// (not rebuilt per unlock) so ProbabilityPromptPolicy's internal Random
-/// carries state across calls rather than reseeding from scratch each time.
-/// CompositePromptPolicy itself is still available (and unit-tested) in
-/// prompt_policy.dart for anywhere an opaque AND-of-policies is wanted.
-final TimeCooldownPolicy _cooldownPolicy = TimeCooldownPolicy(intentCooldown);
-final ProbabilityPromptPolicy _probabilityPolicy = ProbabilityPromptPolicy(promptProbability);
 
 void main() {
   runApp(const MyApp());
@@ -233,12 +198,12 @@ void backgroundMain() {
   _unlockChannel.setMethodCallHandler((call) async {
     if (call.method == 'onUnlock') {
       debugPrint('🔓 UNLOCK EVENT RECEIVED at ${DateTime.now()}');
-      // Gate only the prompt — monitoring/logging above still runs either
-      // way, so turning this off doesn't stop the service, just the popup.
-      if (!await _shouldPrompt()) {
-        debugPrint('🔕 Prompts disabled, skipping');
-        return;
-      }
+      // The prompts-disabled/quiet-hours/permission/etc. triage all now
+      // happens INSIDE _showCaptureScreen, which is called unconditionally
+      // on every unlock — not gated here — because every unlock needs an
+      // unlock_log row regardless of outcome (docs/DATA_MODEL.md §3), and
+      // _showCaptureScreen is the one place already positioned to log
+      // exactly which gate fired.
       final args = (call.arguments as Map?) ?? const {};
       final width = (args['width'] as num?)?.toInt() ?? 0;
       final height = (args['height'] as num?)?.toInt() ?? 0;
@@ -366,18 +331,85 @@ Future<T?> _withTimeout<T>(String label, Future<T> future) async {
   }
 }
 
-/// Shows the intent-capture overlay on unlock. Lives at top level (not in a
-/// widget) because it runs in the headless background engine — see
-/// [backgroundMain]. [screenWidth]/[screenHeight] are the true display size in
-/// raw device pixels, provided by native (the headless engine can't read
-/// display metrics itself).
+/// Records one `unlock_log` row — see docs/DATA_MODEL.md §2/§3 for why this
+/// must run for EVERY unlock regardless of outcome, and why it happens AFTER
+/// the decision (and after `showOverlay()` on the shown path) rather than
+/// before: it must never sit on the ~500ms unlock-to-prompt path
+/// (`CLAUDE.md` §8), and it must never be able to suppress the prompt on
+/// failure. Wrapped in try/catch AND `_withTimeout` — belt and braces,
+/// matching the two independently-observed failure classes already hit in
+/// this codebase (a DB call that throws, and a plugin/DB call that never
+/// returns at all — `docs/ARCHITECTURE.md` §5).
+Future<void> _logUnlock({
+  required DateTime unlockedAt,
+  required bool promptShown,
+  SkipReason? skipReason,
+}) async {
+  try {
+    final store = await _ensureIntentStore();
+    if (store == null) {
+      debugPrint('⚠️ Dropping unlock_log row — IntentStore unavailable');
+      return;
+    }
+    await _withTimeout(
+      'IntentStore.insertUnlock()',
+      store.insertUnlock(unlockedAt: unlockedAt, promptShown: promptShown, skipReason: skipReason),
+    );
+  } catch (e) {
+    debugPrint('⚠️ Failed to log unlock (non-fatal): $e');
+  }
+}
+
+/// Shows the intent-capture overlay on unlock — or decides not to, logging
+/// exactly why either way. Lives at top level (not in a widget) because it
+/// runs in the headless background engine — see [backgroundMain].
+/// [screenWidth]/[screenHeight] are the true display size in raw device
+/// pixels, provided by native (the headless engine can't read display
+/// metrics itself).
+///
+/// Called UNCONDITIONALLY on every unlock (the caller no longer gates on
+/// prompts-enabled before calling this) because every unlock needs an
+/// `unlock_log` row regardless of outcome — this function is the one place
+/// already positioned to log exactly which gate fired, so the gating logic
+/// lives here rather than being split across the channel handler and here.
+///
+/// Checks run cheapest/no-I/O first: prompts-enabled and quiet hours are a
+/// single batched settings read with no plugin or DB call, so a user who has
+/// turned prompts off (or is in a configured quiet window) never pays for the
+/// permission check or a DB round-trip. Permission, screen size, and
+/// overlay-active preserve their original relative order from before this
+/// task; cooldown/probability come last since they're the only checks that
+/// need the store.
 Future<void> _showCaptureScreen(int screenWidth, int screenHeight) async {
+  final unlockedAt = DateTime.now();
+  final settings = await _appSettings.loadSnapshot();
+
+  // Gate only the prompt — monitoring/logging below still runs either way
+  // (the unlock_log row is still written), so turning this off doesn't stop
+  // the service, just the popup.
+  if (!settings.promptsEnabled) {
+    debugPrint('🔕 Prompts disabled, skipping');
+    await _logUnlock(unlockedAt: unlockedAt, promptShown: false, skipReason: SkipReason.promptsDisabled);
+    return;
+  }
+
+  if (settings.quietHoursEnabled &&
+      !QuietHoursPolicy(settings.quietHoursWindow).shouldPrompt(PromptContext(now: unlockedAt))) {
+    debugPrint('🌙 Quiet hours active (${settings.quietHoursWindow}), skipping');
+    await _logUnlock(unlockedAt: unlockedAt, promptShown: false, skipReason: SkipReason.quietHours);
+    return;
+  }
+
   final hasPermission = await _withTimeout('isPermissionGranted()', FlutterOverlayWindow.isPermissionGranted());
   debugPrint('📋 Has overlay permission: $hasPermission');
-  if (hasPermission != true) return;
+  if (hasPermission != true) {
+    await _logUnlock(unlockedAt: unlockedAt, promptShown: false, skipReason: SkipReason.noPermission);
+    return;
+  }
 
   if (screenWidth <= 0 || screenHeight <= 0) {
     debugPrint('⚠️ Invalid screen size ($screenWidth x $screenHeight), skipping');
+    await _logUnlock(unlockedAt: unlockedAt, promptShown: false, skipReason: SkipReason.invalidScreenSize);
     return;
   }
 
@@ -388,39 +420,49 @@ Future<void> _showCaptureScreen(int screenWidth, int screenHeight) async {
   // and docs/debug/sprint3-session-log-2026-07-22.txt for the evidence.
   if (_overlayIsActive) {
     debugPrint('🟡 Overlay already active, skipping re-trigger');
+    await _logUnlock(unlockedAt: unlockedAt, promptShown: false, skipReason: SkipReason.overlayActive);
     return;
   }
 
   // Prompt triage: a deterministic cooldown floor (never re-prompt within
-  // intentCooldown of the last event), then a probability gate above it
-  // (unpredictable timing resists the habituation a fixed cadence causes —
-  // see the Sprint 3 plan / CLAUDE.md §9). _ensureIntentStore retries the
-  // open if a prior attempt failed (e.g. it raced credential-encrypted
-  // storage being locked pre-first-unlock, see that function's doc comment)
-  // instead of trusting a stale null forever; a still-null result here (a
-  // genuinely unavailable store, not just "hasn't opened yet") is treated as
-  // "no prior event," so the cooldown floor doesn't block this unlock rather
-  // than silently wedging the prompt entirely. Checked (and logged) as two
-  // separate steps — see _cooldownPolicy / _probabilityPolicy above for why:
-  // a long streak of skips is either "cooldown is stuck" (a real bug) or
-  // "unlucky probability draws" (working as intended), and a single
-  // clubbed-together log line can't tell you which, which is exactly what
-  // made an early test run look broken.
+  // the configured cooldown of the last event), then a probability gate
+  // above it (unpredictable timing resists the habituation a fixed cadence
+  // causes — see docs/DATA_MODEL.md / CLAUDE.md §9). Both policies are built
+  // FRESH from the just-loaded settings snapshot rather than held as
+  // module-level finals, so a change made in the Settings screen (T13) takes
+  // effect on the very next unlock with no engine restart — the whole reason
+  // AppSettings never caches a SharedPreferencesAsync instance (see that
+  // class's doc comment). _ensureIntentStore retries the open if a prior
+  // attempt failed (e.g. it raced credential-encrypted storage being locked
+  // pre-first-unlock, see that function's doc comment) instead of trusting a
+  // stale null forever; a still-null result here (a genuinely unavailable
+  // store, not just "hasn't opened yet") is treated as "no prior event," so
+  // the cooldown floor doesn't block this unlock rather than silently
+  // wedging the prompt entirely. Checked (and logged) as two separate steps
+  // — not a single CompositePromptPolicy — so a long streak of skips is
+  // diagnosable as "cooldown is stuck" (a real bug) vs. "unlucky probability
+  // draws" (working as intended), which a clubbed-together log line can't
+  // distinguish (this is what made an early Sprint 3 test run look broken).
   final store = await _ensureIntentStore();
   final lastCompletedAt = store == null
       ? null
       : await _withTimeout('IntentStore.lastCompletedAt()', store.lastCompletedAt());
-  final ctx = PromptContext(now: DateTime.now(), lastCompletedAt: lastCompletedAt);
-  if (!_cooldownPolicy.shouldPrompt(ctx)) {
+  final ctx = PromptContext(now: unlockedAt, lastCompletedAt: lastCompletedAt);
+
+  final cooldownPolicy = TimeCooldownPolicy(settings.cooldown);
+  if (!cooldownPolicy.shouldPrompt(ctx)) {
     final elapsed = lastCompletedAt == null ? null : ctx.now.difference(lastCompletedAt);
-    debugPrint('🎲 Triage: skipping — COOLDOWN active (elapsed $elapsed < $intentCooldown)');
+    debugPrint('🎲 Triage: skipping — COOLDOWN active (elapsed $elapsed < ${settings.cooldown})');
+    await _logUnlock(unlockedAt: unlockedAt, promptShown: false, skipReason: SkipReason.cooldown);
     return;
   }
-  if (!_probabilityPolicy.shouldPrompt(ctx)) {
-    debugPrint('🎲 Triage: skipping — PROBABILITY miss (p=$promptProbability)');
+  final probabilityPolicy = ProbabilityPromptPolicy(settings.probability);
+  if (!probabilityPolicy.shouldPrompt(ctx)) {
+    debugPrint('🎲 Triage: skipping — PROBABILITY miss (p=${settings.probability})');
+    await _logUnlock(unlockedAt: unlockedAt, promptShown: false, skipReason: SkipReason.probability);
     return;
   }
-  debugPrint('🎲 Triage: prompting (cooldown clear, probability hit p=$promptProbability)');
+  debugPrint('🎲 Triage: prompting (cooldown clear, probability hit p=${settings.probability})');
 
   // Size the window from the native-provided true display size (raw device
   // pixels — exactly what showOverlay() expects; see CLAUDE.md §5). We do NOT
@@ -457,6 +499,10 @@ Future<void> _showCaptureScreen(int screenWidth, int screenHeight) async {
     overlayContent: 'Declare your intent',
   );
   debugPrint('🟣 showOverlay called (${screenWidth}x$screenHeight capture screen)');
+  // Logged AFTER showOverlay(), not before: the prompt reaching the screen is
+  // the time-critical part (CLAUDE.md §8's ~500ms target); this write is not
+  // (docs/DATA_MODEL.md §3c).
+  await _logUnlock(unlockedAt: unlockedAt, promptShown: true);
 }
 
 class MyApp extends StatelessWidget {
@@ -503,13 +549,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadPromptsEnabled() async {
-    final enabled = await _shouldPrompt();
+    final enabled = await _appSettings.promptsEnabled();
     if (mounted) setState(() => _promptsEnabled = enabled);
   }
 
   Future<void> _togglePrompts(bool value) async {
     setState(() => _promptsEnabled = value);
-    await SharedPreferencesAsync().setBool(promptsEnabledKey, value);
+    await _appSettings.setPromptsEnabled(value);
   }
 
   @override

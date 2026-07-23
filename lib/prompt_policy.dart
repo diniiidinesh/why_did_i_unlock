@@ -1,5 +1,7 @@
 import 'dart:math';
 
+import 'app_settings.dart' show QuietHoursWindow;
+
 /// Everything a [PromptPolicy] might need to decide whether to show the
 /// capture screen on this unlock. Only [now] and [lastCompletedAt] are
 /// populated by the MVP call site (`_showCaptureScreen` in main.dart);
@@ -55,6 +57,53 @@ class ProbabilityPromptPolicy implements PromptPolicy {
 
   @override
   bool shouldPrompt(PromptContext ctx) => _random.nextDouble() < probability;
+}
+
+/// Suppresses prompts during a configured time-of-day window (e.g. 23:00-07:00
+/// — "don't nag me while I'm asleep"). Independent of cooldown/probability —
+/// see docs/DATA_MODEL.md §11. The window is a plain value from
+/// [QuietHoursWindow] rather than duplicated fields here, so there is exactly
+/// one definition of "minutes since local midnight" in the codebase.
+///
+/// Whether quiet hours applies AT ALL is a separate on/off setting the call
+/// site checks (`AppSettingsSnapshot.quietHoursEnabled`) — this class only
+/// answers "is `now` inside the configured window," not "is the feature on."
+/// Keeping those separate means a user can leave a window configured while
+/// toggling the feature off, without losing their chosen times.
+class QuietHoursPolicy implements PromptPolicy {
+  final QuietHoursWindow window;
+
+  const QuietHoursPolicy(this.window);
+
+  @override
+  bool shouldPrompt(PromptContext ctx) => !isWithinWindow(ctx.now, window);
+
+  /// Minute-of-day comparison, deliberately NOT a naive `start <= now <= end`
+  /// range check — that form is correct for a same-day window (e.g.
+  /// 01:00-05:00) and silently WRONG for one that wraps past midnight (e.g.
+  /// 23:00-07:00), where "inside the window" is everything on either side of
+  /// midnight, not a single contiguous range on the minute-of-day number
+  /// line. See docs/DATA_MODEL.md §11 — this was flagged there specifically
+  /// because it's easy to get quietly backwards. Public + static so it's
+  /// directly unit-testable without constructing a whole [PromptContext].
+  static bool isWithinWindow(DateTime now, QuietHoursWindow window) {
+    final minuteOfDay = now.hour * 60 + now.minute;
+    if (window.startMinutes == window.endMinutes) {
+      // A zero-width window (start == end) is ambiguous between "always
+      // quiet" and "never quiet." Treat it as never-quiet — the safer
+      // default for a wellbeing app is to fail open (prompt), not silently
+      // suppress every single unlock because of a degenerate setting.
+      return false;
+    }
+    if (window.startMinutes < window.endMinutes) {
+      // Same-day window: inside is the contiguous range [start, end).
+      return minuteOfDay >= window.startMinutes && minuteOfDay < window.endMinutes;
+    }
+    // Overnight wraparound (start > end): inside is everything from start to
+    // midnight, PLUS everything from midnight to end — i.e. NOT the short
+    // daytime segment in between.
+    return minuteOfDay >= window.startMinutes || minuteOfDay < window.endMinutes;
+  }
 }
 
 /// ANDs a list of policies together — prompts only if ALL agree. This is the

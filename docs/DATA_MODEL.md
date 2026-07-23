@@ -184,7 +184,7 @@ at all. Scrolling to find a preset at unlock is a failure state.
 | Enabled presets | 8 (5–6 recommended) | app level |
 | Stored presets incl. disabled | 30 | app level |
 | Preset label | 24 chars UI / 40 stored | UI + store |
-| `allowed_packages` | 2000 chars | store |
+| `allowed_packages` | 2000 chars | **not yet enforced** — reserved; no setter exists until app-restricted sessions land (§10) |
 | Custom intent text | 100 chars UI / 500 stored | existing, unchanged |
 
 Enforced in app code, not as DB constraints — a row-count limit needs a trigger in

@@ -17,10 +17,28 @@ for the exact assertions.
 
 | File | Covers |
 |---|---|
-| `test/intent_store_test.dart` | `IntentStore` repository (cases 1–9): insert/read, empty DB, SQL-injection literal stored verbatim, idempotent `client_id`, input validation (5 sub-cases via `fromMessage`), no-intent row shape, `recentEvents` limit+ordering, `lastCompletedAt` across kinds, schema-migration reopen. |
-| `test/prompt_policy_test.dart` | Triage policies (cases 10–12): `ProbabilityPromptPolicy` bounds + seeded determinism, `TimeCooldownPolicy` boundary (`>=`), `CompositePromptPolicy` AND-semantics. |
+| `test/intent_store_test.dart` | `IntentStore` repository. **Sprint 3 (1–9):** insert/read, empty DB, SQL-injection literal stored verbatim, idempotent `client_id`, `fromMessage` validation (7 sub-cases incl. `presetId` typing + `toMessage` round-trip), no-intent row shape, `recentEvents` limit+ordering, `lastCompletedAt` across kinds, reopen. **Sprint 4 (20–25):** real v1→v2 migration from a hand-built v1 file, `unlock_log` round-trip incl. every `SkipReason`, declare→dismiss lifecycle (`open`/`done`/`abandoned`, idempotency, no-op on unknown id, **no resurrection of abandoned rows**), `unlock_id` stateless resolution (incl. later-skipped-unlock and no-prompted-unlock cases), preset CRUD + limits + soft-delete + restore-defaults. |
+| `test/app_settings_test.dart` | `AppSettings` (30–35): defaults match the previously-hardcoded constants, round-trips, **clamping on both write and read**, retention enum mapping + sentinel, quiet-hours flag independent of window, `loadSnapshot` batching, cross-instance visibility. |
+| `test/prompt_policy_test.dart` | Triage policies. **Sprint 3 (10–12):** `ProbabilityPromptPolicy` bounds + seeded determinism, `TimeCooldownPolicy` boundary (`>=`), `CompositePromptPolicy` AND-semantics. **Sprint 4 (40–42):** `QuietHoursPolicy` same-day window, **overnight wraparound**, inclusive-start/exclusive-end boundaries, degenerate zero-width window fails open. |
 | `test/widget_test.dart` | `HomeScreen` renders title/toggle/history entry (13); `IntentCaptureScreen` renders presets/pill/field/OK (14). |
 | `test/history_screen_test.dart` | `HistoryScreen` renders events newest-first, styles `no_intent` rows distinctly (15). |
+
+### What automated tests deliberately do **not** cover
+
+Two hard limits, both structural rather than laziness — they define the manual matrix below:
+
+1. **`_showCaptureScreen` and the whole unlock write path are unreachable from tests.**
+   They're private (Dart's leading-underscore privacy is per-library, so a test file
+   genuinely cannot call them) and depend on `flutter_overlay_window`'s platform channel
+   plus `IsolateNameServer` ports that only behave correctly inside a real Android
+   process with three live Flutter engines. Every triage *decision* is unit-tested via
+   its policy class; the *wiring* that calls them is not, and can only be verified
+   on-device by reading logs.
+2. **A green `flutter test` does not prove the sqflite path works on-device.**
+   `sqflite_common_ffi` (desktop) tolerates SQL that Android's backend rejects — this is
+   not hypothetical, it is exactly how the `PRAGMA journal_mode=WAL` `execute()`-vs-
+   `rawQuery()` bug reached a device undetected (`docs/ARCHITECTURE.md` §5). **Any change
+   touching schema or queries needs at least one real read/write cycle on hardware.**
 
 ## Manual on-device matrix (physical device only — e.g. A063)
 
@@ -59,3 +77,36 @@ active/triage state appears to have latched and did not self-heal.
 is live") needs (a) a defined **reset on background-engine cold start**, and (b) a **safety
 timeout** so a missed overlay-closed signal self-heals. Case 29 is the "didn't heal after that"
 symptom directly.
+
+### Sprint 4 — schema v2, settings, unlock logging
+
+Run with a second terminal open on `flutter logs -d A063`. Cases 30–33 are the
+**upgrade-safety gate** — run them before anything else, because every later case
+assumes the migration landed correctly.
+
+Reading the DB directly (several cases below need it):
+```bash
+adb shell "run-as com.whydidiunlock.why_did_i_unlock sqlite3 databases/intents.db 'SELECT skip_reason, COUNT(*) FROM unlock_log GROUP BY skip_reason;'"
+```
+
+| # | Case | Status | Expected behaviour / what to look for |
+|---|---|---|---|
+| **30** | **Upgrade install over v0.5.0+7** (do NOT uninstall first) | ❌ | App opens, no crash. This is the only way to exercise the real `onUpgrade` — the automated migration test builds its v1 file in `sqflite_common_ffi`, which is exactly the backend that has previously masked an Android-only SQL failure. |
+| 31 | After #30, open History | ❌ | Every pre-upgrade event still listed, unchanged. Confirms existing rows survived with `status` defaulted to `done`. |
+| 32 | After #30, verify the new tables exist | ❌ | `sqlite3 … '.tables'` shows `intent_log`, `unlock_log`, `intent_preset`; `SELECT COUNT(*) FROM intent_preset` = 5. |
+| 33 | Fresh install (uninstall first) | ❌ | Exercises `onCreate` (a different path from #30 — it runs v1 schema + v2 migration in one shot). Prompt still appears on next unlock; presets seeded. |
+| **34** | **Normal unlock → prompt shown** | ❌ | Log: `🎲 Triage: prompting` then `🟣 showOverlay called`. DB: a `unlock_log` row with `prompt_shown=1`, `skip_reason` NULL. |
+| 35 | Unlock blocked by cooldown | ❌ | Log: `COOLDOWN active (elapsed … < 0:01:00)`. DB: row with `skip_reason='cooldown'`. |
+| 36 | Unlock blocked by probability | ❌ | Log: `PROBABILITY miss (p=0.5)`. DB: row with `skip_reason='probability'`. **Cooldown and probability must remain separately identifiable** — that distinction is what made an earlier "looks broken" run diagnosable. |
+| 37 | Prompts toggled OFF in-app → unlock | ❌ | **Behaviour change:** previously produced no trace at all; now logs `🔕 Prompts disabled` **and writes a row** with `skip_reason='prompts_disabled'`. No prompt appears. |
+| 38 | Unlock while a bubble/capture screen is already live | ❌ | Log: `🟡 Overlay already active`. DB: `skip_reason='overlay_active'`. |
+| 39 | Revoke "Display over other apps", then unlock | ❌ | Log: `📋 Has overlay permission: false`. DB: `skip_reason='no_permission'`. This row is the highest-value one in the table — it's silent breakage becoming visible. |
+| **40** | **Quiet hours suppresses prompts** | ❌ | No Settings UI until T13, so set it by hand: `adb shell "run-as … sqlite3"` won't work (it's `shared_preferences`, not sqflite) — easiest is to wait for T13, or temporarily flip `AppSettings.defaultQuietHoursEnabled` to `true` in a debug build. Expect `🌙 Quiet hours active`, `skip_reason='quiet_hours'`. |
+| 41 | **Overnight quiet-hours window across midnight** | ❌ | With a 22:00–07:00 window: suppressed at 23:00 **and** at 03:00; NOT suppressed at 12:00. The wraparound logic is unit-tested, but confirm the device's local timezone resolves as expected (the policy uses local `DateTime`, not UTC). |
+| 42 | Declare → dismiss still works end-to-end | ❌ | Regression check: `_submitIntent`/`_dismissBubble` are untouched by T9, so behaviour must be identical to v0.5.0+7. Row written, bubble appears and closes. |
+| 43 | Logging failure cannot suppress a prompt | ❌ | Hard to force deliberately; verify the weaker version — across a long session, no unlock is ever *missing* a prompt that triage said should show. Any `⚠️ Failed to log unlock (non-fatal)` in logs must be followed by the prompt still appearing. |
+| 44 | Battery/latency sanity after adding a write per unlock | ❌ | Unlock→prompt still feels immediate (`CLAUDE.md` §8's ~500ms target); no new jank. The `unlock_log` insert is deliberately after `showOverlay()`, so a regression here would indicate the ordering broke. |
+
+**Not yet reachable (needs later tasks):** preset editing (T16), settings screen round-trip
+including the cross-isolate propagation check (T13), `open`→`abandoned` sweep on reboot (T10),
+CSV export (T17). Cases will be added as those land rather than listed here as permanently ❌.

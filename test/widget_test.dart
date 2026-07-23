@@ -9,9 +9,10 @@ void main() {
   setUp(() {
     // HomeScreen.initState fires two real plugin calls fire-and-forget:
     // FlutterOverlayWindow.isPermissionGranted() (a MethodChannel call) and
-    // _shouldPrompt() (SharedPreferencesAsync). Neither has a real platform
-    // implementation in a widget test, so both need mocking or they'd throw
-    // MissingPluginException from an unawaited Future and fail the test.
+    // AppSettings().promptsEnabled() (SharedPreferencesAsync). Neither has a
+    // real platform implementation in a widget test, so both need mocking or
+    // they'd throw MissingPluginException from an unawaited Future and fail
+    // the test.
     const overlayChannel = MethodChannel('x-slayer/overlay_channel');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
       overlayChannel,

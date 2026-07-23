@@ -1,5 +1,5 @@
 <!--
-ARCHIVED PLANNING DOCUMENT — signed off 2026-07-23, frozen at approval time.
+ARCHIVED PLANNING DOCUMENT — signed off 2026-07-23.
 
 This is the full Sprint 4 plan as approved (via Claude Code's plan-mode
 ExitPlanMode), copied verbatim from the local plan file it originated in
@@ -8,19 +8,24 @@ artifact, not synced or durable, which is why a copy now lives here instead).
 It covers the information architecture, the full data model rationale, the
 screen map, and the Claude Code / Cursor task breakdown for Sprint 4.
 
-This file is NOT updated as implementation proceeds — treat it as a decision
-record, not a living doc. For current, up-to-date information see:
+This file MAY be updated as implementation proceeds or scope changes — see the
+"Update log" below for what's changed since sign-off and why. Edit the body
+when something here goes stale; add a dated log entry rather than silently
+rewriting history. For current, up-to-date information see:
   - Schema, invariants, and the ERD as currently implemented: docs/DATA_MODEL.md
   - Task status: ask in-session, or check git log on this branch
     (sprint4-app-shell) against the task list below.
   - Play Store submission prep: docs/PLAY_SUBMISSION.md
   - Privacy policy: docs/PRIVACY_POLICY.md
 
-Known amendment since sign-off: time-based "quiet hours" scheduling (a prompt
-suppression window, e.g. 23:00-07:00) was added to scope during implementation,
-after this plan was approved. It does not appear in the task table below as its
-own line item; it was folded into T3 (settings storage), T9 (triage policy), and
-T13 (Settings screen exposure). See docs/DATA_MODEL.md §11 for its design.
+## Update log
+
+- **2026-07-23 (sign-off):** initial plan approved as written below.
+- **2026-07-23 (later same day):** time-based "quiet hours" scheduling (a prompt
+  suppression window, e.g. 23:00-07:00) added to scope during implementation. Not
+  reflected as its own line in the §10 task table — folded into T3 (settings
+  storage), T9 (triage policy), and T13 (Settings screen exposure). Design in
+  `docs/DATA_MODEL.md` §11.
 -->
 
 # Sprint 4 — App shell: onboarding, IA, and a data model built to outlast it

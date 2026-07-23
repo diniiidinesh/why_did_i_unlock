@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:why_did_i_unlock/app_settings.dart';
 import 'package:why_did_i_unlock/prompt_policy.dart';
 
 void main() {
@@ -87,6 +88,92 @@ void main() {
       ]);
       final last = now.subtract(const Duration(seconds: 120));
       expect(composite.shouldPrompt(PromptContext(now: now, lastCompletedAt: last)), isTrue);
+    });
+  });
+
+  group('40. QuietHoursPolicy — same-day window (start < end)', () {
+    // 01:00-05:00 -> 60..300 minutes.
+    const window = QuietHoursWindow(startMinutes: 60, endMinutes: 300);
+    final policy = QuietHoursPolicy(window);
+
+    test('a time inside the window is suppressed', () {
+      final t = DateTime.utc(2026, 1, 1, 2, 30); // 02:30
+      expect(QuietHoursPolicy.isWithinWindow(t, window), isTrue);
+      expect(policy.shouldPrompt(PromptContext(now: t)), isFalse);
+    });
+
+    test('a time outside the window is allowed', () {
+      final t = DateTime.utc(2026, 1, 1, 10, 0); // 10:00
+      expect(QuietHoursPolicy.isWithinWindow(t, window), isFalse);
+      expect(policy.shouldPrompt(PromptContext(now: t)), isTrue);
+    });
+
+    test('exactly at start is inside (inclusive)', () {
+      final t = DateTime.utc(2026, 1, 1, 1, 0); // 01:00
+      expect(QuietHoursPolicy.isWithinWindow(t, window), isTrue);
+    });
+
+    test('exactly at end is outside (exclusive)', () {
+      final t = DateTime.utc(2026, 1, 1, 5, 0); // 05:00
+      expect(QuietHoursPolicy.isWithinWindow(t, window), isFalse);
+    });
+  });
+
+  group('41. QuietHoursPolicy — overnight wraparound (start > end)', () {
+    // 22:00-07:00 -> 1320..420 minutes. This is the trap case: a naive
+    // start<=now<=end range check gets this silently backwards.
+    const window = QuietHoursWindow(startMinutes: 22 * 60, endMinutes: 7 * 60);
+    final policy = QuietHoursPolicy(window);
+
+    test('late evening (23:00) is inside', () {
+      final t = DateTime.utc(2026, 1, 1, 23, 0);
+      expect(QuietHoursPolicy.isWithinWindow(t, window), isTrue);
+      expect(policy.shouldPrompt(PromptContext(now: t)), isFalse);
+    });
+
+    test('early morning (03:00), past midnight, is still inside', () {
+      final t = DateTime.utc(2026, 1, 1, 3, 0);
+      expect(QuietHoursPolicy.isWithinWindow(t, window), isTrue);
+    });
+
+    test('exactly at start (22:00) is inside (inclusive)', () {
+      final t = DateTime.utc(2026, 1, 1, 22, 0);
+      expect(QuietHoursPolicy.isWithinWindow(t, window), isTrue);
+    });
+
+    test('exactly at end (07:00) is outside (exclusive)', () {
+      final t = DateTime.utc(2026, 1, 1, 7, 0);
+      expect(QuietHoursPolicy.isWithinWindow(t, window), isFalse);
+    });
+
+    test('midday (12:00) is outside — the short segment between end and start', () {
+      final t = DateTime.utc(2026, 1, 1, 12, 0);
+      expect(QuietHoursPolicy.isWithinWindow(t, window), isFalse);
+      expect(policy.shouldPrompt(PromptContext(now: t)), isTrue);
+    });
+
+    test('one minute before midnight is inside', () {
+      final t = DateTime.utc(2026, 1, 1, 23, 59);
+      expect(QuietHoursPolicy.isWithinWindow(t, window), isTrue);
+    });
+
+    test('midnight exactly is inside', () {
+      final t = DateTime.utc(2026, 1, 2, 0, 0);
+      expect(QuietHoursPolicy.isWithinWindow(t, window), isTrue);
+    });
+  });
+
+  group('42. QuietHoursPolicy — degenerate window', () {
+    test('start == end fails open (never suppresses) rather than always-suppress', () {
+      const window = QuietHoursWindow(startMinutes: 300, endMinutes: 300);
+      // Check across several times of day — none should be suppressed.
+      for (final hour in [0, 5, 12, 18, 23]) {
+        final t = DateTime.utc(2026, 1, 1, hour);
+        expect(QuietHoursPolicy.isWithinWindow(t, window), isFalse, reason: 'hour=$hour');
+      }
+      // And via shouldPrompt, confirming the policy object itself agrees.
+      final policy = QuietHoursPolicy(window);
+      expect(policy.shouldPrompt(PromptContext(now: DateTime.utc(2026, 1, 1, 12))), isTrue);
     });
   });
 }
