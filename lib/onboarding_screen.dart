@@ -48,15 +48,36 @@ class OnboardingScreen extends StatefulWidget {
 
 const int _stepCount = 5;
 
-class _OnboardingScreenState extends State<OnboardingScreen> {
+class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBindingObserver {
   final PageController _controller = PageController();
   int _step = 0;
   bool? _permissionGranted;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // requestPermission() launches Android's "Display over other apps"
+    // settings screen and its Future resolves immediately — well before the
+    // user has actually flipped the toggle and come back. The real signal
+    // that a grant may have happened is this app resuming from the
+    // background, not that call returning. Scoped to the permission step so
+    // it's a no-op (and doesn't fire a stray plugin call) on every other
+    // step of the flow.
+    if (state == AppLifecycleState.resumed && _step == 2) {
+      _refreshPermission();
+    }
   }
 
   Future<void> _refreshPermission() async {
