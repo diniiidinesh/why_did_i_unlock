@@ -11,6 +11,7 @@
 | `docs/ARCHITECTURE.md` | Engine topology, native components, event flows, plugin gotchas | The native/overlay/engine layer changes. |
 | `docs/PRD.md` | Product requirements, current-vs-planned feature state | A feature ships or scope shifts. |
 | `docs/BACKLOG.md` | Tactical deferred work (features/fixes/ideas) + priorities | Something is deferred, shipped (mark `[DONE date]`), or reprioritized. |
+| `docs/erd/` | Archived sprint plans (ERD + IA + task breakdown), one dated file per sprint | **Never** — these are frozen at sign-off. A new sprint gets a new dated file; don't edit an old one. If the plan changes materially before implementation finishes, add a short dated addendum at the top rather than rewriting. |
 | `README.md` | Front door + doc index | New doc added, or status headline changes. |
 | Claude Code local memory | Same-machine convenience only — **does NOT sync across machines** | Keep as pointers to the git-tracked docs, not a second copy. |
 
