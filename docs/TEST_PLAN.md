@@ -20,7 +20,7 @@ for the exact assertions.
 | `test/intent_store_test.dart` | `IntentStore` repository. **Sprint 3 (1–9):** insert/read, empty DB, SQL-injection literal stored verbatim, idempotent `client_id`, `fromMessage` validation (7 sub-cases incl. `presetId` typing + `toMessage` round-trip), no-intent row shape, `recentEvents` limit+ordering, `lastCompletedAt` across kinds, reopen. **Sprint 4 (20–25):** real v1→v2 migration from a hand-built v1 file, `unlock_log` round-trip incl. every `SkipReason`, declare→dismiss lifecycle (`open`/`done`/`abandoned`, idempotency, no-op on unknown id, **no resurrection of abandoned rows**), `unlock_id` stateless resolution (incl. later-skipped-unlock and no-prompted-unlock cases), preset CRUD + limits + soft-delete + restore-defaults. |
 | `test/app_settings_test.dart` | `AppSettings` (30–35): defaults match the previously-hardcoded constants, round-trips, **clamping on both write and read**, retention enum mapping + sentinel, quiet-hours flag independent of window, `loadSnapshot` batching, cross-instance visibility. |
 | `test/prompt_policy_test.dart` | Triage policies. **Sprint 3 (10–12):** `ProbabilityPromptPolicy` bounds + seeded determinism, `TimeCooldownPolicy` boundary (`>=`), `CompositePromptPolicy` AND-semantics. **Sprint 4 (40–42):** `QuietHoursPolicy` same-day window, **overnight wraparound**, inclusive-start/exclusive-end boundaries, degenerate zero-width window fails open. |
-| `test/widget_test.dart` | `HomeScreen` renders title/toggle/history entry (13); `IntentCaptureScreen` renders presets/pill/field/OK (14). |
+| `test/widget_test.dart` | `HomeScreen` renders title/toggle/history entry (13); `IntentCaptureScreen` renders presets/pill/field/OK (14), an empty preset list (16, T11's zero-presets state), tapping a preset passes its id back through `onSubmit` (17), custom text carries no `presetId` (18). |
 | `test/history_screen_test.dart` | `HistoryScreen` renders events newest-first, styles `no_intent` rows distinctly (15). |
 
 ### What automated tests deliberately do **not** cover
@@ -139,6 +139,30 @@ mid-flight meant it never happened at all as far as the database was concerned. 
 the abandoned-sweep path on a real device, not just in the automated test that simulates it
 via a direct `sweepOpenToAbandoned()` call, is the one thing here that can't be inferred
 from code review.
+
+### Sprint 4 — config relay: DB-backed presets on the capture screen (T11)
+
+The capture screen's pills are no longer the hardcoded `Payments/Calls/Messages/Food
+Order/Commute` list — they're fetched live from `intent_preset` via a new relay. This
+is the first port in the app registered by the OVERLAY isolate rather than
+`backgroundMain`; the on-device check below is specifically about confirming that
+works at all, not just that the data is correct.
+
+| # | Case | Status | Expected behaviour |
+|---|---|---|---|
+| **54** | **First unlock after a fresh install/reboot (cold overlay engine)** | ❌ | Capture screen shows the 5 seeded default presets. Log: `📤 Sent 5 preset(s) to overlay` (background) with no `⚠️ Could not find overlay-config reply port` warning before it — confirms the overlay's port was registered before the reply was sent, not raced. |
+| 55 | Rename a preset (once T16 lands — until then, edit `intent_preset.label` directly via `sqlite3`), then lock and unlock | ❌ | The capture screen shows the NEW label on this next unlock — confirms the re-request-on-return-to-capture-mode path, not just the cold-start one. |
+| 56 | Disable a preset (or edit `intent_preset.enabled=0` via `sqlite3`), then unlock | ❌ | That preset's pill no longer appears; the rest render unchanged. |
+| 57 | Declare an intent from a preset pill, check the DB | ❌ | `adb shell "run-as com.whydidiunlock.why_did_i_unlock sqlite3 databases/intents.db 'SELECT text, preset_id FROM intent_log ORDER BY id DESC LIMIT 1;'"` — `preset_id` is populated (non-null), matching the tapped preset's `id`. This is the regression check for the T10-era gap where `presetId` was always null because presets weren't relayed yet. |
+| 58 | Declare from the custom text field (not a preset pill) | ❌ | Same query as #57 — `preset_id` is `NULL`. Confirms custom text never gets a spurious preset link. |
+
+**What would look broken but isn't:** a very brief (sub-second, likely imperceptible)
+render of the capture screen with **no pills at all** — just the text field and "Just
+Like That" — on the very first show after a cold overlay-engine start, before the
+first `requestPresets` reply lands. This is the documented, deliberately-valid
+zero-presets state (docs/DATA_MODEL.md §7), not a bug; if it's visually noticeable
+rather than instantaneous, that's worth flagging as a real latency finding, but the
+absence of pills itself is expected for that one frame.
 
 ### Native — `UpdateReceiver` (added 2026-07-23, outside the T-numbered task list)
 

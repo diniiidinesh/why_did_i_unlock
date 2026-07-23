@@ -43,19 +43,99 @@ void main() {
   testWidgets(
     '14. IntentCaptureScreen renders presets, Just Like That, text field and OK',
     (tester) async {
-      await tester.pumpWidget(MaterialApp(
+      // Presets are DB-backed and injected via the constructor since T11
+      // (config relay) — no longer a hardcoded global the widget reads
+      // itself, so the test supplies its own sample set.
+      const samplePresets = [
+        CapturePreset(id: 1, label: 'Payments'),
+        CapturePreset(id: 2, label: 'Calls'),
+        CapturePreset(id: 3, label: 'Messages'),
+      ];
+      await tester.pumpWidget(const MaterialApp(
         home: IntentCaptureScreen(
-          onSubmit: (_, _) {},
-          onNoIntent: () {},
+          presets: samplePresets,
+          onSubmit: _noopOnSubmit,
+          onNoIntent: _noopOnNoIntent,
         ),
       ));
 
-      for (final preset in intentPresets) {
-        expect(find.text(preset), findsOneWidget);
+      for (final preset in samplePresets) {
+        expect(find.text(preset.label), findsOneWidget);
       }
       expect(find.text(noIntentLabel), findsOneWidget);
       expect(find.byType(TextField), findsOneWidget);
       expect(find.text('OK'), findsOneWidget);
     },
   );
+
+  testWidgets(
+    '16. IntentCaptureScreen renders correctly with an empty preset list',
+    (tester) async {
+      // A deliberately valid state (docs/DATA_MODEL.md §7) — the very first
+      // capture screen after an overlay engine cold start, before the
+      // config-relay reply has arrived, looks exactly like this.
+      await tester.pumpWidget(const MaterialApp(
+        home: IntentCaptureScreen(
+          presets: [],
+          onSubmit: _noopOnSubmit,
+          onNoIntent: _noopOnNoIntent,
+        ),
+      ));
+
+      expect(find.text(noIntentLabel), findsOneWidget);
+      expect(find.byType(TextField), findsOneWidget);
+      expect(find.text('OK'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    '17. IntentCaptureScreen passes the tapped preset\'s id back through onSubmit',
+    (tester) async {
+      String? capturedText;
+      String? capturedSource;
+      int? capturedPresetId;
+
+      await tester.pumpWidget(MaterialApp(
+        home: IntentCaptureScreen(
+          presets: const [CapturePreset(id: 42, label: 'Payments')],
+          onSubmit: (text, source, {presetId}) {
+            capturedText = text;
+            capturedSource = source;
+            capturedPresetId = presetId;
+          },
+          onNoIntent: _noopOnNoIntent,
+        ),
+      ));
+
+      await tester.tap(find.text('Payments'));
+      await tester.pump();
+
+      expect(capturedText, 'Payments');
+      expect(capturedSource, 'preset');
+      expect(capturedPresetId, 42);
+    },
+  );
+
+  testWidgets(
+    '18. Custom text submission carries no presetId',
+    (tester) async {
+      int? capturedPresetId = -1; // sentinel distinct from both null and any real id
+      await tester.pumpWidget(MaterialApp(
+        home: IntentCaptureScreen(
+          presets: const [],
+          onSubmit: (text, source, {presetId}) => capturedPresetId = presetId,
+          onNoIntent: _noopOnNoIntent,
+        ),
+      ));
+
+      await tester.enterText(find.byType(TextField), 'Groceries');
+      await tester.tap(find.text('OK'));
+      await tester.pump();
+
+      expect(capturedPresetId, isNull);
+    },
+  );
 }
+
+void _noopOnSubmit(String text, String source, {int? presetId}) {}
+void _noopOnNoIntent() {}

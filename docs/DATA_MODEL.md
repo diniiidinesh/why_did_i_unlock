@@ -130,6 +130,39 @@ Null for custom intents and for "Just Like That".
   default; leaving it off avoids cascade semantics we don't want. A dangling
   `preset_id` degrades to grouping by text, which is simply the older behaviour.
 
+### Getting presets to the capture screen — pull, not push
+
+The overlay isolate renders the capture screen but has no plugins registered, so it
+cannot call `IntentStore` directly (`docs/ARCHITECTURE.md` §1). Presets — and `preset_id`
+by extension — reach it via a same-process relay, not a hardcoded list:
+
+1. The overlay isolate sends `{'type': 'requestPresets'}` over the existing
+   overlay→background write port (no second overlay→background port needed).
+2. The background isolate calls `activePresets()` (already filtered to
+   enabled+non-deleted, already ordered) and replies with just `{id, label}` per
+   preset — the overlay never needs `sort_order`/`tier`/`allowedPackages`, those are
+   fully resolved before the reply is built.
+3. The reply lands on a port the overlay isolate registers itself, the first time
+   this codebase has a port registered from that side rather than only looked up.
+
+**Pull, not push, deliberately:** a push right after `showOverlay()` would race the
+overlay engine's cold start on the very first show, since the overlay's reply port
+can't exist to receive anything before its own isolate has run far enough to register
+it. Making the late party (the overlay) the requester removes the race outright.
+
+**Requested on every return to capture mode, not just once at engine cold start** —
+the overlay engine is cached and can live for the app process's whole lifetime, so a
+preset edited via the (separate) main-engine Settings/manage-presets screens would
+otherwise stay stale for that cached engine's entire remaining life. Re-requesting on
+every dismissal keeps it acceptably fresh without needing the background engine to
+push updates proactively.
+
+**An empty preset list is not a loading state to special-case** — it's the same
+already-tested "zero enabled presets" state from the Limits section above, reused
+for the brief window between engine cold start and the first reply landing. No
+spinner, no flash of stale data: the capture screen (text field + "Just Like That")
+is always valid regardless of whether presets have arrived yet.
+
 ## 5. `skip_reason` values
 
 | Value | Fires when | Expected volume |

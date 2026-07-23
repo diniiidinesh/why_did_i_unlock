@@ -113,6 +113,19 @@ exists to make the "why" durable.
     whole point is showing it on demand, not re-running triage) but keeps the permission
     check and the active-overlay guard. It also does NOT write an `unlock_log` row — this
     isn't a real unlock, and logging it would inflate "unlocks today."
+  - `com.whydidiunlock.overlay_config_port` (T11) — **background → overlay**, the
+    reverse of every port above it and the first one registered by the OVERLAY isolate
+    rather than by `backgroundMain` (in `_OverlayRootState.initState`, not
+    `overlayMain`, since the overlay engine's widget State — not its bare entry-point
+    function — is what needs to react to the reply via `setState`). Carries the reply
+    to a `requestPresets` message (sent over the existing `intent_write_port`, no
+    dedicated overlay→background request port needed): `{id, label}` per active
+    preset, already filtered and ordered by `activePresets()`. Requested on engine
+    cold start AND again after every `_dismissBubble` reset to capture mode, so a
+    preset edited via the separate main-engine Settings/manage-presets screens doesn't
+    stay stale for this cached engine's whole remaining lifetime. Pull, not push — see
+    docs/DATA_MODEL.md §4 ("Getting presets to the capture screen") for why a push
+    would race the overlay engine's cold start on the very first show.
   - Also see `_ensureIntentStore`'s early call, replaced in the sweep — `backgroundMain`
     calls `_sweepAbandonedIntents()` once per engine start, which both warms the store
     open and reclassifies any `open` intent_log row left by a process that died before

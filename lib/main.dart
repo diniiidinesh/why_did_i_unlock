@@ -12,13 +12,25 @@ import 'history_screen.dart';
 import 'intent_store.dart';
 import 'prompt_policy.dart';
 
-const List<String> intentPresets = [
-  'Payments',
-  'Calls',
-  'Messages',
-  'Food Order',
-  'Commute',
-];
+/// A preset as rendered on the capture screen — just the fields
+/// [IntentCaptureScreen] needs (id + label), not the full `IntentPreset`
+/// from `intent_store.dart` (which also carries sort_order/enabled/
+/// deletedAt/tier/allowedPackages — all background-only concerns already
+/// applied before this is ever constructed: only active presets, already in
+/// display order, ever become a `CapturePreset`). This is the replacement
+/// for the old hardcoded `intentPresets` constant — presets are now
+/// DB-backed and relayed to the overlay isolate on demand (see
+/// docs/DATA_MODEL.md §4, "config relay").
+///
+/// Public (not `_`-prefixed) specifically so widget tests can construct
+/// sample presets to inject via [IntentCaptureScreen]'s constructor — a
+/// private type here couldn't be named from a test file, which is a
+/// different library.
+class CapturePreset {
+  final int id;
+  final String label;
+  const CapturePreset({required this.id, required this.label});
+}
 
 /// Label for the honest "no real reason" option. Deliberately NOT a plain
 /// "Skip" — it still logs (see [_OverlayRootState._submitNoIntent]), just
@@ -165,6 +177,38 @@ void _relayNoIntent(IntentEvent event) {
   _sendToBackground({...event.toMessage(), 'type': 'noIntent'});
 }
 
+/// Handles the `requestPresets` message (see the `intentWritePort.listen`
+/// switch): fetches the currently-active presets and sends them to the
+/// overlay isolate's reply port (see [_overlayConfigPortName]). Called from
+/// the background isolate, which — unlike the overlay isolate — has full
+/// plugin access and can call [IntentStore] directly; the whole reason this
+/// relay exists is that the overlay isolate cannot.
+///
+/// Sends the minimal [CapturePreset] shape (id + label only), not the full
+/// `IntentPreset` row — sort_order/enabled/deletedAt/tier/allowedPackages
+/// are all resolved here, server-side, by calling `activePresets()` (already
+/// filtered to enabled+non-deleted, already ordered): the overlay never
+/// needs to know about disabled or soft-deleted presets at all.
+///
+/// If the overlay's reply port isn't found (e.g. a request arrived before
+/// `_OverlayRootState.initState` finished registering it — shouldn't happen
+/// given the ordering in that method, but not fatal if it somehow did), this
+/// just logs and returns: the overlay's own request is what matters for
+/// retry, not this side re-attempting delivery.
+Future<void> _replyActivePresetsToOverlay(IntentStore store) async {
+  final presets = await _withTimeout('IntentStore.activePresets()', store.activePresets());
+  final payload = (presets ?? const [])
+      .map((p) => {'id': p.id, 'label': p.label})
+      .toList();
+  final port = IsolateNameServer.lookupPortByName(_overlayConfigPortName);
+  if (port == null) {
+    debugPrint('⚠️ Could not find overlay-config reply port — overlay not ready yet? Presets dropped');
+    return;
+  }
+  port.send({'presets': payload});
+  debugPrint('📤 Sent ${payload.length} preset(s) to overlay');
+}
+
 /// Name for a second same-process port: the overlay isolate signals THIS
 /// isolate whenever it fully closes (dismiss / "Just Like That" — NOT the
 /// close+reopen resize inside `_submitIntent`, which is still "active").
@@ -214,6 +258,27 @@ void _signalOverlayClosed() {
 /// isolate means the manual trigger goes through the exact same
 /// `_overlayIsActive` guard a real unlock does.
 const String _manualPromptPortName = 'com.whydidiunlock.manual_prompt_port';
+
+/// Name for a FOURTH same-process port, registered by the OVERLAY isolate
+/// itself (not by `backgroundMain`, unlike the other three) — background →
+/// overlay, carrying the reply to a `requestPresets` message (see the
+/// `intentWritePort.listen` switch's `'requestPresets'` case). This is the
+/// first port this file registers from the overlay side rather than just
+/// looking one up; symmetric with the existing lookup-only usage and backed
+/// by the same pure-Dart, same-process mechanism, so no new risk class —
+/// still worth an explicit on-device check (docs/TEST_PLAN.md) precisely
+/// because it's a first, not because there's a specific reason to distrust it.
+///
+/// **Pull, not push** — the overlay isolate requests config (over the
+/// existing `_intentWritePortName`, reusing that channel rather than adding
+/// a second overlay→background port) and background replies here.
+/// Deliberately not the other way around: a push right after `showOverlay()`
+/// would race the overlay engine's cold start on the very first show, since
+/// the overlay's reply port can't exist to receive anything before its own
+/// isolate has run far enough to register it. Making the late party (the
+/// overlay) the requester eliminates the race outright instead of papering
+/// over it with an artificial delay. See docs/DATA_MODEL.md §4.
+const String _overlayConfigPortName = 'com.whydidiunlock.overlay_config_port';
 
 /// Called from the MAIN UI ENGINE (the Status screen, T6) — the only
 /// function in this file callable directly from outside it, since Status
@@ -327,6 +392,8 @@ void backgroundMain() {
           final event = IntentEvent.fromMessage(map);
           await store.insertEvent(event);
           debugPrint('💾 Stored no-intent event: text="${event.text}"');
+        case 'requestPresets':
+          await _replyActivePresetsToOverlay(store);
         default:
           debugPrint('⚠️ Unknown relay message type (${map['type']}) — dropped: $map');
       }
@@ -816,7 +883,55 @@ class _OverlayRootState extends State<OverlayRoot> {
   DateTime? _declaredAt;
   String? _intentClientId;
 
-  Future<void> _submitIntent(String text, String source) async {
+  /// Presets to render on the capture screen — empty until the first reply
+  /// arrives. An empty list is a deliberately valid, already-tested state
+  /// (docs/DATA_MODEL.md §7: "zero enabled presets is a valid, non-throwing
+  /// state"), so the brief window between this engine's cold start and the
+  /// first reply landing degrades to exactly that same state rather than
+  /// needing a separate loading UI — no spinner, no flash of stale data.
+  List<CapturePreset> _presets = [];
+
+  @override
+  void initState() {
+    super.initState();
+    // Cleared first for the same reason backgroundMain clears its three
+    // ports before registering — if this engine's Dart isolate somehow
+    // re-runs initState within one process lifetime, a name can only map to
+    // one port at a time.
+    IsolateNameServer.removePortNameMapping(_overlayConfigPortName);
+    final configPort = ReceivePort();
+    IsolateNameServer.registerPortWithName(configPort.sendPort, _overlayConfigPortName);
+    configPort.listen((message) {
+      final map = message as Map;
+      final rawPresets = (map['presets'] as List?) ?? const [];
+      if (mounted) {
+        setState(() {
+          _presets = rawPresets
+              .map((p) => CapturePreset(id: (p as Map)['id'] as int, label: p['label'] as String))
+              .toList();
+        });
+      }
+    });
+    // Port registration above MUST complete before this request is sent —
+    // it does, since both are synchronous statements with no await between
+    // them, so there's no window where background could look up a port that
+    // doesn't exist yet.
+    _requestPresets();
+  }
+
+  /// Sends a `requestPresets` message over the existing intent-write port
+  /// (reusing that channel rather than adding a second overlay→background
+  /// port — see docs/DATA_MODEL.md §4). Called once at engine cold start
+  /// (`initState`) and again every time the overlay returns to capture mode
+  /// after a dismissal, so a preset edited via the Settings/manage-presets
+  /// screens (a different engine entirely) is picked up on the NEXT capture
+  /// screen rather than staying stale for this cached engine's entire
+  /// lifetime.
+  void _requestPresets() {
+    _sendToBackground({'type': 'requestPresets'});
+  }
+
+  Future<void> _submitIntent(String text, String source, {int? presetId}) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
 
@@ -847,6 +962,11 @@ class _OverlayRootState extends State<OverlayRoot> {
     // completedAt is a required IntentEvent field but is IGNORED by
     // insertOpenIntent (which uses declaredAt as its own placeholder), so
     // declaredAt is passed for both — there is no real completion yet.
+    // presetId is null for custom text (there's no preset to point at) and
+    // for any preset tap that arrived before this engine's first
+    // requestPresets reply landed — a null presetId degrades to grouping by
+    // the text snapshot alone, exactly the pre-T11 behaviour, never an error
+    // (docs/DATA_MODEL.md §4).
     _relayDeclaredIntent(IntentEvent(
       clientId: clientId,
       kind: IntentKind.intent,
@@ -854,6 +974,7 @@ class _OverlayRootState extends State<OverlayRoot> {
       text: trimmed,
       declaredAt: declaredAt,
       completedAt: declaredAt,
+      presetId: presetId,
     ));
 
     // Read density BEFORE the awaits (avoids using context across an async gap).
@@ -945,6 +1066,9 @@ class _OverlayRootState extends State<OverlayRoot> {
         _intentClientId = null;
       });
     }
+    // Refresh presets for the NEXT capture screen — see _requestPresets's
+    // doc for why this happens here rather than only once at cold start.
+    _requestPresets();
   }
 
   @override
@@ -952,6 +1076,7 @@ class _OverlayRootState extends State<OverlayRoot> {
     switch (_mode) {
       case _OverlayMode.capture:
         return IntentCaptureScreen(
+          presets: _presets,
           onSubmit: _submitIntent,
           onNoIntent: _submitNoIntent,
         );
@@ -962,14 +1087,22 @@ class _OverlayRootState extends State<OverlayRoot> {
 }
 
 class IntentCaptureScreen extends StatefulWidget {
-  /// Called with (text, source) where source is 'preset' or 'custom'.
-  final void Function(String text, String source) onSubmit;
+  /// Presets to render as pills. DB-backed and relayed from the background
+  /// isolate (see [CapturePreset]'s doc) — may be empty, which is a
+  /// deliberately valid state (docs/DATA_MODEL.md §7), not an error to guard
+  /// against.
+  final List<CapturePreset> presets;
+
+  /// Called with (text, source, presetId) where source is 'preset' or
+  /// 'custom' and presetId is the tapped preset's id (null for custom text).
+  final void Function(String text, String source, {int? presetId}) onSubmit;
 
   /// Called when the user picks the honest "no real reason" option instead.
   final VoidCallback onNoIntent;
 
   const IntentCaptureScreen({
     super.key,
+    required this.presets,
     required this.onSubmit,
     required this.onNoIntent,
   });
@@ -1039,10 +1172,10 @@ class _IntentCaptureScreenState extends State<IntentCaptureScreen> {
                                 runSpacing: 12,
                                 alignment: WrapAlignment.center,
                                 children: [
-                                  for (final preset in intentPresets)
+                                  for (final preset in widget.presets)
                                     _PresetButton(
-                                      label: preset,
-                                      onTap: () => widget.onSubmit(preset, 'preset'),
+                                      label: preset.label,
+                                      onTap: () => widget.onSubmit(preset.label, 'preset', presetId: preset.id),
                                     ),
                                 ],
                               ),
