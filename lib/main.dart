@@ -243,8 +243,15 @@ Future<void> _replyActivePresetsToOverlay(IntentStore store) async {
     debugPrint('⚠️ Could not find overlay-config reply port — overlay not ready yet? Presets dropped');
     return;
   }
-  port.send({'presets': payload});
-  debugPrint('📤 Sent ${payload.length} preset(s) to overlay');
+  // `manual` rides along on this same message rather than a separate one —
+  // see [_currentPresentIsManual]'s doc for why a second message on this
+  // port would be actively dangerous (it would be misread as an empty
+  // preset list). Reflects whichever capture presentation is CURRENTLY
+  // showing (or was most recently shown), which is exactly what the overlay
+  // needs to decide whether to relay this session's answer — see
+  // docs/BACKLOG.md's [P1] "manual trigger arms real cooldown" entry.
+  port.send({'presets': payload, 'manual': _currentPresentIsManual});
+  debugPrint('📤 Sent ${payload.length} preset(s) to overlay (manual=$_currentPresentIsManual)');
 }
 
 /// Name for a second same-process port: the overlay isolate signals THIS
@@ -268,6 +275,24 @@ const String _overlayClosedPortName = 'com.whydidiunlock.overlay_closed_port';
 /// race where a second `onUnlock` could arrive while the first is still
 /// awaiting that call.
 bool _overlayIsActive = false;
+
+/// True while (or most recently while) the CURRENTLY showing capture screen
+/// was reached via the manual Status-screen trigger ([_showCaptureScreenManually])
+/// rather than a real unlock ([_showCaptureScreen]). Set synchronously inside
+/// [_presentCaptureOverlay] — mirrors [_overlayIsActive]'s "before the await,
+/// not after" rule for the same reason: a fresh presentation must see the
+/// correct value the instant its own preset-push message goes out, not
+/// whatever the previous session left behind.
+///
+/// This is how the overlay isolate — which cannot tell a real unlock from a
+/// manual trigger on its own; both take the exact same `showOverlay()` code
+/// path — learns which kind of session it's currently running, so it can
+/// skip persisting an answer that came from a tester tapping "Show me the
+/// prompt now" rather than an actual unlock. See docs/BACKLOG.md's [P1]
+/// "manual trigger arms real cooldown" entry for the bug this fixes, and
+/// [_replyActivePresetsToOverlay] for how this value reaches the overlay
+/// (piggybacked on the same preset-push/reply message, not a second one).
+bool _currentPresentIsManual = false;
 
 /// Called from the overlay isolate right after a REAL `closeOverlay()` (i.e.
 /// dismiss or "Just Like That" — not the close+reopen resize in
@@ -775,7 +800,7 @@ Future<void> _showCaptureScreen(int screenWidth, int screenHeight) async {
   // onUnlock could arrive (a fresh async call — Dart doesn't serialize
   // re-entrant handler invocations) while this call is still awaiting
   // showOverlay(), and both would otherwise see _overlayIsActive == false.
-  await _presentCaptureOverlay(screenWidth, screenHeight);
+  await _presentCaptureOverlay(screenWidth, screenHeight, manual: false);
   // Logged AFTER showOverlay(), not before: the prompt reaching the screen is
   // the time-critical part (CLAUDE.md §8's ~500ms target); this write is not
   // (docs/DATA_MODEL.md §3c).
@@ -790,7 +815,16 @@ Future<void> _showCaptureScreen(int screenWidth, int screenHeight) async {
 /// constraints, just reached by a different route into this isolate. Split
 /// out specifically so there is exactly one place that can get the window
 /// flags/alignment wrong, not two copies that could drift.
-Future<void> _presentCaptureOverlay(int screenWidth, int screenHeight) async {
+///
+/// [manual] distinguishes the two callers for [_currentPresentIsManual] (see
+/// that variable's doc) — `false` from the real-unlock path, `true` from the
+/// manual Status-screen trigger. Required, not defaulted, so a future third
+/// caller can't accidentally inherit the wrong value by omission.
+Future<void> _presentCaptureOverlay(int screenWidth, int screenHeight, {required bool manual}) async {
+  // Set BEFORE showOverlay(), same reasoning as _overlayIsActive just below:
+  // the preset/manual push that follows showOverlay() must see the value for
+  // THIS presentation, not a stale one from whatever was shown previously.
+  _currentPresentIsManual = manual;
   // Size the window from the true display size in raw device pixels — exactly
   // what showOverlay() expects; see CLAUDE.md §5. We do NOT use
   // PlatformDispatcher here because this runs in the headless background
@@ -885,7 +919,7 @@ Future<void> _showCaptureScreenManually(int screenWidth, int screenHeight) async
     debugPrint('🧪 Manual prompt trigger: overlay already active, skipping');
     return;
   }
-  await _presentCaptureOverlay(screenWidth, screenHeight);
+  await _presentCaptureOverlay(screenWidth, screenHeight, manual: true);
   debugPrint('🧪 Manual prompt shown (Status screen trigger)');
 }
 
@@ -1044,6 +1078,18 @@ class _OverlayRootState extends State<OverlayRoot> {
   /// needing a separate loading UI — no spinner, no flash of stale data.
   List<CapturePreset> _presets = [];
 
+  /// Whether the capture screen CURRENTLY showing (or most recently shown)
+  /// was reached via the manual Status-screen trigger rather than a real
+  /// unlock — see [_currentPresentIsManual]'s doc in the background isolate
+  /// for the full story. Read at answer time ([_submitIntent]/
+  /// [_submitNoIntent]/[_dismissBubble]) to skip persisting a test tap as if
+  /// it were a real declared/no-intent event (docs/BACKLOG.md's [P1] "manual
+  /// trigger arms real cooldown"). Defaults `false` (real) so a session
+  /// answered before the very first config reply lands — the same
+  /// brief-race window already accepted for [_presets] — errs toward NOT
+  /// silently dropping a real write, rather than toward under-persisting.
+  bool _sessionIsManual = false;
+
   @override
   void initState() {
     super.initState();
@@ -1059,13 +1105,22 @@ class _OverlayRootState extends State<OverlayRoot> {
       debugPrint('📥 Overlay: received config reply: $message');
       final map = message as Map;
       final rawPresets = (map['presets'] as List?) ?? const [];
+      // `manual` rides the same message as presets — see
+      // _replyActivePresetsToOverlay's doc for why this is one message, not
+      // two (a second, presets-less message on this port would otherwise be
+      // misread as "zero active presets").
+      final rawManual = map['manual'] as bool? ?? false;
       if (mounted) {
         setState(() {
           _presets = rawPresets
               .map((p) => CapturePreset(id: (p as Map)['id'] as int, label: p['label'] as String))
               .toList();
+          _sessionIsManual = rawManual;
         });
-        debugPrint('📥 Overlay: _presets now has ${_presets.length} entr${_presets.length == 1 ? 'y' : 'ies'}');
+        debugPrint(
+          '📥 Overlay: _presets now has ${_presets.length} entr${_presets.length == 1 ? 'y' : 'ies'}, '
+          'manual=$_sessionIsManual',
+        );
       } else {
         debugPrint('⚠️ Overlay: config reply arrived but widget was unmounted, dropped');
       }
@@ -1182,15 +1237,27 @@ class _OverlayRootState extends State<OverlayRoot> {
     // requestPresets reply landed — a null presetId degrades to grouping by
     // the text snapshot alone, exactly the pre-T11 behaviour, never an error
     // (docs/DATA_MODEL.md §4).
-    _relayDeclaredIntent(IntentEvent(
-      clientId: clientId,
-      kind: IntentKind.intent,
-      source: _intentSourceFromString(source),
-      text: trimmed,
-      declaredAt: declaredAt,
-      completedAt: declaredAt,
-      presetId: presetId,
-    ));
+    //
+    // Skipped entirely for a manual (Status-screen "show me the prompt now")
+    // session — see docs/BACKLOG.md's [P1] "manual trigger arms real
+    // cooldown": persisting a test tap's answer poisoned TimeCooldownPolicy's
+    // MAX(completed_at) read for the very next REAL unlock. The bubble/UI
+    // transition below still happens unconditionally — only the DB write is
+    // gated, so a manual session still looks and behaves like a real one to
+    // whoever is testing it.
+    if (!_sessionIsManual) {
+      _relayDeclaredIntent(IntentEvent(
+        clientId: clientId,
+        kind: IntentKind.intent,
+        source: _intentSourceFromString(source),
+        text: trimmed,
+        declaredAt: declaredAt,
+        completedAt: declaredAt,
+        presetId: presetId,
+      ));
+    } else {
+      debugPrint('🧪 Manual session — skipping intent_log declare write');
+    }
 
     // Read density BEFORE the awaits (avoids using context across an async gap).
     // showOverlay() sizes the window in raw device pixels, so convert dp -> px.
@@ -1229,20 +1296,35 @@ class _OverlayRootState extends State<OverlayRoot> {
     // _intentWritePortName for why this replaced shareData(). Atomic — no
     // separate declare/dismiss step, since there's no bubble to later
     // dismiss (see _relayNoIntent's doc).
-    final event = IntentEvent(
-      clientId: _generateClientId(now),
-      kind: IntentKind.noIntent,
-      source: null,
-      text: noIntentLabel,
-      declaredAt: now,
-      completedAt: now,
-    );
-    _relayNoIntent(event);
+    //
+    // Skipped for a manual session — see the matching comment in
+    // _submitIntent and docs/BACKLOG.md's [P1] entry. This was in fact the
+    // exact repro that surfaced the bug: a manual trigger answered with
+    // "Just Like That" wrote a real completed_at that armed cooldown for the
+    // next real unlock.
+    if (!_sessionIsManual) {
+      final event = IntentEvent(
+        clientId: _generateClientId(now),
+        kind: IntentKind.noIntent,
+        source: null,
+        text: noIntentLabel,
+        declaredAt: now,
+        completedAt: now,
+      );
+      _relayNoIntent(event);
+    } else {
+      debugPrint('🧪 Manual session — skipping intent_log no-intent write');
+    }
 
     await FlutterOverlayWindow.closeOverlay();
     // Tells the background isolate this is a REAL close (not the
     // close+reopen resize in _submitIntent) — see _overlayIsActive.
     _signalOverlayClosed();
+    // Defensive reset for whatever session comes next, in case its own
+    // config reply is somehow delayed past the moment it's answered — see
+    // _sessionIsManual's doc for why `false` (real) is the safer default to
+    // fall back to than leaving this session's `true` lingering.
+    _sessionIsManual = false;
   }
 
   Future<void> _dismissBubble() async {
@@ -1262,7 +1344,18 @@ class _OverlayRootState extends State<OverlayRoot> {
     // IntentDismissal's doc and docs/DATA_MODEL.md §4. _intentClientId is
     // always non-null here: this is only reachable from bubble mode, which
     // _submitIntent only enters after setting it.
-    _relayDismissal(IntentDismissal(clientId: _intentClientId!, completedAt: dismissedAt));
+    //
+    // Skipped for a manual session — see the matching comment in
+    // _submitIntent and docs/BACKLOG.md's [P1] entry. _submitIntent already
+    // skipped the declare write for this same session, so there is no open
+    // row for this clientId to mark done anyway; relaying the dismissal here
+    // would just be a wasted round-trip (or, on `markIntentDone`'s
+    // no-matching-row path, silently do nothing) — either way, skip it.
+    if (!_sessionIsManual) {
+      _relayDismissal(IntentDismissal(clientId: _intentClientId!, completedAt: dismissedAt));
+    } else {
+      debugPrint('🧪 Manual session — skipping intent_log dismiss write');
+    }
 
     await FlutterOverlayWindow.closeOverlay();
     // Tells the background isolate this is a REAL close (not the
@@ -1282,6 +1375,9 @@ class _OverlayRootState extends State<OverlayRoot> {
         _intentSource = '';
         _declaredAt = null;
         _intentClientId = null;
+        // Defensive reset, same reasoning as _submitNoIntent's — see
+        // _sessionIsManual's doc.
+        _sessionIsManual = false;
       });
     }
     // Refresh presets for the NEXT capture screen — see _requestPresets's

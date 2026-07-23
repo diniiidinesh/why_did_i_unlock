@@ -45,7 +45,7 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 
 - **[DONE 2026-07-22] Overlay write path, IsolateNameServer relay, and concurrent-open guard** — Bugs 1–4 found and fixed (see summary above). Write path now reliably delivers every event across multiple dismiss cycles, even after swipe-away and reboot. Verified end-to-end with 27 automated tests + 24 manual on-device cases.
 - **[DONE 2026-07-22] Prompt-frequency triage** — cooldown (1 min) + probability (50%) composite, both verified working correctly against real event data. Triage gate plugs into `_showCaptureScreen`, inputs validated fresh per unlock.
-- **[P1] A manually-triggered test answer ("Show me the prompt now") applies real cooldown to the NEXT REAL unlock.** Confirmed on-device 2026-07-24:
+- **[FIXED 2026-07-24, needs on-device re-verify] A manually-triggered test answer ("Show me the prompt now") applies real cooldown to the NEXT REAL unlock.** Confirmed on-device 2026-07-24:
   ```
   🟣 showOverlay called (1080x2400 capture screen)
   🧪 Manual prompt shown (Status screen trigger)
@@ -70,16 +70,26 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
   button and answering it silently arms the cooldown for the next several real unlocks —
   exactly the confusing "why didn't it prompt me, is the trigger broken?" symptom a tester
   would see, when the trigger itself worked perfectly.
-  **Two fix directions, needs a decision before whoever picks this up starts:**
-  1. **Tag the origin.** Add a column (or reuse a spare) on `intent_log` marking a row as
-     manual-test-originated; `lastCompletedAt()` (and any future cooldown-adjacent query)
-     filters those out, while still keeping the row in history/export for audit continuity
-     — you did answer something, after all, just not in response to a real unlock.
-  2. **Don't persist manual-trigger answers to `intent_log` at all**, mirroring
-     `_showCaptureScreenManually`'s existing `unlock_log` exclusion — treat the whole manual
-     flow as ephemeral, no DB footprint. Simpler, but loses the ability to use the manual
-     trigger to verify the DB write path end-to-end (which is exactly how Sprint 3's
-     write-path bugs were originally caught and confirmed fixed) — a real trade-off, not free.
+  **Fix shipped (`lib/main.dart`, `cursor/sprint4-stage-b`):** direction 2 — don't persist
+  manual-trigger answers to `intent_log` at all, mirroring `_showCaptureScreenManually`'s
+  existing `unlock_log` exclusion. The overlay isolate previously had no way to tell a real
+  unlock from a manual trigger on its own (both take the exact same `showOverlay()` code
+  path via `_presentCaptureOverlay`), so this needed a new signal, not just a background-side
+  filter: a module-level `_currentPresentIsManual` flag is set synchronously in
+  `_presentCaptureOverlay` (before `showOverlay()`, same "set before the await" rule as
+  `_overlayIsActive`) and piggybacked on the SAME preset-push/reply message the [P0] fix
+  above already sends (`{'presets': [...], 'manual': true/false}` over
+  `_overlayConfigPortName` — one message, not two, since a second presets-less message on
+  that port would be misread as "zero active presets"). The overlay stores it as
+  `_sessionIsManual` and checks it in `_submitIntent`/`_submitNoIntent`/`_dismissBubble`,
+  skipping only the `_relayDeclaredIntent`/`_relayNoIntent`/`_relayDismissal` DB-write calls
+  — the bubble/close/UI transitions all still happen exactly as before, so a manual session
+  still looks and behaves identically to a real one for whoever is testing it, it just leaves
+  no `intent_log` row. Rejected **direction 1 (tag-and-filter)**: no schema/migration needed
+  for direction 2, and the manual trigger's real purpose (verifying the write path end-to-end,
+  per Sprint 3's history) is still fully exercisable by watching `debugPrint` output
+  (`🧪 Manual session — skipping intent_log ... write`) and the resulting bubble/UI, without
+  needing a persisted row to prove the path worked.
   Not fixed here — flagging with full repro + root cause so it doesn't need re-diagnosing.
 - **[DONE 2026-07-22] Minimal history view** — `lib/history_screen.dart` reads from the DB, renders events newest-first, styles no-intent rows distinctly. Verified against real multi-event data on-device.
 - ~~**[P2] Triage customization UI**~~ — done via T13 (`lib/settings_screen.dart`): cooldown/probability are curated preset chips + a validated Custom entry, not the originally-imagined sliders (see that screen's doc comments for why). Instance-based triage strategy (e.g. "skip every Nth unlock") is still not built — see the `[explore]` item below.
