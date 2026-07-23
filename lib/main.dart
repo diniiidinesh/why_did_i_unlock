@@ -144,13 +144,21 @@ const String _intentWritePortName = 'com.whydidiunlock.intent_write_port';
 /// [IntentStore] method to call, since the three shapes need different
 /// handling (see docs/DATA_MODEL.md §4 on why declaration and dismissal are
 /// separate writes now, not one).
-void _sendToBackground(Map<String, dynamic> message) {
+/// Returns `true` if the port was found and the message handed off, `false`
+/// if it wasn't (background engine not ready yet — see [_requestPresets]'s
+/// retry loop, added after this exact race was caught on-device 2026-07-23:
+/// the overlay's `initState` fired before `backgroundMain` had (re-)registered
+/// its ports, and because the config-relay request only ever fired once with
+/// no retry, that single failure left the capture screen permanently without
+/// presets for the rest of that cached overlay engine's lifetime).
+bool _sendToBackground(Map<String, dynamic> message) {
   final port = IsolateNameServer.lookupPortByName(_intentWritePortName);
   if (port == null) {
     debugPrint('⚠️ Could not find intent-write port — background engine not ready? Message dropped: $message');
-    return;
+    return false;
   }
   port.send(message);
+  return true;
 }
 
 /// Relayed from `_submitIntent` at DECLARATION time — creates the `open` row
@@ -952,9 +960,26 @@ class _OverlayRootState extends State<OverlayRoot> {
   /// screens (a different engine entirely) is picked up on the NEXT capture
   /// screen rather than staying stale for this cached engine's entire
   /// lifetime.
-  void _requestPresets() {
-    debugPrint('📮 Overlay: sending requestPresets');
-    _sendToBackground({'type': 'requestPresets'});
+  /// Retries a bounded number of times if the background isolate's port
+  /// isn't found yet — confirmed on-device 2026-07-23 as a real, if brief,
+  /// startup race (background can legitimately not have registered its ports
+  /// yet at the exact moment this overlay engine's `initState` fires, e.g.
+  /// if `backgroundMain` is mid-restart). Without a retry, that single
+  /// failure was permanent: this only ever fires once per cached overlay
+  /// engine's lifetime from `initState`, so a lost first attempt meant no
+  /// presets for every unlock reusing that same engine afterward — not a
+  /// one-off flake, a standing failure until the process itself restarted.
+  /// ~2s total retry window (5 × 400ms) — long enough to ride out a startup
+  /// race, short enough to never be mistaken for a hang.
+  Future<void> _requestPresets() async {
+    const maxAttempts = 5;
+    const retryDelay = Duration(milliseconds: 400);
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      debugPrint('📮 Overlay: sending requestPresets (attempt $attempt/$maxAttempts)');
+      if (_sendToBackground({'type': 'requestPresets'})) return;
+      if (attempt < maxAttempts) await Future.delayed(retryDelay);
+    }
+    debugPrint('⚠️ Overlay: giving up on requestPresets after $maxAttempts attempts — background engine unreachable');
   }
 
   Future<void> _submitIntent(String text, String source, {int? presetId}) async {
