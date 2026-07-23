@@ -986,7 +986,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 24),
             _HomeLink(label: 'View history', screenBuilder: (_) => const HistoryScreen()),
-            _HomeLink(label: 'Manage presets', screenBuilder: (_) => const ManagePresetsScreen()),
+            _HomeLink(label: 'Manage options', screenBuilder: (_) => const ManagePresetsScreen()),
             _HomeLink(label: 'Status & troubleshooting', screenBuilder: (_) => const StatusScreen()),
             _HomeLink(label: 'About', screenBuilder: (_) => const AboutScreen()),
           ],

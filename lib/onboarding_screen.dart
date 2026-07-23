@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'app_settings.dart';
 import 'oem_autostart_copy.dart';
@@ -23,6 +24,18 @@ class OnboardingScreen extends StatefulWidget {
   final Future<bool?> Function() requestPermission;
   final Future<void> Function() completeOnboarding;
 
+  /// Battery-optimization-exemption check/request — the standard Android
+  /// dialog, same as the Status screen's card (see that screen's doc for why
+  /// this is distinct from the OEM Autostart Manager screens shown on this
+  /// same onboarding step, which have no public API). Folded into onboarding
+  /// itself (not just Status) so a user can grant it in the same flow they
+  /// already granted the overlay permission in, rather than needing to find
+  /// Status later — Dinesh's ask 2026-07-24, since the request itself is a
+  /// single system dialog with no extra plumbing beyond what Status already
+  /// has.
+  final Future<bool> Function() checkBatteryExemption;
+  final Future<void> Function() requestBatteryExemption;
+
   /// Called after [completeOnboarding] resolves on the final step. Optional
   /// because this screen doesn't own navigation (nothing wires it into
   /// `MyApp` yet — that's T18's job); it exists purely so a future caller,
@@ -34,13 +47,25 @@ class OnboardingScreen extends StatefulWidget {
     super.key,
     Future<bool> Function()? checkPermission,
     Future<bool?> Function()? requestPermission,
+    Future<bool> Function()? checkBatteryExemption,
+    Future<void> Function()? requestBatteryExemption,
     Future<void> Function()? completeOnboarding,
     this.onFinished,
   })  : checkPermission = checkPermission ?? FlutterOverlayWindow.isPermissionGranted,
         requestPermission = requestPermission ?? FlutterOverlayWindow.requestPermission,
+        checkBatteryExemption = checkBatteryExemption ?? _defaultCheckBatteryExemption,
+        requestBatteryExemption = requestBatteryExemption ?? _defaultRequestBatteryExemption,
         completeOnboarding = completeOnboarding ?? _defaultCompleteOnboarding;
 
   static Future<void> _defaultCompleteOnboarding() => const AppSettings().setOnboardingCompleted(true);
+
+  // Top-level-function tear-offs, not inline closures, so this constructor
+  // can stay `const` — see status_screen.dart's identical pattern/doc.
+  static Future<bool> _defaultCheckBatteryExemption() => Permission.ignoreBatteryOptimizations.isGranted;
+
+  static Future<void> _defaultRequestBatteryExemption() async {
+    await Permission.ignoreBatteryOptimizations.request();
+  }
 
   @override
   State<OnboardingScreen> createState() => _OnboardingScreenState();
@@ -52,6 +77,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
   final PageController _controller = PageController();
   int _step = 0;
   bool? _permissionGranted;
+
+  /// Same null-while-checking convention as [_permissionGranted]. Lives on
+  /// the same step as the OEM autostart guidance (step 3, index 3) since
+  /// both are "keep the background service alive" asks.
+  bool? _batteryExempt;
 
   @override
   void initState() {
@@ -78,6 +108,12 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
     if (state == AppLifecycleState.resumed && _step == 2) {
       _refreshPermission();
     }
+    // Same reasoning, one step later: the battery-exemption system dialog
+    // (step 3, alongside OEM autostart guidance) also returns immediately,
+    // before the user has actually answered it.
+    if (state == AppLifecycleState.resumed && _step == 3) {
+      _refreshBatteryExemption();
+    }
   }
 
   Future<void> _refreshPermission() async {
@@ -88,6 +124,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
   Future<void> _requestPermission() async {
     await widget.requestPermission();
     await _refreshPermission();
+  }
+
+  Future<void> _refreshBatteryExemption() async {
+    final exempt = await widget.checkBatteryExemption();
+    if (mounted) setState(() => _batteryExempt = exempt);
+  }
+
+  Future<void> _requestBatteryExemption() async {
+    await widget.requestBatteryExemption();
+    await _refreshBatteryExemption();
   }
 
   void _next() {
@@ -114,6 +160,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
     // but re-checking whenever step 3 comes into view (including navigating
     // back to it) keeps the displayed status honest either way.
     if (index == 2) _refreshPermission();
+    if (index == 3) _refreshBatteryExemption();
   }
 
   @override
@@ -135,7 +182,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
                     granted: _permissionGranted,
                     onGrant: _requestPermission,
                   ),
-                  const _OemReliabilityStep(),
+                  _OemReliabilityStep(
+                    batteryExempt: _batteryExempt,
+                    onRequestBatteryExemption: _requestBatteryExemption,
+                  ),
                   const _YourDataStep(),
                 ],
               ),
@@ -300,22 +350,45 @@ class _PermissionStep extends StatelessWidget {
 }
 
 class _OemReliabilityStep extends StatelessWidget {
-  const _OemReliabilityStep();
+  final bool? batteryExempt;
+  final Future<void> Function() onRequestBatteryExemption;
+
+  const _OemReliabilityStep({required this.batteryExempt, required this.onRequestBatteryExemption});
 
   @override
   Widget build(BuildContext context) {
+    final String statusText;
+    final Color statusColor;
+    if (batteryExempt == null) {
+      statusText = 'Checking…';
+      statusColor = Colors.white54;
+    } else if (batteryExempt == true) {
+      statusText = 'Exempt — background restrictions won\'t apply';
+      statusColor = Colors.greenAccent;
+    } else {
+      statusText = 'Not exempt yet';
+      statusColor = Colors.orangeAccent;
+    }
+
     return _StepBody(
       icon: Icons.battery_alert_outlined,
       headline: 'Some phones need one more step',
       body:
           'Certain phone makers aggressively stop background apps to save '
-          'battery, which can silently stop the prompts. If your phone is one '
-          'of these, allow autostart / unrestricted battery use so monitoring '
-          'keeps running. If you\'re not sure, you can always check this again '
-          'later from Status & troubleshooting.',
+          'battery, which can silently stop the prompts. Grant battery-'
+          'optimization exemption below — a standard Android setting, one tap '
+          '— and, if your phone is one of the makers listed, also allow '
+          'autostart / unrestricted battery use so monitoring keeps running. '
+          'If you\'re not sure, you can always check both again later from '
+          'Status & troubleshooting.',
       extra: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Text(statusText, style: TextStyle(color: statusColor, fontSize: 14)),
+          const SizedBox(height: 8),
+          if (batteryExempt != true)
+            ElevatedButton(onPressed: onRequestBatteryExemption, child: const Text('Disable battery optimization')),
+          const SizedBox(height: 20),
           for (final g in oemAutostartGuidance) Text('• ${g.vendor}', style: const TextStyle(color: Colors.white70, fontSize: 13)),
           const SizedBox(height: 8),
           const Text('My phone isn\'t listed?', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),

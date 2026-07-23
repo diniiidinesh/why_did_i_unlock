@@ -7,6 +7,8 @@ void main() {
     WidgetTester tester, {
     Future<bool> Function()? checkPermission,
     Future<bool?> Function()? requestPermission,
+    Future<bool> Function()? checkBatteryExemption,
+    Future<void> Function()? requestBatteryExemption,
     Future<void> Function()? completeOnboarding,
     VoidCallback? onFinished,
   }) {
@@ -14,6 +16,8 @@ void main() {
       home: OnboardingScreen(
         checkPermission: checkPermission ?? () async => false,
         requestPermission: requestPermission ?? () async => true,
+        checkBatteryExemption: checkBatteryExemption ?? () async => false,
+        requestBatteryExemption: requestBatteryExemption ?? () async {},
         completeOnboarding: completeOnboarding ?? () async {},
         onFinished: onFinished,
       ),

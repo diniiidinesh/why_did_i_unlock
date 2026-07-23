@@ -216,7 +216,7 @@ class _ManagePresetsScreenState extends State<ManagePresetsScreen> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
-        title: const Text('Manage presets'),
+        title: const Text('Manage options'),
         actions: [
           TextButton(
             onPressed: presets == null ? null : _restoreDefaults,

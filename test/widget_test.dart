@@ -43,7 +43,7 @@ void main() {
     expect(find.text('Unlock prompts'), findsOneWidget);
     expect(find.byType(Switch), findsOneWidget);
     expect(find.text('View history'), findsOneWidget);
-    expect(find.text('Manage presets'), findsOneWidget);
+    expect(find.text('Manage options'), findsOneWidget);
     expect(find.text('Status & troubleshooting'), findsOneWidget);
     expect(find.text('About'), findsOneWidget);
   });
