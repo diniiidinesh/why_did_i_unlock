@@ -345,6 +345,36 @@ const List<String> _defaultPresetLabels = [
   'Commute',
 ];
 
+/// A dashboard time window (T14) — every insight query is windowed and
+/// index-backed (docs/DATA_MODEL.md §8), never a full-table scan, since
+/// retention can legitimately keep years of rows around. [today] is the
+/// user's LOCAL calendar day (what "today" means to a person looking at a
+/// dashboard); [last7Days]/[last30Days] are rolling windows from now, not
+/// calendar-aligned — see [IntentStore._windowStart].
+enum InsightWindow { today, last7Days, last30Days }
+
+/// Which bucket a declared/no-intent event falls into for the Home donut
+/// (T18 assigns labels/colors — see `lib/insights/outcome_donut.dart`'s doc
+/// on why the painter itself takes plain `DonutSlice` data, not this type).
+enum OutcomeCategory { intentDone, intentAbandoned, noIntent }
+
+/// One bucket's count from [IntentStore.outcomeBreakdown].
+class OutcomeCount {
+  final OutcomeCategory category;
+  final int count;
+  const OutcomeCount({required this.category, required this.count});
+}
+
+/// Completion-duration stats from [IntentStore.completionDurationStats] —
+/// see that method's doc for the median/mean computation and its known
+/// simplification (screen-off spans aren't excluded, docs/DATA_MODEL.md §6).
+class DurationStats {
+  final double medianSeconds;
+  final double meanSeconds;
+  final int sampleCount;
+  const DurationStats({required this.medianSeconds, required this.meanSeconds, required this.sampleCount});
+}
+
 /// Repository over the on-device SQLite schema (`unlock_log`, `intent_log`,
 /// `intent_preset` — see docs/DATA_MODEL.md for the full ERD and rationale).
 /// Reused by BOTH the background engine (the sole writer — see CLAUDE.md §3)
@@ -675,6 +705,132 @@ class IntentStore {
         presetId: row['preset_id'] as int?,
         unlockId: row['unlock_id'] as int?,
       );
+
+  // ---------------------------------------------------------------------
+  // Insight queries (T14) — windowed counts, outcome breakdown, and
+  // SQL-computed completion-duration stats feeding the Home screen's cards
+  // (T18) and donut (T15). See docs/DATA_MODEL.md §6/§8 for the metric
+  // honesty and windowing/indexing rules these follow.
+  // ---------------------------------------------------------------------
+
+  /// Inclusive lower boundary for [window], as a UTC instant — every stored
+  /// timestamp is UTC epoch ms, so the conversion happens here, once, rather
+  /// than at every call site. [InsightWindow.today] is LOCAL midnight
+  /// (what a user means by "today"), converted to UTC; the rolling windows
+  /// are relative to [now], not calendar-aligned. [now] is injectable for
+  /// tests; defaults to the real current time.
+  DateTime _windowStart(InsightWindow window, DateTime now) {
+    switch (window) {
+      case InsightWindow.today:
+        return DateTime(now.year, now.month, now.day).toUtc();
+      case InsightWindow.last7Days:
+        return now.toUtc().subtract(const Duration(days: 7));
+      case InsightWindow.last30Days:
+        return now.toUtc().subtract(const Duration(days: 30));
+    }
+  }
+
+  /// Total unlocks in [window] — every `unlock_log` row regardless of
+  /// outcome. Per docs/DATA_MODEL.md §6, this is a FLOOR not a truth when
+  /// the service has been dead, but it's still the correct count of what
+  /// WAS observed; the Home card should label it accordingly, not this query.
+  Future<int> unlockCount({required InsightWindow window, DateTime? now}) async {
+    final since = _windowStart(window, now ?? DateTime.now());
+    final rows = await _db.rawQuery(
+      'SELECT COUNT(*) AS n FROM unlock_log WHERE unlocked_at >= ?',
+      [since.millisecondsSinceEpoch],
+    );
+    return Sqflite.firstIntValue(rows) ?? 0;
+  }
+
+  /// Prompts actually shown in [window] — the numerator for a "prompt rate"
+  /// against [unlockCount]'s denominator.
+  Future<int> promptShownCount({required InsightWindow window, DateTime? now}) async {
+    final since = _windowStart(window, now ?? DateTime.now());
+    final rows = await _db.rawQuery(
+      'SELECT COUNT(*) AS n FROM unlock_log WHERE unlocked_at >= ? AND prompt_shown = 1',
+      [since.millisecondsSinceEpoch],
+    );
+    return Sqflite.firstIntValue(rows) ?? 0;
+  }
+
+  /// Outcome breakdown for the Home donut — returns plain counts per
+  /// [OutcomeCategory]; T18 assigns labels/colors when building
+  /// `DonutSlice`s (see that class's doc for why the painter itself has no
+  /// `IntentStore` dependency). Windowed on `declared_at` (when the user
+  /// engaged), not `completed_at`, so an intent declared inside the window
+  /// but only dismissed/abandoned later still counts toward the window it
+  /// was DECLARED in — the natural reading of "what happened today."
+  Future<List<OutcomeCount>> outcomeBreakdown({required InsightWindow window, DateTime? now}) async {
+    final since = _windowStart(window, now ?? DateTime.now());
+    final rows = await _db.rawQuery(
+      '''
+      SELECT kind, status, COUNT(*) AS n
+      FROM intent_log
+      WHERE declared_at >= ?
+      GROUP BY kind, status
+      ''',
+      [since.millisecondsSinceEpoch],
+    );
+    return rows.map((row) {
+      final kind = _kindFromDb(row['kind'] as String);
+      final status = _statusFromDb((row['status'] as String?) ?? 'done');
+      final category = kind == IntentKind.noIntent
+          ? OutcomeCategory.noIntent
+          : (status == IntentStatus.abandoned ? OutcomeCategory.intentAbandoned : OutcomeCategory.intentDone);
+      return OutcomeCount(category: category, count: row['n'] as int);
+    }).toList();
+  }
+
+  /// Completion-duration stats (median headline, mean secondary — see
+  /// docs/DATA_MODEL.md §6/§9: "time to complete a task" really means "time
+  /// until the bubble was dismissed") over `status='done'` rows DECLARED
+  /// within [window]. Null on zero matching rows — a real "not enough data
+  /// yet" state, never a fabricated zero duration.
+  ///
+  /// Median is computed exactly per docs/DATA_MODEL.md §8's decision: COUNT
+  /// first, then a single `ORDER BY ... LIMIT 1 OFFSET n ~/ 2` query — one
+  /// middle row, not an averaged pair on an even count. Deliberately simple:
+  /// this is a directional headline metric, not a statistic anyone audits
+  /// to the second.
+  ///
+  /// **Known simplification, not solved here:** does not exclude intents
+  /// whose open period spanned a screen-off, which docs/DATA_MODEL.md §6
+  /// treats as an ideal — the schema has no persisted lock-event table to
+  /// detect that from (`onLock` in main.dart is logged via `debugPrint`
+  /// only, never written to a table), so there's nothing to join against.
+  Future<DurationStats?> completionDurationStats({required InsightWindow window, DateTime? now}) async {
+    final since = _windowStart(window, now ?? DateTime.now());
+    final countRows = await _db.rawQuery(
+      '''
+      SELECT COUNT(*) AS n, AVG(completed_at - declared_at) AS mean_ms
+      FROM intent_log
+      WHERE status = ? AND declared_at >= ?
+      ''',
+      [_statusToDb(IntentStatus.done), since.millisecondsSinceEpoch],
+    );
+    final n = Sqflite.firstIntValue(countRows) ?? 0;
+    if (n == 0) return null;
+    final meanMs = (countRows.first['mean_ms'] as num).toDouble();
+
+    final medianRows = await _db.rawQuery(
+      '''
+      SELECT (completed_at - declared_at) AS duration_ms
+      FROM intent_log
+      WHERE status = ? AND declared_at >= ?
+      ORDER BY duration_ms
+      LIMIT 1 OFFSET ?
+      ''',
+      [_statusToDb(IntentStatus.done), since.millisecondsSinceEpoch, n ~/ 2],
+    );
+    final medianMs = (medianRows.first['duration_ms'] as num).toDouble();
+
+    return DurationStats(
+      medianSeconds: medianMs / 1000,
+      meanSeconds: meanMs / 1000,
+      sampleCount: n,
+    );
+  }
 
   // ---------------------------------------------------------------------
   // intent_preset — user-editable capture-screen pills. See

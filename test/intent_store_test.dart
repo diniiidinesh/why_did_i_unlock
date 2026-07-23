@@ -658,4 +658,86 @@ void main() {
       expect(events.first.text, 'Payments');
     });
   });
+
+  group('28. Insight queries (T14)', () {
+    // Real DateTime.now() (not a fixed historical date) throughout this
+    // group — 7d/30d windowing is pure relative subtraction (timezone-safe),
+    // but `today` is local-calendar-day, which would be flaky against a
+    // fixed UTC instant on a machine in a different timezone. Using the
+    // actual "now" and only relative offsets from it keeps every assertion
+    // valid regardless of where the test runs.
+    test('unlockCount / promptShownCount respect the window boundary', () async {
+      final now = DateTime.now();
+      await store.insertUnlock(unlockedAt: now.subtract(const Duration(days: 40)), promptShown: true); // outside 30d
+      await store.insertUnlock(unlockedAt: now.subtract(const Duration(days: 3)), promptShown: true); // inside 7d/30d
+      await store.insertUnlock(
+        unlockedAt: now.subtract(const Duration(days: 3)),
+        promptShown: false,
+        skipReason: SkipReason.cooldown,
+      );
+      await store.insertUnlock(unlockedAt: now, promptShown: true); // inside today too
+
+      expect(await store.unlockCount(window: InsightWindow.last30Days, now: now), 3);
+      expect(await store.unlockCount(window: InsightWindow.last7Days, now: now), 3);
+      expect(await store.promptShownCount(window: InsightWindow.last7Days, now: now), 2);
+      expect(await store.unlockCount(window: InsightWindow.today, now: now), 1);
+    });
+
+    test('outcomeBreakdown groups into intentDone / intentAbandoned / noIntent', () async {
+      final now = DateTime.now();
+      await store.insertOpenIntent(_event(clientId: 'done1', declaredAt: now, completedAt: now));
+      await store.markIntentDone(clientId: 'done1', completedAt: now);
+      await store.insertOpenIntent(_event(clientId: 'aband1', declaredAt: now, completedAt: now));
+      await store.sweepOpenToAbandoned();
+      await store.insertEvent(_event(
+        clientId: 'ni1',
+        kind: IntentKind.noIntent,
+        source: null,
+        text: 'Just Like That',
+        declaredAt: now,
+        completedAt: now,
+      ));
+
+      final breakdown = await store.outcomeBreakdown(window: InsightWindow.today, now: now);
+      final byCategory = {for (final b in breakdown) b.category: b.count};
+      expect(byCategory[OutcomeCategory.intentDone], 1);
+      expect(byCategory[OutcomeCategory.intentAbandoned], 1);
+      expect(byCategory[OutcomeCategory.noIntent], 1);
+    });
+
+    test('outcomeBreakdown excludes events declared outside the window', () async {
+      final now = DateTime.now();
+      final old = now.subtract(const Duration(days: 40));
+      await store.insertEvent(_event(clientId: 'old', declaredAt: old, completedAt: old));
+      expect(await store.outcomeBreakdown(window: InsightWindow.last30Days, now: now), isEmpty);
+    });
+
+    test('completionDurationStats is null with no done rows in window', () async {
+      expect(await store.completionDurationStats(window: InsightWindow.last7Days), isNull);
+    });
+
+    test('completionDurationStats computes median/mean over done rows only, ignoring abandoned', () async {
+      final now = DateTime.now();
+      Future<void> declareDone(String id, int seconds) async {
+        await store.insertOpenIntent(_event(clientId: id, declaredAt: now, completedAt: now));
+        await store.markIntentDone(clientId: id, completedAt: now.add(Duration(seconds: seconds)));
+      }
+
+      // Durations 10s/20s/90s: mean = 40s, but median (offset n~/2 = 1 on the
+      // ascending-ordered list) is the middle value, 20s — asymmetric on
+      // purpose so this test can't pass with mean and median swapped.
+      await declareDone('d10', 10);
+      await declareDone('d20', 20);
+      await declareDone('d90', 90);
+      // An abandoned row must not pollute either stat.
+      await store.insertOpenIntent(_event(clientId: 'aband2', declaredAt: now, completedAt: now));
+      await store.sweepOpenToAbandoned();
+
+      final stats = await store.completionDurationStats(window: InsightWindow.today, now: now);
+      expect(stats, isNotNull);
+      expect(stats!.sampleCount, 3);
+      expect(stats.medianSeconds, 20);
+      expect(stats.meanSeconds, 40);
+    });
+  });
 }
