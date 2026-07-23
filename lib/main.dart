@@ -291,13 +291,33 @@ const String _overlayConfigPortName = 'com.whydidiunlock.overlay_config_port';
 /// own display metrics directly (it has an actual UI), so there's no need
 /// to fall back on a native-provided value the way the headless background
 /// engine does.
-void triggerCapturePromptManually({required int screenWidth, required int screenHeight}) {
+///
+/// Returns `true` if the message was actually sent to the background isolate,
+/// `false` if its port couldn't be found (the background engine hasn't
+/// registered it yet, or isn't running at all). This return value was added
+/// after an on-device investigation (2026-07-23, T6 manual testing) found the
+/// button silently doing nothing when the background engine never started —
+/// `void` let that failure look identical to success from the caller's side,
+/// which directly contradicts this button's own purpose: "show me the prompt
+/// now" exists to surface real problems (see the permission-check note on
+/// `_showCaptureScreenManually` below), and a background engine that never
+/// came up is exactly such a problem, not something to hide.
+///
+/// This is a **fire-and-forget send**, not a round trip — `true` means "the
+/// port existed and the message was handed off," not "the capture screen is
+/// now guaranteed to appear" (permission/overlay-active checks still happen
+/// asynchronously on the other side, in `_showCaptureScreenManually`, and are
+/// not reported back here). Good enough to distinguish "nothing will ever
+/// happen" from "something is in flight" — richer round-trip status would
+/// need a reply port, deferred as a future improvement if it's ever needed.
+bool triggerCapturePromptManually({required int screenWidth, required int screenHeight}) {
   final port = IsolateNameServer.lookupPortByName(_manualPromptPortName);
   if (port == null) {
     debugPrint('⚠️ Could not find manual-prompt port — background engine not ready?');
-    return;
+    return false;
   }
   port.send({'screenWidth': screenWidth, 'screenHeight': screenHeight});
+  return true;
 }
 
 @pragma("vm:entry-point")

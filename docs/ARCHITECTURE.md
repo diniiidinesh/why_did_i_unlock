@@ -112,7 +112,12 @@ exists to make the "why" durable.
     which deliberately bypasses prompts-enabled/quiet-hours/cooldown/probability (the
     whole point is showing it on demand, not re-running triage) but keeps the permission
     check and the active-overlay guard. It also does NOT write an `unlock_log` row — this
-    isn't a real unlock, and logging it would inflate "unlocks today."
+    isn't a real unlock, and logging it would inflate "unlocks today." Returns `bool`
+    (added 2026-07-23, after an on-device T6 investigation) — `true` iff the port lookup
+    succeeded and the message was handed off, `false` if the background engine hasn't
+    registered it yet. Fire-and-forget, not a round trip: `true` is not a guarantee the
+    capture screen actually appears (permission/overlay-active are still checked
+    asynchronously on the other side) — see the function's own doc comment.
   - `com.whydidiunlock.overlay_config_port` (T11) — **background → overlay**, the
     reverse of every port above it and the first one registered by the OVERLAY isolate
     rather than by `backgroundMain` (in `_OverlayRootState.initState`, not

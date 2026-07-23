@@ -74,6 +74,38 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 - **[P2] Configurable durations via a Settings screen** — cooldown (shipped hardcoded at **1 minute**), probability (shipped hardcoded at **50%**), and, once built, timer duration should become user-configurable via presets + custom (e.g. 5/10/15 min), mirroring the intent-preset UI. Both Sprint 3 triage values are named constants + a `CompositePromptPolicy` so wiring a future presets UI is small, not a rework. See also the "Triage customization UI" item above.
 - **[decision] Bubble customization (color/size/opacity)** — deferred correctly: needs (a) a preferences-persistence layer (likely `shared_preferences`, distinct from the `sqflite` intent log) and (b) monetization clarity, since this was a candidate Pro-gated feature and free-vs-Pro is undecided (CLAUDE.md §11). Don't build gating before the model is chosen.
 
+## T6 "no prompt at all" investigation (2026-07-23) — likely resolved, needs one confirmation
+
+Cursor reported "Show me the prompt now" doing nothing, and a **real unlock also not
+showing the capture screen** on the same test run. Root cause is very likely a tooling
+artifact, not a `backgroundMain`/`main.dart` regression: Cursor tested via a throwaway
+`tool/preview_screens.dart` harness (`flutter run -t tool/preview_screens.dart`, debug),
+not the real `lib/main.dart` entrypoint. `backgroundMain()`/`overlayMain()` are
+`@pragma("vm:entry-point")`, which only preserves + registers them as natively-invokable
+entry points if they're reachable from **whichever file the compiler was told is the
+entrypoint** — `tool/preview_screens.dart` almost certainly doesn't import `lib/main.dart`,
+so that build's Dart bundle never contained `backgroundMain` at all, explaining every
+symptom (service alive but `backgroundMain ready` never logged, all
+`IsolateNameServer` lookups returning null, manual trigger and real unlocks both silently
+doing nothing) as one cause, not several.
+
+- **[P0] Confirm on the real entrypoint** — `flutter run --release -d <device>`, default
+  `lib/main.dart`, no `-t`. If the capture screen still doesn't appear on a real unlock
+  here, this is a genuine regression needing real investigation, not a tooling artifact —
+  escalate immediately. If it works normally, the diagnosis above is confirmed and this
+  item closes.
+- **[P1] `tool/preview_screens.dart` needs a warning comment** (Cursor's file, not edited
+  here) — safe for pure-UI screen previews only; anything touching the background/overlay
+  engines or `IsolateNameServer` needs the real entrypoint. Suggested wording already
+  handed to Cursor in-session.
+- **[DONE 2026-07-23]** `triggerCapturePromptManually()` now returns `bool` (was `void`) —
+  `false` when the background engine's port can't be found, so the Status screen can show
+  an honest "background engine not reachable" instead of always implying success. See
+  `lib/main.dart` doc comment and `docs/ARCHITECTURE.md` §3. Cursor can now wire this into
+  `status_screen.dart`'s UI (currently ignores the return value, per its `void`-typed
+  `ManualPromptTrigger` — Dart allows this, no compile break, but the richer signal is
+  unused until Status reads it).
+
 ## Docs housekeeping (assessed 2026-07-23, not yet actioned)
 
 - **[P2] `TEST_PLAN.md` case numbering is fragmented** — 1–9, 5e/5f/5g sub-cases, 10–12, 13–18, 20–27, 30–35, 40–42, 45–58, grown organically across sub-sections. Not broken, just hard to scan. A renumbering pass is possible but risks breaking hand-written cross-references elsewhere — needs care, not urgency.
