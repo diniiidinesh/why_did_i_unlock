@@ -828,6 +828,32 @@ Future<void> _presentCaptureOverlay(int screenWidth, int screenHeight) async {
     overlayContent: 'Declare your intent',
   );
   debugPrint('🟣 showOverlay called (${screenWidth}x$screenHeight capture screen)');
+
+  // Push a fresh preset list on EVERY capture present — real unlock or
+  // manual trigger, cold overlay-engine start or a long-cached engine being
+  // reused. Fixes docs/BACKLOG.md's [P0] "overlay presets go stale for an
+  // entire session" bug: the overlay isolate only ever refreshed its
+  // `_presets` in `initState` and after a bubble dismiss, so a session that
+  // went through "Just Like That" answers (no dismiss) or simply never
+  // showed a bubble again after a Manage Options edit kept serving a stale
+  // list — sometimes for the engine's entire remaining lifetime, until a
+  // reboot. See docs/ARCHITECTURE.md §8.1 for the general "cached engine
+  // holding stale state" pattern this fits.
+  //
+  // Fire-and-forget and best-effort, not awaited before returning: this must
+  // not sit on the unlock hot path (CLAUDE.md §8's ~500ms target — the same
+  // reason `_logUnlock` above is also un-awaited-relative-to-the-caller by
+  // running after `showOverlay()`, not before it). On a truly cold overlay
+  // engine start, `_overlayConfigPortName` may not be registered yet (the
+  // overlay's own `initState` hasn't run far enough) — that's fine, because
+  // the overlay's own `_requestPresets()` pull (with its bounded retry,
+  // called from `initState`) is what reliably lands presets in that case.
+  // This push exists specifically for every OTHER present, where the port
+  // is already live from a previous show and there is no reason to wait for
+  // the overlay to notice anything changed.
+  unawaited(_ensureIntentStore().then((store) {
+    if (store != null) _replyActivePresetsToOverlay(store);
+  }));
 }
 
 /// The manual-trigger counterpart to [_showCaptureScreen] — reached via
