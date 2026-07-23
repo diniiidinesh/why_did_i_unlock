@@ -74,6 +74,13 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 - **[P2] Configurable durations via a Settings screen** — cooldown (shipped hardcoded at **1 minute**), probability (shipped hardcoded at **50%**), and, once built, timer duration should become user-configurable via presets + custom (e.g. 5/10/15 min), mirroring the intent-preset UI. Both Sprint 3 triage values are named constants + a `CompositePromptPolicy` so wiring a future presets UI is small, not a rework. See also the "Triage customization UI" item above.
 - **[decision] Bubble customization (color/size/opacity)** — deferred correctly: needs (a) a preferences-persistence layer (likely `shared_preferences`, distinct from the `sqflite` intent log) and (b) monetization clarity, since this was a candidate Pro-gated feature and free-vs-Pro is undecided (CLAUDE.md §11). Don't build gating before the model is chosen.
 
+## Docs housekeeping (assessed 2026-07-23, not yet actioned)
+
+- **[P2] `TEST_PLAN.md` case numbering is fragmented** — 1–9, 5e/5f/5g sub-cases, 10–12, 13–18, 20–27, 30–35, 40–42, 45–58, grown organically across sub-sections. Not broken, just hard to scan. A renumbering pass is possible but risks breaking hand-written cross-references elsewhere — needs care, not urgency.
+- **[P2] `ARCHITECTURE.md` §3 (Channels)** has grown into a long nested bullet list (four `IsolateNameServer` ports, each a paragraph) — consider a table like §2 already uses, for scannability.
+- **[P2] `README.md` doc-map audit** — unverified whether `docs/debug/` and `docs/PRIVACY_POLICY.md` have rows (added `docs/erd/` and `docs/PLAY_SUBMISSION.md` this session; less certain about these two). Five-minute check, one file.
+- **[P2] `DATA_MODEL.md` §11/§12 numbering** — fixed a mixup here once this session; worth one glance to confirm it stayed fixed.
+
 ## Exploratory (bigger bets — need scoping before they enter any sprint)
 
 - **[explore] Suggest which app to open** — from the declared intent, surface/deep-link the relevant app (e.g. a payment intent → payments app).
