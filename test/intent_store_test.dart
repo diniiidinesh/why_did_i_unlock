@@ -589,4 +589,73 @@ void main() {
       // Capture-screen-side layout validity is covered in widget tests, not here.
     });
   });
+
+  group('26. IntentDismissal message validation', () {
+    test('round-trips through toMessage/fromMessage', () {
+      final dismissal = IntentDismissal(clientId: 'c1', completedAt: DateTime.utc(2026, 1, 1, 10, 5));
+      final rebuilt = IntentDismissal.fromMessage(dismissal.toMessage());
+      expect(rebuilt.clientId, dismissal.clientId);
+      expect(rebuilt.completedAt, dismissal.completedAt);
+    });
+
+    test('rejects missing clientId', () {
+      final msg = IntentDismissal(clientId: 'c1', completedAt: DateTime.utc(2026, 1, 1)).toMessage();
+      msg.remove('clientId');
+      expect(() => IntentDismissal.fromMessage(msg), throwsFormatException);
+    });
+
+    test('rejects empty clientId', () {
+      final msg = IntentDismissal(clientId: '', completedAt: DateTime.utc(2026, 1, 1)).toMessage();
+      expect(() => IntentDismissal.fromMessage(msg), throwsFormatException);
+    });
+
+    test('rejects a non-int completedAt', () {
+      final msg = IntentDismissal(clientId: 'c1', completedAt: DateTime.utc(2026, 1, 1)).toMessage();
+      msg['completedAt'] = 'not-a-timestamp';
+      expect(() => IntentDismissal.fromMessage(msg), throwsFormatException);
+    });
+
+    test('rejects a missing completedAt', () {
+      final msg = IntentDismissal(clientId: 'c1', completedAt: DateTime.utc(2026, 1, 1)).toMessage();
+      msg.remove('completedAt');
+      expect(() => IntentDismissal.fromMessage(msg), throwsFormatException);
+    });
+  });
+
+  group('27. declare-then-dismiss via the two-message shape (end-to-end at the store level)', () {
+    test('a declare message followed by a dismiss message produces one done row', () async {
+      final declared = DateTime.utc(2026, 1, 1, 10, 0, 0);
+      final dismissed = DateTime.utc(2026, 1, 1, 10, 3, 0);
+
+      // Mirrors what backgroundMain's listener does for 'declare' then
+      // 'dismiss' messages — not testing main.dart directly (it's
+      // unreachable from tests, see docs/TEST_PLAN.md), but confirming the
+      // store-level contract those two calls rely on.
+      await store.insertOpenIntent(_event(clientId: 'e2e', declaredAt: declared, completedAt: declared));
+      final dismissal = IntentDismissal(clientId: 'e2e', completedAt: dismissed);
+      await store.markIntentDone(clientId: dismissal.clientId, completedAt: dismissal.completedAt);
+
+      final events = await store.recentEvents();
+      expect(events, hasLength(1));
+      expect(events.first.status, IntentStatus.done);
+      expect(events.first.completedAt, dismissed);
+      expect(events.first.declaredAt, declared);
+    });
+
+    test('a declare message with no matching dismiss survives a sweep as abandoned', () async {
+      final declared = DateTime.utc(2026, 1, 1, 10, 0, 0);
+      await store.insertOpenIntent(_event(clientId: 'e2e-crash', declaredAt: declared, completedAt: declared));
+
+      // Simulates the process dying before dismissal (reboot, OEM kill) and
+      // a fresh engine starting — backgroundMain calls this once at startup.
+      final swept = await store.sweepOpenToAbandoned();
+
+      expect(swept, 1);
+      final events = await store.recentEvents();
+      expect(events.first.status, IntentStatus.abandoned);
+      // The intent is NOT lost — this is the whole point of writing at
+      // declaration time instead of only at dismissal (docs/DATA_MODEL.md §4).
+      expect(events.first.text, 'Payments');
+    });
+  });
 }

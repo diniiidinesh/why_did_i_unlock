@@ -200,6 +200,41 @@ void _signalOverlayClosed() {
   port.send(true);
 }
 
+/// Name for a THIRD same-process port, direction reversed from the other
+/// two: main UI engine → background engine. Backs the Status screen's
+/// "show me the prompt now" button (T6) — a tester's way to verify the app
+/// actually works without waiting for a real unlock.
+///
+/// This has to be relayed to the background isolate rather than the Status
+/// screen calling `FlutterOverlayWindow.showOverlay()` directly, because
+/// `_overlayIsActive` is a plain background-isolate variable, not shared
+/// state — a direct call from the main engine would leave it `false` while
+/// a real overlay is actually showing, so the very next real unlock would
+/// try to show a second one on top of it. Routing through the background
+/// isolate means the manual trigger goes through the exact same
+/// `_overlayIsActive` guard a real unlock does.
+const String _manualPromptPortName = 'com.whydidiunlock.manual_prompt_port';
+
+/// Called from the MAIN UI ENGINE (the Status screen, T6) — the only
+/// function in this file callable directly from outside it, since Status
+/// lives in a different file/screen and needs a real entry point rather
+/// than plumbing through `main.dart`'s internals.
+///
+/// [screenWidth]/[screenHeight] must be the TRUE display size in raw device
+/// pixels (e.g. `MediaQuery.of(context).size * MediaQuery.of(context).devicePixelRatio`,
+/// rounded). Unlike the real unlock path, the main UI engine CAN read its
+/// own display metrics directly (it has an actual UI), so there's no need
+/// to fall back on a native-provided value the way the headless background
+/// engine does.
+void triggerCapturePromptManually({required int screenWidth, required int screenHeight}) {
+  final port = IsolateNameServer.lookupPortByName(_manualPromptPortName);
+  if (port == null) {
+    debugPrint('⚠️ Could not find manual-prompt port — background engine not ready?');
+    return;
+  }
+  port.send({'screenWidth': screenWidth, 'screenHeight': screenHeight});
+}
+
 @pragma("vm:entry-point")
 void backgroundMain() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -223,6 +258,20 @@ void backgroundMain() {
   overlayClosedPort.listen((_) {
     _overlayIsActive = false;
     debugPrint('🔵 Overlay closed signal received');
+  });
+
+  // Same cleared-then-registered reasoning as the two ports above — see
+  // that comment. This one flows the OPPOSITE direction (main → background):
+  // see _manualPromptPortName's doc for why the Status screen can't just
+  // call showOverlay() directly.
+  IsolateNameServer.removePortNameMapping(_manualPromptPortName);
+  final manualPromptPort = ReceivePort();
+  IsolateNameServer.registerPortWithName(manualPromptPort.sendPort, _manualPromptPortName);
+  manualPromptPort.listen((message) async {
+    final map = message as Map;
+    final width = (map['screenWidth'] as num?)?.toInt() ?? 0;
+    final height = (map['screenHeight'] as num?)?.toInt() ?? 0;
+    await _showCaptureScreenManually(width, height);
   });
 
   _unlockChannel.setMethodCallHandler((call) async {
@@ -565,6 +614,48 @@ Future<void> _showCaptureScreen(int screenWidth, int screenHeight) async {
   // onUnlock could arrive (a fresh async call — Dart doesn't serialize
   // re-entrant handler invocations) while this call is still awaiting
   // showOverlay(), and both would otherwise see _overlayIsActive == false.
+  await _presentCaptureOverlay(screenWidth, screenHeight);
+  // Logged AFTER showOverlay(), not before: the prompt reaching the screen is
+  // the time-critical part (CLAUDE.md §8's ~500ms target); this write is not
+  // (docs/DATA_MODEL.md §3c).
+  await _logUnlock(unlockedAt: unlockedAt, promptShown: true);
+}
+
+/// The actual `showOverlay()` call, shared by the real unlock path
+/// ([_showCaptureScreen]) and the manual trigger ([_showCaptureScreenManually],
+/// T6's "show me the prompt now"). Setting `_overlayIsActive` and the window
+/// params themselves must stay IDENTICAL between the two paths — a manual
+/// trigger is still a real overlay window with the same sizing/gravity
+/// constraints, just reached by a different route into this isolate. Split
+/// out specifically so there is exactly one place that can get the window
+/// flags/alignment wrong, not two copies that could drift.
+Future<void> _presentCaptureOverlay(int screenWidth, int screenHeight) async {
+  // Size the window from the true display size in raw device pixels — exactly
+  // what showOverlay() expects; see CLAUDE.md §5. We do NOT use
+  // PlatformDispatcher here because this runs in the headless background
+  // engine, which has no display surface and reports 0x0 on the real-unlock
+  // path — see the two callers for how each supplies a real value instead. We
+  // also avoid the plugin's WindowSize.fullCover, whose native screenHeight()
+  // under-covers the bottom on this device.
+  //
+  // alignment MUST be topLeft, not center. Confirmed via `dumpsys window
+  // windows`: with center gravity, Android fits the window's "parent" frame
+  // to exclude the nav bar (height 2337 = 2400 - 63px nav bar), then CENTERS
+  // our (taller) requested window inside that shrunk region — shifting it up
+  // ~31px (half the nav-bar inset) so the bottom lands 31px short of the true
+  // display bottom. That's the exposed-bottom bug; it's a gravity/fit
+  // artifact, not a size or position value problem (both were already
+  // correct). topLeft anchors to the true origin instead of centering within
+  // an inset-shrunk region.
+  //
+  // startPosition (0,0): pins the window to the true top-left; without it the
+  // plugin's default position shifts the window up by the status-bar height.
+  //
+  // Set BEFORE the await, not after: closes the race where a second trigger
+  // (a real unlock OR another manual trigger) could arrive (a fresh async
+  // call — Dart doesn't serialize re-entrant handler invocations) while this
+  // call is still awaiting showOverlay(), and both would otherwise see
+  // _overlayIsActive == false.
   _overlayIsActive = true;
   await FlutterOverlayWindow.showOverlay(
     height: screenHeight,
@@ -576,10 +667,39 @@ Future<void> _showCaptureScreen(int screenWidth, int screenHeight) async {
     overlayContent: 'Declare your intent',
   );
   debugPrint('🟣 showOverlay called (${screenWidth}x$screenHeight capture screen)');
-  // Logged AFTER showOverlay(), not before: the prompt reaching the screen is
-  // the time-critical part (CLAUDE.md §8's ~500ms target); this write is not
-  // (docs/DATA_MODEL.md §3c).
-  await _logUnlock(unlockedAt: unlockedAt, promptShown: true);
+}
+
+/// The manual-trigger counterpart to [_showCaptureScreen] — reached via
+/// [_manualPromptPortName] from the Status screen's "show me the prompt now"
+/// button (T6), not from a real unlock. Deliberately bypasses
+/// prompts-enabled, quiet hours, cooldown, and probability: the whole point
+/// of the button is to show the prompt regardless of triage state, so a
+/// tester isn't told "no, cooldown" when they explicitly asked to see it.
+///
+/// What it does NOT skip: the permission check (surfacing a real permission
+/// problem is exactly what this button exists to catch — silently
+/// succeeding would defeat its purpose) and the `_overlayIsActive` guard
+/// (can't show two overlay windows at once, manually triggered or not).
+///
+/// Deliberately does NOT call [_logUnlock] — this isn't a real unlock, and
+/// counting it would inflate "unlocks today" and the prompt-rate stats with
+/// test-only noise the metrics were never meant to include.
+Future<void> _showCaptureScreenManually(int screenWidth, int screenHeight) async {
+  final hasPermission = await _withTimeout('isPermissionGranted()', FlutterOverlayWindow.isPermissionGranted());
+  if (hasPermission != true) {
+    debugPrint('🧪 Manual prompt trigger: permission not granted, cannot show');
+    return;
+  }
+  if (screenWidth <= 0 || screenHeight <= 0) {
+    debugPrint('🧪 Manual prompt trigger: invalid screen size ($screenWidth x $screenHeight), cannot show');
+    return;
+  }
+  if (_overlayIsActive) {
+    debugPrint('🧪 Manual prompt trigger: overlay already active, skipping');
+    return;
+  }
+  await _presentCaptureOverlay(screenWidth, screenHeight);
+  debugPrint('🧪 Manual prompt shown (Status screen trigger)');
 }
 
 class MyApp extends StatelessWidget {

@@ -34,6 +34,10 @@ void main() {
     test('retentionPeriod defaults to oneYear', () async {
       expect(await settings.retentionPeriod(), RetentionPeriod.oneYear);
     });
+
+    test('onboardingCompleted defaults false — a fresh install shows onboarding', () async {
+      expect(await settings.onboardingCompleted(), isFalse);
+    });
   });
 
   group('31. round-trips', () {
@@ -61,6 +65,21 @@ void main() {
     test('retentionPeriod', () async {
       await settings.setRetentionPeriod(RetentionPeriod.forever);
       expect(await settings.retentionPeriod(), RetentionPeriod.forever);
+    });
+
+    test('onboardingCompleted', () async {
+      await settings.setOnboardingCompleted(true);
+      expect(await settings.onboardingCompleted(), isTrue);
+    });
+
+    test('a second AppSettings instance sees an onboarding-completed write immediately', () async {
+      // Same cross-isolate-visibility guarantee as the other settings —
+      // T4's onboarding flow runs in the main UI engine; _showCaptureScreen's
+      // eventual read of this (if ever needed) runs in the background
+      // engine. Confirms this flag isn't accidentally special-cased.
+      await settings.setOnboardingCompleted(true);
+      final other = const AppSettings();
+      expect(await other.onboardingCompleted(), isTrue);
     });
   });
 

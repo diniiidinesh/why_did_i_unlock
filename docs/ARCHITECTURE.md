@@ -78,17 +78,45 @@ exists to make the "why" durable.
   `onUnlock` with `{width, height}` args (native-provided display size), and `onLock`
   (no args). Handler installed by `backgroundMain`.
 - **`flutter_overlay_window` internal channels** (`x-slayer/*`): `showOverlay`,
-  `closeOverlay`, `resizeOverlay`, `updateFlag`, `isActive`, plus `shareData` /
-  `overlayListener` for overlay↔main-app messaging — this is the Sprint 3 intent-log
-  write path (`OverlayRoot._dismissBubble` / `_submitNoIntent` call `shareData()` with
-  an `IntentEvent.toMessage()` Map; `backgroundMain` subscribes `overlayListener` and
-  calls `IntentStore.insertEvent`). **Critical: `shareData()` calls from the overlay
-  isolate must be fire-and-forget (`unawaited(...)`), never `await`ed — see §5.**
-  Routing is native-side static-field-based (`WindowSetup.messenger`, set by whichever
-  engine last called the plugin's `onAttachedToEngine` — background attaches after
-  MainActivity in the normal launch path, so background wins); confirmed via a
-  real-device spike (native source read + swipe-from-Recents test) that this reaches
-  the background engine reliably, including after the main UI engine is destroyed.
+  `closeOverlay`, `resizeOverlay`, `updateFlag` — window lifecycle only. The plugin's own
+  `shareData`/`overlayListener` bridge is **not used** — see below.
+- **`IsolateNameServer` ports** (pure Dart, same-process, not a platform channel at all) —
+  overlay↔background messaging, replacing the plugin's `shareData()`/`overlayListener`
+  bridge used through early Sprint 3. That bridge routed through a single native static
+  field (`WindowSetup.messenger`) set by whichever engine last attached the plugin,
+  which the ephemeral main UI engine could silently hijack (confirmed via native source
+  read — see §5's fire-and-forget note, which is now historical: there is no reply to
+  await over this transport in the first place, since `SendPort.send()` is
+  synchronous/fire-and-forget by construction). Three named ports, all registered by
+  `backgroundMain`:
+  - `com.whydidiunlock.intent_write_port` — overlay → background. Carries three tagged
+    message shapes (a `type` field selects which `IntentStore` call the listener makes):
+    `declare` (an `IntentEvent.toMessage()`, from `_submitIntent` → `insertOpenIntent`),
+    `dismiss` (an `IntentDismissal.toMessage()`, from `_dismissBubble` →
+    `markIntentDone`), and `noIntent` (an `IntentEvent.toMessage()`, from
+    `_submitNoIntent` → `insertEvent`, atomic — see docs/DATA_MODEL.md §4 for why
+    declare/dismiss are two writes but no-intent is one).
+  - `com.whydidiunlock.overlay_closed_port` — overlay → background. Signals a REAL
+    `closeOverlay()` (dismiss or no-intent), replacing `FlutterOverlayWindow.isActive()`
+    — see §5.
+  - `com.whydidiunlock.manual_prompt_port` (added 2026-07-23, T6) — **main UI engine →
+    background**, the only port that flows this direction. Backs the Status screen's
+    "show me the prompt now" button — `triggerCapturePromptManually()` is the public
+    entry point Status calls directly (imports `main.dart`, doesn't need to touch its
+    internals). Can't be a direct `showOverlay()` call from the main engine instead,
+    because `_overlayIsActive` is a plain background-isolate variable: a direct call
+    would leave it `false` while a manually-triggered overlay is actually showing, so a
+    real unlock arriving moments later would try to show a second one on top of it.
+    Routing through the background isolate means the manual trigger goes through the
+    same `_overlayIsActive` guard a real unlock does — see `_showCaptureScreenManually`,
+    which deliberately bypasses prompts-enabled/quiet-hours/cooldown/probability (the
+    whole point is showing it on demand, not re-running triage) but keeps the permission
+    check and the active-overlay guard. It also does NOT write an `unlock_log` row — this
+    isn't a real unlock, and logging it would inflate "unlocks today."
+  - Also see `_ensureIntentStore`'s early call, replaced in the sweep — `backgroundMain`
+    calls `_sweepAbandonedIntents()` once per engine start, which both warms the store
+    open and reclassifies any `open` intent_log row left by a process that died before
+    dismissing it (docs/DATA_MODEL.md §3, cases 7/8).
 
 ## 4. Event flows
 
@@ -105,25 +133,48 @@ System ACTION_USER_PRESENT
 ```
 
 **Declare intent → bubble** (all inside the overlay engine): `OverlayRoot._submitIntent`
-→ `closeOverlay()` then `showOverlay()` at bubble (pill) size with `defaultFlag`. The
-close+reopen is required because flipping the window flag in place doesn't release input
-focus (would block touches in other apps). Screen/pill sizing is in **raw device pixels**
-(the plugin quirk); the pill dp is × `devicePixelRatio`.
+generates `clientId` ONCE (reused for both widget state and the relay below — calling
+the id generator twice would mint two different ids for the same intent) → **relays a
+`declare` message immediately**, before the window resize (this is what makes the
+declaration durable even if the process dies before the bubble is ever dismissed — see
+docs/DATA_MODEL.md §4) → `closeOverlay()` then `showOverlay()` at bubble (pill) size
+with `defaultFlag`. The close+reopen is required because flipping the window flag in
+place doesn't release input focus (would block touches in other apps). Screen/pill
+sizing is in **raw device pixels** (the plugin quirk); the pill dp is × `devicePixelRatio`.
 
-**Dismiss bubble:** `OverlayRoot._dismissBubble` → builds an `IntentEvent` (kind=intent)
-→ `unawaited(shareData(...))` (Sprint 3 write relay — fire-and-forget, see §5) →
-`closeOverlay()` then resets its own state back to capture mode (the overlay engine is
-cached and its widget state survives `closeOverlay`, so an explicit reset is required
-or a stale bubble reappears). `_submitNoIntent` (the "Just Like That" path) does the
-same `shareData()` relay with kind=no_intent before its own `closeOverlay()`.
+**Dismiss bubble:** `OverlayRoot._dismissBubble` → relays a minimal `dismiss` message
+(just `clientId` + `completedAt` — the declared fields were already persisted by the
+`declare` relay above, see `IntentDismissal`'s doc) → `closeOverlay()` then resets its
+own state back to capture mode (the overlay engine is cached and its widget state
+survives `closeOverlay`, so an explicit reset is required or a stale bubble reappears).
+`_submitNoIntent` (the "Just Like That" path) relays a single `noIntent` message (kind,
+source=null, text, matching declared/completed timestamps) before its own
+`closeOverlay()` — atomic, no separate declare/dismiss step, since there's no bubble to
+later dismiss.
 
-**Overlay message → stored row (Sprint 3):** `shareData(event.toMessage())` (overlay
-isolate) → native `OverlayService`'s `overlayMessageChannel` forwards via the static
-`WindowSetup.messenger` → background engine's `overlayListener` stream →
-`IntentEvent.fromMessage()` (validates: non-empty/length-capped text, valid kind/source
-combination, `declaredAt <= completedAt`; malformed messages are logged and dropped,
-never crash the isolate) → `IntentStore.insertEvent()` (`INSERT OR IGNORE` on
-`client_id`, idempotent against any retry/duplicate).
+**Overlay message → stored row:** `_sendToBackground(message)` (overlay isolate, via the
+`com.whydidiunlock.intent_write_port` `IsolateNameServer` port) → background engine's
+`intentWritePort` listener branches on the message's `type` tag:
+- `declare` → `IntentEvent.fromMessage()` (validates: non-empty/length-capped text, valid
+  kind/source combination, `declaredAt <= completedAt`, `presetId` int-or-absent) →
+  `IntentStore.insertOpenIntent()` — writes `status='open'`, resolves `unlock_id` via a
+  stateless lookup (docs/DATA_MODEL.md §4), idempotent on `client_id`.
+- `dismiss` → `IntentDismissal.fromMessage()` (validates `clientId` + `completedAt`) →
+  `IntentStore.markIntentDone()` — updates the matching `open` row to `done`; a no-op
+  (never a crash) if that row is missing or already `done`/`abandoned`.
+- `noIntent` → `IntentEvent.fromMessage()` → `IntentStore.insertEvent()` — same
+  single-shot idempotent insert as Sprint 3, `status='done'` from the start.
+- Any other/missing `type`, or a message that fails validation, is logged and dropped —
+  never crashes the background isolate.
+
+**Recovering from a lost dismissal:** if the process dies between `declare` and
+`dismiss` (reboot, OEM kill, a dropped relay), the row survives as `open` rather than
+never having existed at all — the entire reason declaration writes moved earlier than
+dismissal. `backgroundMain` calls `_sweepAbandonedIntents()` once per engine start,
+which reclassifies any lingering `open` row to `abandoned`: it's no longer live (the
+overlay isolate that would have dismissed it is gone), but it is NOT lost — the
+declared text, source, and timestamp all remain queryable. See docs/DATA_MODEL.md §3,
+cases 7/8.
 
 **Lock:** `ACTION_SCREEN_OFF` → `UnlockReceiver` → `onPhoneLocked()` → `onLock` → logged
 (no UI action today).

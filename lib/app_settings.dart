@@ -38,6 +38,12 @@ class AppSettings {
   static const String _quietHoursEndMinutesKey = 'quiet_hours_end_minutes';
   static const String _retentionDaysKey = 'retention_days';
 
+  /// Key used by the storage key literal below: `'onboarding_completed'` was
+  /// the name already specified in the signed-off Sprint 4 plan
+  /// (`docs/erd/sprint4-app-shell-plan-2026-07-23.md` §5), so this matches
+  /// rather than inventing a new name.
+  static const String _onboardingCompletedKey = 'onboarding_completed';
+
   // ---------------------------------------------------------------------
   // Bounds — see docs/DATA_MODEL.md §5 (Settings) for the product rationale.
   // ---------------------------------------------------------------------
@@ -56,6 +62,7 @@ class AppSettings {
   static const int defaultQuietHoursStartMinutes = 22 * 60; // 22:00
   static const int defaultQuietHoursEndMinutes = 7 * 60; // 07:00 — wraps past midnight
   static const RetentionPeriod defaultRetention = RetentionPeriod.oneYear;
+  static const bool defaultOnboardingCompleted = false;
 
   // ---------------------------------------------------------------------
   // Prompts on/off
@@ -67,6 +74,24 @@ class AppSettings {
 
   Future<void> setPromptsEnabled(bool value) async {
     await SharedPreferencesAsync().setBool(_promptsEnabledKey, value);
+  }
+
+  // ---------------------------------------------------------------------
+  // Onboarding completion — gates whether the 5-step flow (T4) is shown on
+  // launch. Default false (never completed), so a fresh install shows
+  // onboarding; the flow itself calls setOnboardingCompleted(true) on its
+  // last step. Deliberately its own flag rather than inferred from some
+  // other state (e.g. "has the overlay permission"), since a user could
+  // grant/revoke that permission independently of ever having seen the
+  // explanatory screens.
+  // ---------------------------------------------------------------------
+  Future<bool> onboardingCompleted() async {
+    final prefs = SharedPreferencesAsync();
+    return await prefs.getBool(_onboardingCompletedKey) ?? defaultOnboardingCompleted;
+  }
+
+  Future<void> setOnboardingCompleted(bool value) async {
+    await SharedPreferencesAsync().setBool(_onboardingCompletedKey, value);
   }
 
   // ---------------------------------------------------------------------

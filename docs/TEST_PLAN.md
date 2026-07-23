@@ -108,8 +108,37 @@ adb shell "run-as com.whydidiunlock.why_did_i_unlock sqlite3 databases/intents.d
 | 44 | Battery/latency sanity after adding a write per unlock | ❌ | Unlock→prompt still feels immediate (`CLAUDE.md` §8's ~500ms target); no new jank. The `unlock_log` insert is deliberately after `showOverlay()`, so a regression here would indicate the ordering broke. |
 
 **Not yet reachable (needs later tasks):** preset editing (T16), settings screen round-trip
-including the cross-isolate propagation check (T13), `open`→`abandoned` sweep on reboot (T10),
-CSV export (T17). Cases will be added as those land rather than listed here as permanently ❌.
+including the cross-isolate propagation check (T13), CSV export (T17). Cases will be added
+as those land rather than listed here as permanently ❌.
+
+### Sprint 4 — declaration-time writes and the abandoned-intent sweep (T10)
+
+The relay protocol changed shape: declaring an intent and dismissing it are now two
+separate messages (`declare` then `dismiss`) instead of one full event sent at dismissal.
+Read `docs/DATA_MODEL.md` §4 before running these if the "why" isn't obvious from the
+case descriptions alone.
+
+```bash
+adb shell "run-as com.whydidiunlock.why_did_i_unlock sqlite3 databases/intents.db 'SELECT client_id, status, text, declared_at, completed_at FROM intent_log ORDER BY id DESC LIMIT 5;'"
+```
+
+| # | Case | Status | Expected behaviour |
+|---|---|---|---|
+| 47 | Declare an intent (tap a preset) | ❌ | Log: `📝 Intent declared` then `📂 Intent opened`. DB: a row appears **immediately**, `status='open'`, `completed_at` equal to `declared_at` (the placeholder) — before the bubble is ever dismissed. |
+| 48 | Dismiss that bubble | ❌ | Log: `✅ Intent dismissed` then `✅ Intent marked done`. DB: the **same row** (same `client_id`) now `status='done'`, `completed_at` updated to the real dismiss time, `declared_at` unchanged. |
+| **49** | **Declare an intent, then force-stop or reboot before dismissing** | ❌ | The row from #47 must NOT disappear. On the next app/engine start, log shows `🧹 Swept 1 abandoned intent(s)` (or more, if several were open). DB: that row now `status='abandoned'`, text/timestamps intact. **This is the core guarantee T10 exists for** — compare against pre-Sprint-4 behaviour, where this exact sequence lost the intent entirely. |
+| 50 | "Just Like That" still works unchanged | ❌ | Log: `🤷 No intent declared` then `💾 Stored no-intent event`. DB: one row, `status='done'` immediately — no `open` row ever appears for this path (it's atomic, not declare-then-dismiss). Regression check: confirms the no-intent path wasn't accidentally routed through the new two-message logic. |
+| 51 | Declare, dismiss, declare again (two intents in sequence) | ❌ | Two distinct rows, both `status='done'`, different `client_id`s. Confirms the per-intent `clientId` generated in `_submitIntent` isn't reused or leaked across intents. |
+| 52 | A `dismiss` message with no prior `declare` reaching the store (simulate: kill the app between tapping a preset and the relay landing) | ❌ | Hard to force deliberately on-device; if observed naturally, expect no crash and no row — `markIntentDone`'s `WHERE status='open'` clause matches nothing, silently. Log would show `✅ Intent marked done` (the relay call succeeded) but the DB row never existed to begin with. Note if this ever happens; not expected to reproduce easily. |
+| **53** | **"Show me the prompt now" (Status screen, T6) — blocked until T6 lands** | ⛔ | Tap the button while prompts are disabled/in cooldown/in quiet hours → the capture screen still appears (bypasses triage by design). No `unlock_log` row is written for it (check via the case-30 `sqlite3` query — count should not increase). Tap it twice quickly → second tap is a no-op, logged `🧪 Manual prompt trigger: overlay already active, skipping` (same guard a real double-unlock hits). Revoke overlay permission first → tapping logs `🧪 Manual prompt trigger: permission not granted, cannot show` and nothing appears — confirms the button surfaces a real permission problem rather than silently succeeding. |
+
+**Why case 49 matters most:** every other Sprint 4 change so far has been additive
+(more logging, a settings layer). This one changes what happens to *data that already
+existed conceptually* — before T10, an intent was only real once dismissed; a crash
+mid-flight meant it never happened at all as far as the database was concerned. Confirming
+the abandoned-sweep path on a real device, not just in the automated test that simulates it
+via a direct `sweepOpenToAbandoned()` call, is the one thing here that can't be inferred
+from code review.
 
 ### Native — `UpdateReceiver` (added 2026-07-23, outside the T-numbered task list)
 
