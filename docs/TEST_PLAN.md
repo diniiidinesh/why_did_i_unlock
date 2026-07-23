@@ -22,6 +22,11 @@ for the exact assertions.
 | `test/prompt_policy_test.dart` | Triage policies. **Sprint 3 (10–12):** `ProbabilityPromptPolicy` bounds + seeded determinism, `TimeCooldownPolicy` boundary (`>=`), `CompositePromptPolicy` AND-semantics. **Sprint 4 (40–42):** `QuietHoursPolicy` same-day window, **overnight wraparound**, inclusive-start/exclusive-end boundaries, degenerate zero-width window fails open. |
 | `test/widget_test.dart` | `HomeScreen` renders title/toggle/history entry (13); `IntentCaptureScreen` renders presets/pill/field/OK (14), an empty preset list (16, T11's zero-presets state), tapping a preset passes its id back through `onSubmit` (17), custom text carries no `presetId` (18). |
 | `test/history_screen_test.dart` | `HistoryScreen` renders events newest-first, styles `no_intent` rows distinctly (15). |
+| `test/outcome_donut_test.dart` | **Sprint 4 (T15).** `OutcomeDonut` (pure `CustomPainter`, no store dependency): legend percentages per slice, optional `centerLabel`, empty state for both an empty slice list and a slice list that sums to zero (no divide-by-zero). |
+| `test/about_screen_test.dart` | **Sprint 4 (T5).** `AboutScreen`: renders name/version/every action row, injected `version` override, `mailto:` URI built correctly (address + subject/body), a launch failure or thrown exception surfaces as a `SnackBar` (not silent), Support section has no payment link. All `url_launcher` calls are injected — no platform channel touched. |
+| `test/status_screen_test.dart` | **Sprint 4 (T6).** `StatusScreen`: live permission status text, "Grant permission" hidden once granted, tapping it calls `requestPermission` then re-checks, every OEM guidance vendor + the "not listed" fallback render, "Show me the prompt now" calls the injected trigger with the true device-pixel size (`MediaQuery.size * devicePixelRatio`, rounded) — same injection pattern, no `FlutterOverlayWindow`/`IsolateNameServer` platform code touched. |
+| `test/onboarding_screen_test.dart` | **Sprint 4 (T4).** `OnboardingScreen`'s 5 steps in order, Back/Continue navigation, permission step reflects injected `checkPermission` live and never blocks `Continue`, "Grant permission" requests then re-checks, OEM step shares `lib/oem_autostart_copy.dart` with the Status screen, final "Get started" calls `completeOnboarding` (→ `AppSettings.setOnboardingCompleted(true)` in the real default) then `onFinished`. |
+| `test/manage_presets_screen_test.dart` | **Sprint 4 (T16).** `ManagePresetsScreen` against a **real** `IntentStore` (`sqflite_common_ffi`, same real-isolate-I/O pattern as `history_screen_test.dart`), not a fake double — reorder via `ReorderableDragStartListener` drag, rename, soft-delete (leaves the row soft-deleted, never touches its `intent_log` history), restore-defaults (same — old row stays soft-deleted, not hard-deleted), and the two real `docs/DATA_MODEL.md` §7 edge cases: enabling past the 8-enabled cap and creating past the 30-stored cap both surface the store's own `PresetLimitExceeded` message as a `SnackBar` rather than crashing. Soft-deleted presets are confirmed hidden from this list. |
 
 ### What automated tests deliberately do **not** cover
 
@@ -127,7 +132,10 @@ which is expected, not a bug: see `CLAUDE.md` §5's security review).
 | 43 | Logging failure cannot suppress a prompt | ❌ | Hard to force deliberately; verify the weaker version — across a long session, no unlock is ever *missing* a prompt that triage said should show. Any `⚠️ Failed to log unlock (non-fatal)` in logs must be followed by the prompt still appearing. |
 | 44 | Battery/latency sanity after adding a write per unlock | ❌ | Unlock→prompt still feels immediate (`CLAUDE.md` §8's ~500ms target); no new jank. The `unlock_log` insert is deliberately after `showOverlay()`, so a regression here would indicate the ordering broke. |
 
-**Not yet reachable (needs later tasks):** preset editing (T16), settings screen round-trip
+**Not yet reachable (needs later tasks):** preset editing (T16) — the screen itself landed
+(`lib/manage_presets_screen.dart`, automated tests in the table above) but isn't wired into
+`MyApp`/`HomeScreen` navigation yet, so it has no manual on-device matrix entry until T18
+does that wiring — same story for the T4/T5/T6/T15 screens below. Settings screen round-trip
 including the cross-isolate propagation check (T13), CSV export (T17). Cases will be added
 as those land rather than listed here as permanently ❌.
 
@@ -152,6 +160,12 @@ the WAL sidecar (hit exactly this on 2026-07-23; see that section's note).
 | 51 | Declare, dismiss, declare again (two intents in sequence) | ✅ | Verified on-device 2026-07-23: 3 distinct completed declare→dismiss cycles in one session, each with its own `client_id`, none reused or leaked. |
 | 52 | A `dismiss` message with no prior `declare` reaching the store (simulate: kill the app between tapping a preset and the relay landing) | ❌ | Hard to force deliberately on-device; if observed naturally, expect no crash and no row — `markIntentDone`'s `WHERE status='open'` clause matches nothing, silently. Log would show `✅ Intent marked done` (the relay call succeeded) but the DB row never existed to begin with. Note if this ever happens; not expected to reproduce easily. |
 | **53** | **"Show me the prompt now" (Status screen, T6) — blocked until T6 lands** | ⛔ | Tap the button while prompts are disabled/in cooldown/in quiet hours → the capture screen still appears (bypasses triage by design). No `unlock_log` row is written for it (check via the case-30 `sqlite3` query — count should not increase). Tap it twice quickly → second tap is a no-op, logged `🧪 Manual prompt trigger: overlay already active, skipping` (same guard a real double-unlock hits). Revoke overlay permission first → tapping logs `🧪 Manual prompt trigger: permission not granted, cannot show` and nothing appears — confirms the button surfaces a real permission problem rather than silently succeeding. |
+
+**Case 53 update (2026-07-23):** the Status screen itself (`lib/status_screen.dart`) has now
+landed, with the "Show me the prompt now" button calling `triggerCapturePromptManually` exactly
+as this case describes — see the automated-test row above for what's covered without a device.
+Case 53 stays ⛔ regardless: nothing wires `StatusScreen` into app navigation yet (T18), so
+there's still no way to reach it on a real device to run the manual checks below.
 
 **Why case 49 matters most:** every other Sprint 4 change so far has been additive
 (more logging, a settings layer). This one changes what happens to *data that already

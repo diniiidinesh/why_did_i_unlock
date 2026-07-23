@@ -26,6 +26,18 @@ rewriting history. For current, up-to-date information see:
   reflected as its own line in the §10 task table — folded into T3 (settings
   storage), T9 (triage policy), and T13 (Settings screen exposure). Design in
   `docs/DATA_MODEL.md` §11.
+- **2026-07-23 (Cursor UI tasks):** T4/T5/T6/T15/T16 landed —
+  `lib/onboarding_screen.dart`, `lib/about_screen.dart`, `lib/status_screen.dart`
+  (+ shared `lib/oem_autostart_copy.dart`), `lib/insights/outcome_donut.dart`, and
+  `lib/manage_presets_screen.dart`, each with widget tests (see `docs/TEST_PLAN.md`'s
+  automated-tests table). All five are self-contained screens built against the
+  already-shipped `AppSettings`/`IntentStore`/`triggerCapturePromptManually` APIs —
+  **none are wired into `MyApp`/`HomeScreen` navigation yet**, so none have a manual
+  on-device matrix entry either; that wiring is T18's job. `url_launcher` added as a
+  new dependency (T5's mailto/privacy/Play links only — no network call by the app
+  itself). Contact email, privacy-policy URL, and Play-listing URL are all
+  grep-able `TODO_*_UNRESOLVED` placeholders pending the real `[P1]` decisions in
+  `docs/BACKLOG.md`.
 -->
 
 # Sprint 4 — App shell: onboarding, IA, and a data model built to outlast it
