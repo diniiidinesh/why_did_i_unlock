@@ -45,6 +45,42 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 
 - **[DONE 2026-07-22] Overlay write path, IsolateNameServer relay, and concurrent-open guard** — Bugs 1–4 found and fixed (see summary above). Write path now reliably delivers every event across multiple dismiss cycles, even after swipe-away and reboot. Verified end-to-end with 27 automated tests + 24 manual on-device cases.
 - **[DONE 2026-07-22] Prompt-frequency triage** — cooldown (1 min) + probability (50%) composite, both verified working correctly against real event data. Triage gate plugs into `_showCaptureScreen`, inputs validated fresh per unlock.
+- **[P1] A manually-triggered test answer ("Show me the prompt now") applies real cooldown to the NEXT REAL unlock.** Confirmed on-device 2026-07-24:
+  ```
+  🟣 showOverlay called (1080x2400 capture screen)
+  🧪 Manual prompt shown (Status screen trigger)
+  🤷 No intent declared ("Just Like That") at 2026-07-24 01:10:54.643686
+  💾 Stored no-intent event: text="Just Like That"
+  🔒 LOCK EVENT RECEIVED at 2026-07-24 01:10:56.397106
+  🔓 UNLOCK EVENT RECEIVED at 2026-07-24 01:10:58.199707
+  🎲 Triage: skipping — COOLDOWN active (elapsed 0:00:03.556781 < 0:01:00.000000)
+  ```
+  **Root cause:** `_showCaptureScreenManually` (the Status screen's "Show me the prompt now"
+  button, T6) already deliberately skips `_logUnlock` for itself, specifically so a manual
+  test "would inflate 'unlocks today' and the prompt-rate stats with test-only noise the
+  metrics were never meant to include" (see that function's doc comment in `lib/main.dart`).
+  But the SAME protection was never extended to what the user answers on that manually-shown
+  screen: `_submitIntent`/`_submitNoIntent` relay to `IntentStore.insertOpenIntent`/
+  `insertEvent` unconditionally, with no way to tell "this answer came from a real unlock"
+  apart from "this answer came from a manual test tap." `TimeCooldownPolicy` reads
+  `IntentStore.lastCompletedAt()` — `MAX(completed_at)` across ALL `intent_log` rows,
+  manual-origin or not (docs/DATA_MODEL.md §4 explains why it deliberately includes `open`/
+  `abandoned` rows, but says nothing about EXCLUDING manual-test rows, because the concept
+  of "manual-test row" doesn't exist in the schema at all). Net effect: tapping the test
+  button and answering it silently arms the cooldown for the next several real unlocks —
+  exactly the confusing "why didn't it prompt me, is the trigger broken?" symptom a tester
+  would see, when the trigger itself worked perfectly.
+  **Two fix directions, needs a decision before whoever picks this up starts:**
+  1. **Tag the origin.** Add a column (or reuse a spare) on `intent_log` marking a row as
+     manual-test-originated; `lastCompletedAt()` (and any future cooldown-adjacent query)
+     filters those out, while still keeping the row in history/export for audit continuity
+     — you did answer something, after all, just not in response to a real unlock.
+  2. **Don't persist manual-trigger answers to `intent_log` at all**, mirroring
+     `_showCaptureScreenManually`'s existing `unlock_log` exclusion — treat the whole manual
+     flow as ephemeral, no DB footprint. Simpler, but loses the ability to use the manual
+     trigger to verify the DB write path end-to-end (which is exactly how Sprint 3's
+     write-path bugs were originally caught and confirmed fixed) — a real trade-off, not free.
+  Not fixed here — flagging with full repro + root cause so it doesn't need re-diagnosing.
 - **[DONE 2026-07-22] Minimal history view** — `lib/history_screen.dart` reads from the DB, renders events newest-first, styles no-intent rows distinctly. Verified against real multi-event data on-device.
 - **[P2] Triage customization UI** — settings screen exposing cooldown/probability (and eventually instance-based) tuning, mirroring the intent-preset UI pattern. Architecture is ready for this (`CompositePromptPolicy` in `lib/prompt_policy.dart`) — deferred because it's competitor Intenty's turf, not this app's differentiator, and there's no usage data yet to pick better defaults than the current 1min/50%.
   - **Probability options:** Everytime (100%), 75%, 50% (current default), 25%, Never (0%) — or custom percentage input.
