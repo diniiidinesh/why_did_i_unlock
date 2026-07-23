@@ -142,9 +142,8 @@ narrowly scoped `PROCESS_TEXT` intent inserted by the Flutter engine, **not**
 - **[ ] Privacy policy URL.** Required. No website exists yet. Content is
   genuinely short given "no data leaves the device," but it must be publicly
   hosted at a stable URL.
-- **[ ] Verify resolved `targetSdk`.** `android/app/build.gradle.kts` uses
-  `flutter.targetSdkVersion` rather than a pinned value, so it moves with the
-  Flutter toolchain. Confirm it meets Play's current floor before submitting.
+- **[DONE 2026-07-24] Verify resolved `targetSdk`.** Was `flutter.targetSdkVersion`
+  (unpinned, moved with the toolchain) — now pinned to 29/36 (minSdk/targetSdk), see §3b.3.
 - **[ ] Store listing must explain the overlay.** Screenshots and description
   should make the bubble's purpose self-evident — a reviewer who cannot tell why
   the app needs to draw over other apps will assume the worst.
@@ -181,15 +180,18 @@ badly each bites.
    App Signing, Google holds the app signing key and a lost *upload* key can be
    reset through support — losing it is no longer unrecoverable the way it is for
    sideloaded builds.
-3. **[Gradle — needs sign-off] `minSdk` does not match the documented baseline.**
-   `CLAUDE.md` §8 states a baseline of API 29, but
-   `android/app/build.gradle.kts` uses `flutter.minSdkVersion`, which resolves to
-   Flutter's default (below 29). Sideloading hid this — a store listing will not.
-   Shipping to Android versions where the overlay stack has never been tested
-   invites crashes and one-star reviews from devices that were never in scope.
-   Pin `minSdk = 29` to match the documented intent. Same file: consider pinning
-   `targetSdk` explicitly rather than inheriting it, so a Flutter upgrade can't
-   silently move it under Play's compliance floor.
+3. **[DONE 2026-07-24] `minSdk` did not match the documented baseline.**
+   `CLAUDE.md` §8 states a baseline of API 29, but `android/app/build.gradle.kts`
+   used `flutter.minSdkVersion`, which resolved to Flutter's default (24 as of
+   this Flutter version) — below 29. Sideloading hid this; a store listing would
+   not. Fixed: `minSdk` pinned to `29` (sign-off 2026-07-24), and `targetSdk`
+   pinned to `36` (the toolchain's current resolved value, made explicit so a
+   future `flutter upgrade` can't silently move it — a version bump should be a
+   deliberate edit here). **Still needed:** a real on-device pass confirming
+   nothing in the overlay/foreground-service stack regresses at the new floor —
+   minSdk 29 was already the *documented* intent, but this is the first time it's
+   *enforced*, so devices between API 24–28 that may have worked by accident are
+   now correctly out of scope, not yet re-verified against 29+ specifically.
 4. **[Release hygiene] Bump `pubspec.yaml` version.** Play rejects an upload
    whose version code does not exceed the previous one. Currently `0.5.0+7`.
 

@@ -34,8 +34,22 @@ android {
         applicationId = "com.whydidiunlock.why_did_i_unlock"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        //
+        // minSdk/targetSdk are PINNED, not inherited from `flutter.*`
+        // (T8, docs/PLAY_SUBMISSION.md §3b.3, sign-off 2026-07-24):
+        // - minSdk 29 (Android 10) matches the documented baseline
+        //   (CLAUDE.md §8) — the overlay + foreground-service stack has only
+        //   ever been tested at API 29+. Left as `flutter.minSdkVersion`
+        //   (currently 24), sideloading hid a real gap: shipping to versions
+        //   below the app's actual tested floor, which a Play listing would
+        //   not hide.
+        // - targetSdk 36 is today's `flutter.targetSdkVersion` resolved
+        //   value, pinned explicitly so a future `flutter upgrade` can't
+        //   silently move it — intentional version bumps should be a
+        //   deliberate edit here, not a side effect of the toolchain
+        //   updating. Revisit if Play's compliance floor moves past 36.
+        minSdk = 29
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
