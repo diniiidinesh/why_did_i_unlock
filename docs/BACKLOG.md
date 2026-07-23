@@ -30,6 +30,8 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 
 ## Reliability / correctness
 
+- **[DONE 2026-07-23] Restart monitoring after an app update** — `UpdateReceiver` added, listening for `ACTION_MY_PACKAGE_REPLACED` and restarting `UnlockListenerService`. Found via an on-device build push during Sprint 4: `flutter run` always auto-launches after install, which masked that a real update (Play push, or a manually installed APK) left monitoring dead until the user reopened the app — distinct mechanism from the reboot gap (no "stopped state" involved). See `docs/ARCHITECTURE.md` §2.
+
 - **[DONE 2026-07-22] `android:allowBackup="false"`** — SHIPPED alongside Sprint 3 storage (was unset/defaulting to `true`). Prevents Android auto-backup from sweeping up intent history.
 - **[P1] OEM autostart onboarding** — aggressive OEMs (Xiaomi/Oppo/Vivo, key India market) block boot auto-restart AND kill the foreground service during normal use unless the user manually grants "Autostart" / disables battery optimization. Not fixable in code — needs a guided in-app screen walking the user through the OEM-specific setting. Fixes both the reboot gap on those OEMs and the general process-kill reliability gap. (Was "Option C" in the reboot discussion.)
 - **[DONE 2026-07-21] `LOCKED_BOOT_COMPLETED` (direct boot)** — SHIPPED. `BootReceiver` + `UnlockListenerService` are now `directBootAware` and handle `LOCKED_BOOT_COMPLETED`, so monitoring starts before the first post-reboot unlock. Verified across 2 real reboots (prompt appeared ~2s after boot, zero manual app-open). The device-encrypted-storage concern turned out moot: our logic only runs on `ACTION_USER_PRESENT`, which fires after unlock when normal storage is already available.

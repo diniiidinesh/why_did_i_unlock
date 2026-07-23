@@ -88,6 +88,29 @@
                 <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
             </intent-filter>
         </receiver>
+        <!-- ACTION_MY_PACKAGE_REPLACED: fires immediately after this app
+             itself is updated, which always kills any running process (the
+             OS cannot hot-swap running code) — including
+             UnlockListenerService. Without a receiver for this, every
+             real-world update (a Play Store push, or a manually installed
+             newer APK) leaves monitoring dead until the user happens to
+             reopen the app. Distinct from BootReceiver's reboot case: an
+             update does NOT put the app into Android's "stopped" broadcast-
+             withholding state (that only applies to never-launched or
+             force-stopped apps), so no directBootAware handling is needed
+             here beyond restarting the service. exported="true" is required
+             on API 31+ for any receiver with an intent-filter, and is safe
+             here since MY_PACKAGE_REPLACED is scoped by the OS to the
+             updated app's own receivers only — no other app can trigger it.
+             See UpdateReceiver.kt. -->
+        <receiver
+            android:name=".UpdateReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+            </intent-filter>
+        </receiver>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

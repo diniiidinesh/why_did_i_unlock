@@ -59,6 +59,16 @@ exists to make the "why" durable.
 - **`BootReceiver`** — manifest-registered, `exported="true"` (safe: `BOOT_COMPLETED` is
   a protected broadcast that can't be spoofed). Restarts the service after reboot. Also
   catches OEM quick-boot variants (`QUICKBOOT_POWERON`).
+- **`UpdateReceiver`** (added 2026-07-23) — manifest-registered, listens for
+  `ACTION_MY_PACKAGE_REPLACED` and restarts `UnlockListenerService`. Installing an app
+  update always kills its running process (the OS can't hot-swap running code), and
+  unlike a reboot this does NOT put the app into Android's "stopped" broadcast-
+  withholding state — so without this receiver, nothing would ever restart the service
+  after a real-world update (a Play push, or a manually installed newer APK), and
+  monitoring would silently stay dead until the user happened to reopen the app. Found
+  via an on-device build push during Sprint 4; `flutter run` masked it by auto-launching
+  the app after every install. See `UpdateReceiver.kt`'s doc comment for the full
+  distinction from `BootReceiver`'s mechanism.
 - **`OverlayService`** — from the `flutter_overlay_window` plugin. Hosts the overlay
   engine, adds/removes the overlay window.
 
@@ -219,7 +229,8 @@ background engine.
   are missed; `am force-stop` disables restart entirely until manual relaunch. This is
   also the known edge case Sprint 3's storage doesn't solve: if the app process is
   killed between a bubble dismiss and the background engine's DB write completing,
-  that event is lost — same class of gap, not a new one.
+  that event is lost — same class of gap, not a new one. (Not the same mechanism as an
+  **app update** killing the process — that's handled by `UpdateReceiver`, above.)
 - **Memory:** up to 3 engines while the app is open (UI + background + overlay), dropping
   to ~2 (background + overlay) when closed. Battery soak vs. the <2%/day target is untested.
 

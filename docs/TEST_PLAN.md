@@ -110,3 +110,23 @@ adb shell "run-as com.whydidiunlock.why_did_i_unlock sqlite3 databases/intents.d
 **Not yet reachable (needs later tasks):** preset editing (T16), settings screen round-trip
 including the cross-isolate propagation check (T13), `open`→`abandoned` sweep on reboot (T10),
 CSV export (T17). Cases will be added as those land rather than listed here as permanently ❌.
+
+### Native — `UpdateReceiver` (added 2026-07-23, outside the T-numbered task list)
+
+Pure Kotlin/manifest — nothing here is reachable by `flutter test`. Found via an
+on-device build push during Sprint 4; `flutter run` masks this entirely because it
+always auto-launches the app after installing, so this needs a path that does NOT
+auto-launch.
+
+| # | Case | Status | Expected behaviour |
+|---|---|---|---|
+| 45 | Build a release APK, install via `adb install -r` (NOT `flutter run`), do **not** open the app, then unlock the phone | ❌ | `adb logcat -s WDIUUpdate` shows `🔁 Restarting UnlockListenerService after app update` shortly after install completes, with no manual launch. A subsequent unlock still triggers `🔓 UNLOCK EVENT RECEIVED` — monitoring resumed without the user ever opening the app. |
+| 46 | Same as #45, but check the ongoing notification | ❌ | The foreground-service notification reappears immediately after install, before any manual interaction — the visible proof monitoring is alive. |
+
+Command for #45/#46:
+```bash
+flutter build apk --release
+adb install -r build/app/outputs/flutter-apk/app-release.apk
+adb logcat -c && adb logcat -s WDIUUpdate WDIUBoot flutter
+```
+Then lock/unlock the phone without ever tapping the app icon.
