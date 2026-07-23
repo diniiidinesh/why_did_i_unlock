@@ -82,7 +82,7 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
      write-path bugs were originally caught and confirmed fixed) — a real trade-off, not free.
   Not fixed here — flagging with full repro + root cause so it doesn't need re-diagnosing.
 - **[DONE 2026-07-22] Minimal history view** — `lib/history_screen.dart` reads from the DB, renders events newest-first, styles no-intent rows distinctly. Verified against real multi-event data on-device.
-- **[P2] Triage customization UI** — settings screen exposing cooldown/probability (and eventually instance-based) tuning, mirroring the intent-preset UI pattern. Architecture is ready for this (`CompositePromptPolicy` in `lib/prompt_policy.dart`) — deferred because it's competitor Intenty's turf, not this app's differentiator, and there's no usage data yet to pick better defaults than the current 1min/50%.
+- ~~**[P2] Triage customization UI**~~ — done via T13 (`lib/settings_screen.dart`): cooldown/probability are curated preset chips + a validated Custom entry, not the originally-imagined sliders (see that screen's doc comments for why). Instance-based triage strategy (e.g. "skip every Nth unlock") is still not built — see the `[explore]` item below.
   - **Probability options:** Everytime (100%), 75%, 50% (current default), 25%, Never (0%) — or custom percentage input.
   - **Cooldown options:** No cooldown (0 min), 1 min (current default), 2 min, 5 min, 10 min — or custom duration input.
 - **[explore] Instance-based triage strategy** (e.g. "skip every Nth unlock") — a third `PromptPolicy` implementation alongside cooldown/probability; same architecture, not yet built.

@@ -24,11 +24,13 @@ const List<int> cooldownPresetMinutes = [0, 1, 5, 10, 15, 30];
 const List<int> probabilityPresetPercent = [25, 50, 75, 100];
 
 /// Settings screen: prompt on/off, cooldown, probability, quiet hours, and
-/// links to Manage presets / the privacy policy.
+/// links to Manage options / the privacy policy.
 ///
-/// Self-contained and read-only of `HomeScreen` — nothing here wires this
-/// screen into navigation (that's a different task). Every plugin-touching
-/// dependency is an injectable constructor param defaulting to the real
+/// Reachable from `HomeScreen`'s nav list since Sprint 4's Stage A merge —
+/// this screen itself stays fully self-contained (no dependency on
+/// `HomeScreen`), which is what let it be built and widget-tested before
+/// that wiring existed. Every plugin-touching dependency is an injectable
+/// constructor param defaulting to the real
 /// implementation, the same pattern `StatusScreen`/`AboutScreen`/
 /// `ManagePresetsScreen` already use, which is what lets this screen have a
 /// widget test at all: `AppSettings` needs a fake `SharedPreferencesAsync`
@@ -286,7 +288,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   iconColor: Colors.white70,
                   textColor: Colors.white,
                   leading: const Icon(Icons.tune),
-                  title: const Text('Manage presets'),
+                  title: const Text('Manage options'),
                   trailing: const Icon(Icons.chevron_right, color: Colors.white38),
                   onTap: _openManagePresets,
                 ),

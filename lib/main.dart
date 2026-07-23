@@ -935,29 +935,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // NOTE: unlock/lock handling deliberately does NOT live here anymore. It runs
   // in the persistent background engine (see backgroundMain) so it survives the
-  // app being swiped out of Recents. This screen is a launcher: the prompts
-  // on/off toggle plus navigation into the other screens. The overlay
-  // permission is no longer requested cold from here — `OnboardingScreen`'s
-  // permission step (via `AppLauncher`) now explains it before asking, and
-  // `StatusScreen` covers re-requesting it later if it's revoked.
-
-  bool _promptsEnabled = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadPromptsEnabled();
-  }
-
-  Future<void> _loadPromptsEnabled() async {
-    final enabled = await _appSettings.promptsEnabled();
-    if (mounted) setState(() => _promptsEnabled = enabled);
-  }
-
-  Future<void> _togglePrompts(bool value) async {
-    setState(() => _promptsEnabled = value);
-    await _appSettings.setPromptsEnabled(value);
-  }
+  // app being swiped out of Recents. This screen is a pure launcher: just
+  // navigation into the other screens. The overlay permission is no longer
+  // requested cold from here — `OnboardingScreen`'s permission step (via
+  // `AppLauncher`) now explains it before asking, and `StatusScreen` covers
+  // re-requesting it later if it's revoked.
+  //
+  // The prompts on/off toggle used to live here too (a `Switch` writing
+  // `AppSettings.setPromptsEnabled` directly), but that became a second,
+  // easy-to-desync master for the same preference once `SettingsScreen` (T13)
+  // shipped its own "Prompt on unlock" switch: this screen only loaded its
+  // value once in `initState`, so toggling it in Settings and coming back to
+  // Home could show a stale state until the app restarted. Settings is now
+  // the single source of truth for every prompt-triage preference — see that
+  // screen for prompts/cooldown/probability/quiet hours.
 
   @override
   Widget build(BuildContext context) {
@@ -972,20 +963,6 @@ class _HomeScreenState extends State<HomeScreen> {
               style: TextStyle(color: Colors.white, fontSize: 24),
             ),
             const SizedBox(height: 32),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text(
-                  'Unlock prompts',
-                  style: TextStyle(color: Colors.white70, fontSize: 16),
-                ),
-                Switch(
-                  value: _promptsEnabled,
-                  onChanged: _togglePrompts,
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
             _HomeLink(label: 'Settings', screenBuilder: (_) => const SettingsScreen()),
             _HomeLink(label: 'View history', screenBuilder: (_) => const HistoryScreen()),
             _HomeLink(label: 'Manage options', screenBuilder: (_) => const ManagePresetsScreen()),

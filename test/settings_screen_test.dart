@@ -26,7 +26,7 @@ void main() {
       home: SettingsScreen(
         settings: settings,
         launch: launch ?? (_) async => true,
-        managePresetsBuilder: managePresetsBuilder ?? (_) => const Scaffold(body: Text('Manage presets stub')),
+        managePresetsBuilder: managePresetsBuilder ?? (_) => const Scaffold(body: Text('Manage options stub')),
       ),
     ));
     // Let the parallel-await load resolve.
@@ -152,16 +152,16 @@ void main() {
     expect(find.text('06:30'), findsOneWidget);
   });
 
-  testWidgets('tapping "Manage presets" pushes the injected builder', (tester) async {
+  testWidgets('tapping "Manage options" pushes the injected builder', (tester) async {
     await pumpScreen(tester);
 
     // Below the fold — this screen's ListView only builds items within its
     // viewport + cache extent (same reasoning as StatusScreen's own test).
-    await tester.scrollUntilVisible(find.text('Manage presets'), 200);
-    await tester.tap(find.text('Manage presets'));
+    await tester.scrollUntilVisible(find.text('Manage options'), 200);
+    await tester.tap(find.text('Manage options'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Manage presets stub'), findsOneWidget);
+    expect(find.text('Manage options stub'), findsOneWidget);
   });
 
   testWidgets('tapping "Privacy policy" launches the placeholder URL', (tester) async {

@@ -32,7 +32,7 @@ void main() {
         InMemorySharedPreferencesAsync.withData({'onboarding_completed': true});
   });
 
-  testWidgets('13. HomeScreen renders title, prompts toggle, and history entry', (tester) async {
+  testWidgets('13. HomeScreen renders title and every nav entry', (tester) async {
     await tester.pumpWidget(const MyApp());
     // Let AppLauncher's onboardingCompleted() check and HomeScreen
     // initState's mocked-but-still-async calls resolve.
@@ -40,8 +40,12 @@ void main() {
     await tester.pump();
 
     expect(find.text('Why Did I Unlock?'), findsOneWidget);
-    expect(find.text('Unlock prompts'), findsOneWidget);
-    expect(find.byType(Switch), findsOneWidget);
+    // No "Unlock prompts" switch here anymore — Settings (T13) is the single
+    // source of truth for the prompts on/off preference; Home's own copy was
+    // removed because it only loaded its value once in initState and could
+    // silently go stale after a change made in Settings. See HomeScreen's
+    // class doc comment.
+    expect(find.byType(Switch), findsNothing);
     expect(find.text('Settings'), findsOneWidget);
     expect(find.text('View history'), findsOneWidget);
     expect(find.text('Manage options'), findsOneWidget);
@@ -59,7 +63,7 @@ void main() {
     // OnboardingScreen's first step (value prop) — HomeScreen must NOT be
     // reachable yet.
     expect(find.text('Why Did I Unlock?'), findsNothing);
-    expect(find.text('Unlock prompts'), findsNothing);
+    expect(find.text('Settings'), findsNothing);
   });
 
   testWidgets(
