@@ -1085,6 +1085,76 @@ class IntentStore {
       status: row['status'] as String?,
     );
   }
+
+  // ---------------------------------------------------------------------
+  // Your data (T18) — counts, oldest record, delete/prune. Presets are
+  // configuration, not event history: wipe/prune never touch intent_preset
+  // (docs/DATA_MODEL.md §8).
+  // ---------------------------------------------------------------------
+
+  /// All-time unlock + intent row counts for the Settings "Your data" card.
+  /// Deliberately unwindowed — retention disclosure needs the full store
+  /// size, not today's slice.
+  Future<UserDataCounts> userDataCounts() async {
+    final unlockRows = await _db.rawQuery('SELECT COUNT(*) AS n FROM unlock_log');
+    final intentRows = await _db.rawQuery('SELECT COUNT(*) AS n FROM intent_log');
+    return UserDataCounts(
+      unlockCount: Sqflite.firstIntValue(unlockRows) ?? 0,
+      intentCount: Sqflite.firstIntValue(intentRows) ?? 0,
+    );
+  }
+
+  /// Earliest timestamp across unlocks (`unlocked_at`) and intents
+  /// (`declared_at`), or null when both tables are empty.
+  Future<DateTime?> oldestRecordAt() async {
+    final rows = await _db.rawQuery('''
+      SELECT MIN(ts) AS oldest FROM (
+        SELECT unlocked_at AS ts FROM unlock_log
+        UNION ALL
+        SELECT declared_at AS ts FROM intent_log
+      )
+    ''');
+    final ms = Sqflite.firstIntValue(rows);
+    if (ms == null) return null;
+    return DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
+  }
+
+  /// Deletes every unlock and intent row. Keeps `intent_preset` (labels the
+  /// user curated). No `VACUUM` — free pages are reused (docs/DATA_MODEL.md §8).
+  Future<void> deleteAllUserData() async {
+    final batch = _db.batch();
+    batch.delete('intent_log');
+    batch.delete('unlock_log');
+    await batch.commit(noResult: true);
+  }
+
+  /// One-shot prune: removes unlocks with `unlocked_at` before [cutoff] and
+  /// intents with `declared_at` before [cutoff]. Returns how many rows were
+  /// deleted across both tables. Does not touch presets; no `VACUUM`.
+  Future<int> pruneOlderThan(DateTime cutoff) async {
+    final ms = cutoff.toUtc().millisecondsSinceEpoch;
+    final intentDeleted = await _db.delete(
+      'intent_log',
+      where: 'declared_at < ?',
+      whereArgs: [ms],
+    );
+    final unlockDeleted = await _db.delete(
+      'unlock_log',
+      where: 'unlocked_at < ?',
+      whereArgs: [ms],
+    );
+    return intentDeleted + unlockDeleted;
+  }
+}
+
+/// All-time event counts for the Settings "Your data" card (T18).
+class UserDataCounts {
+  final int unlockCount;
+  final int intentCount;
+
+  const UserDataCounts({required this.unlockCount, required this.intentCount});
+
+  int get totalEvents => unlockCount + intentCount;
 }
 
 /// One lossless CSV export row (docs/DATA_MODEL.md §9). Timestamps are UTC

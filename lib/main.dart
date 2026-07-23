@@ -8,15 +8,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 
-import 'about_screen.dart';
 import 'app_settings.dart';
-import 'history_screen.dart';
+import 'home_screen.dart';
 import 'intent_store.dart';
-import 'manage_presets_screen.dart';
 import 'onboarding_screen.dart';
 import 'prompt_policy.dart';
-import 'settings_screen.dart';
-import 'status_screen.dart';
 
 /// A preset as rendered on the capture screen — just the fields
 /// [IntentCaptureScreen] needs (id + label), not the full `IntentPreset`
@@ -981,76 +977,6 @@ class _AppLauncherState extends State<AppLauncher> {
       });
     }
     return const HomeScreen();
-  }
-}
-
-class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
-
-  @override
-  State<HomeScreen> createState() => _HomeScreenState();
-}
-
-class _HomeScreenState extends State<HomeScreen> {
-
-  // NOTE: unlock/lock handling deliberately does NOT live here anymore. It runs
-  // in the persistent background engine (see backgroundMain) so it survives the
-  // app being swiped out of Recents. This screen is a pure launcher: just
-  // navigation into the other screens. The overlay permission is no longer
-  // requested cold from here — `OnboardingScreen`'s permission step (via
-  // `AppLauncher`) now explains it before asking, and `StatusScreen` covers
-  // re-requesting it later if it's revoked.
-  //
-  // The prompts on/off toggle used to live here too (a `Switch` writing
-  // `AppSettings.setPromptsEnabled` directly), but that became a second,
-  // easy-to-desync master for the same preference once `SettingsScreen` (T13)
-  // shipped its own "Prompt on unlock" switch: this screen only loaded its
-  // value once in `initState`, so toggling it in Settings and coming back to
-  // Home could show a stale state until the app restarted. Settings is now
-  // the single source of truth for every prompt-triage preference — see that
-  // screen for prompts/cooldown/probability/quiet hours.
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text(
-              'Why Did I Unlock?',
-              style: TextStyle(color: Colors.white, fontSize: 24),
-            ),
-            const SizedBox(height: 32),
-            _HomeLink(label: 'Settings', screenBuilder: (_) => const SettingsScreen()),
-            _HomeLink(label: 'View history', screenBuilder: (_) => const HistoryScreen()),
-            _HomeLink(label: 'Manage options', screenBuilder: (_) => const ManagePresetsScreen()),
-            _HomeLink(label: 'Status & troubleshooting', screenBuilder: (_) => const StatusScreen()),
-            _HomeLink(label: 'About', screenBuilder: (_) => const AboutScreen()),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// One `HomeScreen` navigation entry — factored out once a fourth identical
-/// TextButton-that-pushes-a-route was about to be added.
-class _HomeLink extends StatelessWidget {
-  final String label;
-  final WidgetBuilder screenBuilder;
-
-  const _HomeLink({required this.label, required this.screenBuilder});
-
-  @override
-  Widget build(BuildContext context) {
-    return TextButton(
-      onPressed: () {
-        Navigator.of(context).push(MaterialPageRoute(builder: screenBuilder));
-      },
-      child: Text(label, style: const TextStyle(color: Colors.white70, fontSize: 16)),
-    );
   }
 }
 

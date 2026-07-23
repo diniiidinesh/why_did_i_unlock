@@ -4,7 +4,9 @@ import 'package:url_launcher/url_launcher.dart';
 import 'about_screen.dart' show privacyPolicyUrl;
 import 'app_settings.dart';
 import 'export_csv.dart';
+import 'intent_store.dart';
 import 'manage_presets_screen.dart';
+import 'your_data_card.dart';
 
 /// Same typedef shape as `about_screen.dart`'s `UrlLauncher` — kept as its
 /// own local declaration (rather than importing the other file's private
@@ -47,14 +49,14 @@ const List<int> probabilityPresetPercent = [25, 50, 75, 100];
 /// out-of-range Custom entry, rather than letting a user type 999 and see
 /// it silently succeed with no indication anything was adjusted.
 ///
-/// CSV export (T17) is a single ListTile here for now; the fuller "Your
-/// data" card (counts, retention, delete-all) lands with T18 and will reuse
-/// the same [exportAndShare] entry point.
+/// The "Your data" card (T18) owns export, retention, and delete controls and
+/// reuses [exportAndShare] / [openStore] injectables for widget tests.
 class SettingsScreen extends StatefulWidget {
   final AppSettings settings;
   final UrlLauncher launch;
   final WidgetBuilder? managePresetsBuilder;
   final Future<void> Function()? exportAndShare;
+  final Future<IntentStore> Function()? openStore;
 
   const SettingsScreen({
     super.key,
@@ -62,6 +64,7 @@ class SettingsScreen extends StatefulWidget {
     UrlLauncher? launch,
     this.managePresetsBuilder,
     this.exportAndShare,
+    this.openStore,
   }) : launch = launch ?? _defaultLaunch;
 
   @override
@@ -216,14 +219,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!ok) _showSnackBar('Privacy policy isn\'t published yet.');
   }
 
-  Future<void> _exportData() async {
-    try {
-      await (widget.exportAndShare ?? exportAndShareCsv)();
-    } catch (_) {
-      _showSnackBar('Export failed. Please try again.');
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final promptsEnabled = _promptsEnabled;
@@ -307,17 +302,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   trailing: const Icon(Icons.chevron_right, color: Colors.white38),
                   onTap: _openManagePresets,
                 ),
-                ListTile(
-                  iconColor: Colors.white70,
-                  textColor: Colors.white,
-                  leading: const Icon(Icons.ios_share),
-                  title: const Text('Export data'),
-                  subtitle: const Text(
-                    'One CSV of every unlock, then any orphan intents. Shared via your phone\'s share sheet.',
-                    style: TextStyle(color: Colors.white38, fontSize: 12),
-                  ),
-                  onTap: _exportData,
+                const _SectionDivider(),
+                YourDataCard(
+                  settings: widget.settings,
+                  openStore: widget.openStore,
+                  exportAndShare: widget.exportAndShare ?? exportAndShareCsv,
+                  showSnackBar: _showSnackBar,
                 ),
+                const _SectionDivider(),
                 ListTile(
                   iconColor: Colors.white70,
                   textColor: Colors.white,

@@ -3,54 +3,57 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:why_did_i_unlock/home_screen.dart';
+import 'package:why_did_i_unlock/intent_store.dart';
 import 'package:why_did_i_unlock/main.dart';
 
 void main() {
   setUp(() {
-    // HomeScreen.initState fires two real plugin calls fire-and-forget:
-    // FlutterOverlayWindow.isPermissionGranted() (a MethodChannel call) and
-    // AppSettings().promptsEnabled() (SharedPreferencesAsync). Neither has a
-    // real platform implementation in a widget test, so both need mocking or
-    // they'd throw MissingPluginException from an unawaited Future and fail
-    // the test.
+    // HomeScreen.initState fires plugin calls: overlay permission check and
+    // (unless injected) IntentStore.open. Widget tests that pump HomeScreen
+    // directly inject openStore; the MyApp path below mocks the overlay
+    // channel and relies on HomeScreen catching a failed real DB open.
     const overlayChannel = MethodChannel('x-slayer/overlay_channel');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
       overlayChannel,
       (call) async {
-        // Return granted=true so _requestOverlayPermission short-circuits
-        // without needing to also mock requestPermission().
         if (call.method == 'checkPermission') return true;
         return null;
       },
     );
-    // Official in-memory test double for SharedPreferencesAsync (see
-    // shared_preferences_platform_interface) — no platform channel involved.
-    // Seeded with onboarding already completed so MyApp's AppLauncher (added
-    // T12-adjacent, see main.dart) goes straight to HomeScreen instead of
-    // OnboardingScreen — that routing decision has its own test below.
     SharedPreferencesAsyncPlatform.instance =
         InMemorySharedPreferencesAsync.withData({'onboarding_completed': true});
   });
 
   testWidgets('13. HomeScreen renders title and every nav entry', (tester) async {
-    await tester.pumpWidget(const MyApp());
-    // Let AppLauncher's onboardingCompleted() check and HomeScreen
-    // initState's mocked-but-still-async calls resolve.
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+    late IntentStore store;
+    await tester.runAsync(() async {
+      store = await IntentStore.open(path: inMemoryDatabasePath);
+    });
+
+    await tester.pumpWidget(MaterialApp(
+      home: HomeScreen(
+        openStore: () async => store,
+        checkPermission: () async => true,
+      ),
+    ));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
     await tester.pump();
     await tester.pump();
 
     expect(find.text('Why Did I Unlock?'), findsOneWidget);
-    // No "Unlock prompts" switch here anymore — Settings (T13) is the single
-    // source of truth for the prompts on/off preference; Home's own copy was
-    // removed because it only loaded its value once in initState and could
-    // silently go stale after a change made in Settings. See HomeScreen's
-    // class doc comment.
     expect(find.byType(Switch), findsNothing);
-    expect(find.text('Settings'), findsOneWidget);
+    expect(find.text('Settings'), findsWidgets);
+    await tester.scrollUntilVisible(find.text('About'), 200);
     expect(find.text('View history'), findsOneWidget);
     expect(find.text('Manage options'), findsOneWidget);
-    expect(find.text('Status & troubleshooting'), findsOneWidget);
+    expect(find.text('Status & troubleshooting'), findsWidgets);
     expect(find.text('About'), findsOneWidget);
+
+    await tester.runAsync(() => store.close());
   });
 
   testWidgets('19. AppLauncher shows OnboardingScreen when onboarding is not yet completed', (tester) async {

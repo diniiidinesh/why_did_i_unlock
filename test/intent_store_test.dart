@@ -787,4 +787,51 @@ void main() {
       expect(rows[2].durationSeconds, 0);
     });
   });
+
+  group('T18 Your data helpers', () {
+    test('userDataCounts and oldestRecordAt over unlocks + intents', () async {
+      final older = DateTime.utc(2026, 1, 1);
+      final newer = DateTime.utc(2026, 6, 1);
+      await store.insertUnlock(unlockedAt: newer, promptShown: true);
+      await store.insertEvent(_event(clientId: 'e1', declaredAt: older, completedAt: older));
+
+      final counts = await store.userDataCounts();
+      expect(counts.unlockCount, 1);
+      expect(counts.intentCount, 1);
+      expect(counts.totalEvents, 2);
+      expect(await store.oldestRecordAt(), older);
+    });
+
+    test('deleteAllUserData clears logs but keeps presets', () async {
+      await store.insertUnlock(unlockedAt: DateTime.utc(2026, 7, 1), promptShown: true);
+      await store.insertEvent(_event(clientId: 'gone'));
+      final presetsBefore = await store.activePresets();
+      expect(presetsBefore, isNotEmpty);
+
+      await store.deleteAllUserData();
+
+      final counts = await store.userDataCounts();
+      expect(counts.unlockCount, 0);
+      expect(counts.intentCount, 0);
+      expect(await store.oldestRecordAt(), isNull);
+      expect(await store.activePresets(), hasLength(presetsBefore.length));
+    });
+
+    test('pruneOlderThan removes only rows before the cutoff', () async {
+      final old = DateTime.utc(2025, 1, 1);
+      final keep = DateTime.utc(2026, 7, 1);
+      await store.insertUnlock(unlockedAt: old, promptShown: true);
+      await store.insertUnlock(unlockedAt: keep, promptShown: true);
+      await store.insertEvent(_event(clientId: 'old', declaredAt: old, completedAt: old));
+      await store.insertEvent(_event(clientId: 'new', declaredAt: keep, completedAt: keep));
+
+      final deleted = await store.pruneOlderThan(DateTime.utc(2026, 1, 1));
+      expect(deleted, 2);
+
+      final counts = await store.userDataCounts();
+      expect(counts.unlockCount, 1);
+      expect(counts.intentCount, 1);
+      expect(await store.oldestRecordAt(), keep);
+    });
+  });
 }
