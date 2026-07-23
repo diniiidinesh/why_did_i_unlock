@@ -108,13 +108,24 @@ because a single added dependency can invalidate every answer here:
 
 ### Permissions that do NOT require a separate Play declaration form
 
-Confirmed against the current manifest — the app requests only
+Confirmed against the current manifest — the app requests
 `SYSTEM_ALERT_WINDOW`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`,
 `RECEIVE_BOOT_COMPLETED`. None of these trigger Play's sensitive-permission
 declaration forms (which cover Accessibility, SMS/Call Log, `QUERY_ALL_PACKAGES`,
 `MANAGE_EXTERNAL_STORAGE`, exact alarms, etc.). The `<queries>` block is a
 narrowly scoped `PROCESS_TEXT` intent inserted by the Flutter engine, **not**
 `QUERY_ALL_PACKAGES`, so it needs no declaration.
+
+> ⚠️ **`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` (added Sprint 4, Status screen's
+> one-tap battery-exemption dialog) is different — verify before submitting.**
+> Unlike the permissions above, Play Console's Policy questionnaire does prompt
+> for a declared use-case for this one (it's a commonly-abused permission for
+> keeping apps alive against user intent). The justification is the same as
+> the foreground-service one in §1: the app's core function requires
+> surviving OEM background-kill to observe unlock events, and the request is
+> user-initiated (a button on the Status screen), not automatic on launch.
+> Confirm the current Play Console form wording before the first submission —
+> policy on this permission has shifted before.
 
 > ⚠️ **This section expires the moment opt-in analytics ships.** Any network
 > transmission — even anonymous, even opt-in — flips the first answer to "Yes"
@@ -152,7 +163,7 @@ narrowly scoped `PROCESS_TEXT` intent inserted by the Flutter engine, **not**
 Found by auditing the current `main` against Play's requirements. Ordered by how
 badly each bites.
 
-1. **[Dart — do now] User-declared intent text is logged in release builds.**
+1. **[DONE 2026-07-24] User-declared intent text is logged in release builds.**
    `debugPrint` is *not* stripped in Flutter release builds; it reaches Android's
    system log. Roughly six call sites in `lib/main.dart` log the user's actual
    intent text (declare, dismiss, store-confirmation, and three error paths that

@@ -3,6 +3,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <!-- Status screen's one-tap battery-optimization-exemption dialog
+         (permission_handler / Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).
+         Play scrutinizes this permission — see docs/PLAY_SUBMISSION.md §2/§3b
+         before submitting; justification: the app's core function requires
+         surviving OEM background-kill to observe unlock events (same
+         rationale as the specialUse foreground service). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <!-- allowBackup="false": Sprint 3 introduces the first on-disk user data
          (the sqflite intent_log). Without this, Android's default auto-backup
          would sweep declared intent text into cloud/adb backups, conflicting

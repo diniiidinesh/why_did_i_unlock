@@ -3,14 +3,19 @@ import 'dart:isolate';
 import 'dart:math';
 import 'dart:ui' show IsolateNameServer;
 
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 
+import 'about_screen.dart';
 import 'app_settings.dart';
 import 'history_screen.dart';
 import 'intent_store.dart';
+import 'manage_presets_screen.dart';
+import 'onboarding_screen.dart';
 import 'prompt_policy.dart';
+import 'status_screen.dart';
 
 /// A preset as rendered on the capture screen — just the fields
 /// [IntentCaptureScreen] needs (id + label), not the full `IntentPreset`
@@ -30,6 +35,22 @@ class CapturePreset {
   final int id;
   final String label;
   const CapturePreset({required this.id, required this.label});
+}
+
+/// A previously-declared intent still `open` (undismissed) at the moment a
+/// new capture screen is shown. Reserved for multi-intent prompting
+/// (docs/erd/sprint4-app-shell-plan-2026-07-23.md §7.1: "prompt again with
+/// the previous bubble's text differentiated, so the user can mark it done
+/// or add a second intent") — **T12 only plumbs the parameter through; it is
+/// always passed an empty list this iteration.** Nothing queries
+/// `WHERE status='open'` yet. Minimal shape (not the full DB row) mirrors
+/// [CapturePreset]'s reasoning: the future rendering code needs just enough
+/// to show a "you already said X" reminder, not preset/unlock linkage.
+class OutstandingIntent {
+  final String clientId;
+  final String text;
+  final DateTime declaredAt;
+  const OutstandingIntent({required this.clientId, required this.text, required this.declaredAt});
 }
 
 /// Label for the honest "no real reason" option. Deliberately NOT a plain
@@ -154,7 +175,15 @@ const String _intentWritePortName = 'com.whydidiunlock.intent_write_port';
 bool _sendToBackground(Map<String, dynamic> message) {
   final port = IsolateNameServer.lookupPortByName(_intentWritePortName);
   if (port == null) {
-    debugPrint('⚠️ Could not find intent-write port — background engine not ready? Message dropped: $message');
+    // Gated: `message` can carry declared intent text (declare/noIntent
+    // payloads) — debugPrint is NOT stripped from release builds
+    // (docs/PLAY_SUBMISSION.md §3b.1), so an unguarded log here would put the
+    // user's own words in Android's system log / bug reports / OEM diagnostic
+    // uploads, directly contradicting the privacy policy's "nothing leaves
+    // your device."
+    if (kDebugMode) {
+      debugPrint('⚠️ Could not find intent-write port — background engine not ready? Message dropped: $message');
+    }
     return false;
   }
   port.send(message);
@@ -288,6 +317,31 @@ const String _manualPromptPortName = 'com.whydidiunlock.manual_prompt_port';
 /// over it with an artificial delay. See docs/DATA_MODEL.md §4.
 const String _overlayConfigPortName = 'com.whydidiunlock.overlay_config_port';
 
+/// Name for a FIFTH same-process port, background → overlay (same direction
+/// as [_overlayConfigPortName], so also registered by the OVERLAY isolate
+/// itself, not by `backgroundMain`). Carries the "screen locked" signal used
+/// by T12 (docs/erd/sprint4-app-shell-plan-2026-07-23.md §3a): a live
+/// CAPTURE SCREEN on lock is a stale, unanswered question and should close
+/// (otherwise the next unlock wrongly logs `overlay_active` — a skip that
+/// isn't really one); a live BUBBLE (an outstanding intent) stays up,
+/// unchanged from today's behaviour. Only the overlay isolate knows its own
+/// `_mode`, so the close-or-not decision has to be made there, not here.
+const String _lockSignalPortName = 'com.whydidiunlock.lock_signal_port';
+
+/// Sent from `backgroundMain`'s `onLock` handler, only when
+/// [_overlayIsActive] (no point signalling when nothing is showing). Mirrors
+/// [_signalOverlayClosed]'s fire-and-forget lookup-by-name style; a not-found
+/// port just means the overlay isolate hasn't registered it (e.g. never shown
+/// this process), not an error.
+void _signalLockToOverlay() {
+  final port = IsolateNameServer.lookupPortByName(_lockSignalPortName);
+  if (port == null) {
+    debugPrint('⚠️ Could not find lock-signal port — overlay not active/registered?');
+    return;
+  }
+  port.send(true);
+}
+
 /// Called from the MAIN UI ENGINE (the Status screen, T6) — the only
 /// function in this file callable directly from outside it, since Status
 /// lives in a different file/screen and needs a real entry point rather
@@ -382,6 +436,13 @@ void backgroundMain() {
       await _showCaptureScreen(width, height);
     } else if (call.method == 'onLock') {
       debugPrint('🔒 LOCK EVENT RECEIVED at ${DateTime.now()}');
+      // Only the CAPTURE screen should close on lock; a live bubble (an
+      // outstanding intent) stays up — see _lockSignalPortName's doc and
+      // docs/erd/sprint4-app-shell-plan-2026-07-23.md §3a. Skip the signal
+      // entirely when no overlay is up at all.
+      if (_overlayIsActive) {
+        _signalLockToOverlay();
+      }
     }
   });
 
@@ -404,14 +465,16 @@ void backgroundMain() {
       final map = message as Map;
       final store = await _ensureIntentStore();
       if (store == null) {
-        debugPrint('⚠️ Dropping relayed message — IntentStore unavailable: $map');
+        // Gated per docs/PLAY_SUBMISSION.md §3b.1 — see _sendToBackground's
+        // doc for why: `map` can carry the user's declared intent text.
+        if (kDebugMode) debugPrint('⚠️ Dropping relayed message — IntentStore unavailable: $map');
         return;
       }
       switch (map['type']) {
         case 'declare':
           final event = IntentEvent.fromMessage(map);
           await store.insertOpenIntent(event);
-          debugPrint('📂 Intent opened: text="${event.text}"');
+          if (kDebugMode) debugPrint('📂 Intent opened: text="${event.text}"');
         case 'dismiss':
           final dismissal = IntentDismissal.fromMessage(map);
           await store.markIntentDone(clientId: dismissal.clientId, completedAt: dismissal.completedAt);
@@ -419,14 +482,16 @@ void backgroundMain() {
         case 'noIntent':
           final event = IntentEvent.fromMessage(map);
           await store.insertEvent(event);
-          debugPrint('💾 Stored no-intent event: text="${event.text}"');
+          if (kDebugMode) debugPrint('💾 Stored no-intent event: text="${event.text}"');
         case 'requestPresets':
           await _replyActivePresetsToOverlay(store);
         default:
-          debugPrint('⚠️ Unknown relay message type (${map['type']}) — dropped: $map');
+          if (kDebugMode) debugPrint('⚠️ Unknown relay message type (${map['type']}) — dropped: $map');
       }
     } catch (e) {
-      debugPrint('⚠️ Ignoring malformed overlay message ($e): $message');
+      // Gated: `message` (the raw, possibly-malformed payload) is included
+      // for debugging and can still carry user text even when malformed.
+      if (kDebugMode) debugPrint('⚠️ Ignoring malformed overlay message ($e): $message');
     }
   });
 
@@ -803,8 +868,58 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const MaterialApp(
-      home: HomeScreen(),
+      home: AppLauncher(),
     );
+  }
+}
+
+/// Decides between the 5-step onboarding flow (T4) and `HomeScreen`, based on
+/// `AppSettings.onboardingCompleted()` — the same flag `OnboardingScreen`
+/// itself sets on its last step. Previously `MyApp` went straight to
+/// `HomeScreen` unconditionally, which is why onboarding existed as a file
+/// but nobody ever saw it: nothing decided to show it.
+///
+/// A user upgrading from a pre-onboarding install (the flag was never
+/// written) sees the flow once — deliberate, not a bug: `onboardingCompleted`
+/// is intentionally its own flag rather than inferred from e.g. "has the
+/// overlay permission" (see that method's doc comment), so there is no other
+/// signal to check.
+class AppLauncher extends StatefulWidget {
+  const AppLauncher({super.key});
+
+  @override
+  State<AppLauncher> createState() => _AppLauncherState();
+}
+
+class _AppLauncherState extends State<AppLauncher> {
+  /// Null while the check is in flight — deliberately a blank black screen
+  /// for that brief window rather than a spinner, matching this app's other
+  /// "no flash of stale/loading UI" choices (docs/DATA_MODEL.md §4).
+  bool? _onboardingCompleted;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final completed = await _appSettings.onboardingCompleted();
+    if (mounted) setState(() => _onboardingCompleted = completed);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final completed = _onboardingCompleted;
+    if (completed == null) {
+      return const Scaffold(backgroundColor: Colors.black);
+    }
+    if (!completed) {
+      return OnboardingScreen(onFinished: () {
+        if (mounted) setState(() => _onboardingCompleted = true);
+      });
+    }
+    return const HomeScreen();
   }
 }
 
@@ -819,25 +934,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // NOTE: unlock/lock handling deliberately does NOT live here anymore. It runs
   // in the persistent background engine (see backgroundMain) so it survives the
-  // app being swiped out of Recents. This screen's only job is to request the
-  // overlay permission on first launch (needs a real Activity context) and
-  // host the prompts on/off toggle — there's no dedicated Settings screen yet,
-  // so it lives here rather than building one just for a single switch.
+  // app being swiped out of Recents. This screen is a launcher: the prompts
+  // on/off toggle plus navigation into the other screens. The overlay
+  // permission is no longer requested cold from here — `OnboardingScreen`'s
+  // permission step (via `AppLauncher`) now explains it before asking, and
+  // `StatusScreen` covers re-requesting it later if it's revoked.
 
   bool _promptsEnabled = true;
 
   @override
   void initState() {
     super.initState();
-    _requestOverlayPermission();
     _loadPromptsEnabled();
-  }
-
-  Future<void> _requestOverlayPermission() async {
-    final hasPermission = await FlutterOverlayWindow.isPermissionGranted();
-    if (!hasPermission) {
-      await FlutterOverlayWindow.requestPermission();
-    }
   }
 
   Future<void> _loadPromptsEnabled() async {
@@ -877,20 +985,32 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
             const SizedBox(height: 24),
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const HistoryScreen()),
-                );
-              },
-              child: const Text(
-                'View history',
-                style: TextStyle(color: Colors.white70, fontSize: 16),
-              ),
-            ),
+            _HomeLink(label: 'View history', screenBuilder: (_) => const HistoryScreen()),
+            _HomeLink(label: 'Manage presets', screenBuilder: (_) => const ManagePresetsScreen()),
+            _HomeLink(label: 'Status & troubleshooting', screenBuilder: (_) => const StatusScreen()),
+            _HomeLink(label: 'About', screenBuilder: (_) => const AboutScreen()),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// One `HomeScreen` navigation entry — factored out once a fourth identical
+/// TextButton-that-pushes-a-route was about to be added.
+class _HomeLink extends StatelessWidget {
+  final String label;
+  final WidgetBuilder screenBuilder;
+
+  const _HomeLink({required this.label, required this.screenBuilder});
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton(
+      onPressed: () {
+        Navigator.of(context).push(MaterialPageRoute(builder: screenBuilder));
+      },
+      child: Text(label, style: const TextStyle(color: Colors.white70, fontSize: 16)),
     );
   }
 }
@@ -950,6 +1070,43 @@ class _OverlayRootState extends State<OverlayRoot> {
     // them, so there's no window where background could look up a port that
     // doesn't exist yet.
     _requestPresets();
+
+    // T12: registered the same way as configPort above (by this isolate,
+    // not backgroundMain) — see _lockSignalPortName's doc.
+    IsolateNameServer.removePortNameMapping(_lockSignalPortName);
+    final lockSignalPort = ReceivePort();
+    IsolateNameServer.registerPortWithName(lockSignalPort.sendPort, _lockSignalPortName);
+    lockSignalPort.listen((_) => _handleLockSignal());
+  }
+
+  /// Reacts to a lock signal relayed from the background isolate (see
+  /// _lockSignalPortName). Only closes the CAPTURE screen — a stale,
+  /// unanswered question on lock is noise, and leaving it open makes the
+  /// next unlock wrongly log `overlay_active` (a skip that isn't really one).
+  /// A live BUBBLE (an outstanding intent) is left running unchanged; this
+  /// iteration's behaviour there stays exactly what it is today (see
+  /// docs/erd/sprint4-app-shell-plan-2026-07-23.md §3a/§7.1).
+  ///
+  /// Deliberately does NOT reset `_mode`/`_intentText`/any capture-screen
+  /// widget state the way `_dismissBubble` does for the bubble path — the
+  /// overlay engine is cached and its widget tree survives `closeOverlay()`
+  /// (that's exactly why `_dismissBubble` NEEDS an explicit reset, or a stale
+  /// bubble reappears). Leaving this path bare means `IntentCaptureScreen`'s
+  /// `TextEditingController` — and any partially-typed text in it — survives
+  /// the close+reopen untouched: the next unlock's capture screen (if triage
+  /// lets one through) resumes the same draft rather than starting blank.
+  /// Only the WINDOW closes; the conversation the user was mid-typing does
+  /// not reset.
+  Future<void> _handleLockSignal() async {
+    if (_mode != _OverlayMode.capture) {
+      debugPrint('🔒 Overlay: lock signal ignored — bubble is live, staying up');
+      return;
+    }
+    debugPrint('🔒 Overlay: closing capture screen on lock');
+    await FlutterOverlayWindow.closeOverlay();
+    // Tells the background isolate this is a REAL close (not the
+    // close+reopen resize in _submitIntent) — see _overlayIsActive.
+    _signalOverlayClosed();
   }
 
   /// Sends a `requestPresets` message over the existing intent-write port
@@ -994,9 +1151,11 @@ class _OverlayRootState extends State<OverlayRoot> {
     // dismiss-time relay's ability to find this row at all (markIntentDone
     // is keyed on clientId).
     final clientId = _generateClientId(declaredAt);
-    debugPrint(
-      '📝 Intent declared: "$trimmed" (source: $source) at $declaredAt',
-    );
+    // Gated per docs/PLAY_SUBMISSION.md §3b.1 — `trimmed` is the user's own
+    // declared-intent text; debugPrint is not stripped from release builds.
+    if (kDebugMode) {
+      debugPrint('📝 Intent declared: "$trimmed" (source: $source) at $declaredAt');
+    }
 
     setState(() {
       _intentText = trimmed;
@@ -1084,10 +1243,13 @@ class _OverlayRootState extends State<OverlayRoot> {
   Future<void> _dismissBubble() async {
     final dismissedAt = DateTime.now();
     final activeFor = _declaredAt == null ? null : dismissedAt.difference(_declaredAt!);
-    debugPrint(
-      '✅ Intent dismissed: "$_intentText" (source: $_intentSource) '
-      'declared at $_declaredAt, dismissed at $dismissedAt, active for $activeFor',
-    );
+    // Gated per docs/PLAY_SUBMISSION.md §3b.1 — see _submitIntent's doc.
+    if (kDebugMode) {
+      debugPrint(
+        '✅ Intent dismissed: "$_intentText" (source: $_intentSource) '
+        'declared at $_declaredAt, dismissed at $dismissedAt, active for $activeFor',
+      );
+    }
 
     // Only clientId + completedAt relayed here — kind/source/text/declaredAt
     // were already persisted by _submitIntent's declare-time relay above;
@@ -1130,6 +1292,9 @@ class _OverlayRootState extends State<OverlayRoot> {
           presets: _presets,
           onSubmit: _submitIntent,
           onNoIntent: _submitNoIntent,
+          // Always empty this iteration — see OutstandingIntent's doc (T12
+          // plumbs the parameter only; nothing populates it yet).
+          outstandingIntents: const [],
         );
       case _OverlayMode.bubble:
         return BubbleWidget(intentText: _intentText, onClose: _dismissBubble);
@@ -1151,11 +1316,17 @@ class IntentCaptureScreen extends StatefulWidget {
   /// Called when the user picks the honest "no real reason" option instead.
   final VoidCallback onNoIntent;
 
+  /// Forward-compat only this iteration — see [OutstandingIntent]'s doc.
+  /// Defaults to empty so existing call sites/tests are unaffected; not yet
+  /// rendered anywhere.
+  final List<OutstandingIntent> outstandingIntents;
+
   const IntentCaptureScreen({
     super.key,
     required this.presets,
     required this.onSubmit,
     required this.onNoIntent,
+    this.outstandingIntents = const [],
   });
 
   @override

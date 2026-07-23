@@ -43,6 +43,14 @@ dependencies:
   # hands the URI to the OS (an email app / browser), matching the local-first
   # stance (CLAUDE.md SS11) since the app itself still makes no network calls.
   url_launcher: ^6.3.1
+  # Status screen: one-tap "ignore battery optimizations" system dialog
+  # (Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS under the hood) —
+  # standard on every OEM, unlike the manufacturer-specific Autostart Manager
+  # screens (Vivo/Xiaomi/Oppo), which have no public API and stay
+  # instructions-only (oem_autostart_copy.dart). Requires the
+  # REQUEST_IGNORE_BATTERY_OPTIMIZATIONS manifest permission (added
+  # alongside), which Play scrutinizes — see docs/PLAY_SUBMISSION.md.
+  permission_handler: ^11.3.1
 
 dev_dependencies:
   flutter_test:

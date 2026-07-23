@@ -25,12 +25,17 @@ void main() {
     );
     // Official in-memory test double for SharedPreferencesAsync (see
     // shared_preferences_platform_interface) — no platform channel involved.
-    SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
+    // Seeded with onboarding already completed so MyApp's AppLauncher (added
+    // T12-adjacent, see main.dart) goes straight to HomeScreen instead of
+    // OnboardingScreen — that routing decision has its own test below.
+    SharedPreferencesAsyncPlatform.instance =
+        InMemorySharedPreferencesAsync.withData({'onboarding_completed': true});
   });
 
   testWidgets('13. HomeScreen renders title, prompts toggle, and history entry', (tester) async {
     await tester.pumpWidget(const MyApp());
-    // Let initState's mocked-but-still-async calls resolve.
+    // Let AppLauncher's onboardingCompleted() check and HomeScreen
+    // initState's mocked-but-still-async calls resolve.
     await tester.pump();
     await tester.pump();
 
@@ -38,6 +43,22 @@ void main() {
     expect(find.text('Unlock prompts'), findsOneWidget);
     expect(find.byType(Switch), findsOneWidget);
     expect(find.text('View history'), findsOneWidget);
+    expect(find.text('Manage presets'), findsOneWidget);
+    expect(find.text('Status & troubleshooting'), findsOneWidget);
+    expect(find.text('About'), findsOneWidget);
+  });
+
+  testWidgets('19. AppLauncher shows OnboardingScreen when onboarding is not yet completed', (tester) async {
+    SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
+
+    await tester.pumpWidget(const MyApp());
+    await tester.pump();
+    await tester.pump();
+
+    // OnboardingScreen's first step (value prop) — HomeScreen must NOT be
+    // reachable yet.
+    expect(find.text('Why Did I Unlock?'), findsNothing);
+    expect(find.text('Unlock prompts'), findsNothing);
   });
 
   testWidgets(

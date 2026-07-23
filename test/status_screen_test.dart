@@ -9,13 +9,17 @@ void main() {
         checkPermission: () async => true,
         requestPermission: () async => true,
         onShowPromptNow: ({required screenWidth, required screenHeight}) {},
+        checkBatteryExemption: () async => true,
+        requestBatteryExemption: () async {},
       ),
     ));
     await tester.pump();
 
     expect(find.text('Granted'), findsOneWidget);
     expect(find.text('Grant permission'), findsNothing);
-    expect(find.text('Refresh status'), findsOneWidget);
+    // Two "Refresh status" buttons now — one on the overlay-permission card,
+    // one on the battery-exemption card added alongside this feature.
+    expect(find.text('Refresh status'), findsNWidgets(2));
   });
 
   testWidgets('shows Not granted and a grant button when permission is missing', (tester) async {
@@ -24,6 +28,8 @@ void main() {
         checkPermission: () async => false,
         requestPermission: () async => true,
         onShowPromptNow: ({required screenWidth, required screenHeight}) {},
+        checkBatteryExemption: () async => true,
+        requestBatteryExemption: () async {},
       ),
     ));
     await tester.pump();
@@ -44,6 +50,8 @@ void main() {
           return true;
         },
         onShowPromptNow: ({required screenWidth, required screenHeight}) {},
+        checkBatteryExemption: () async => true,
+        requestBatteryExemption: () async {},
       ),
     ));
     await tester.pump();
@@ -63,9 +71,16 @@ void main() {
         checkPermission: () async => true,
         requestPermission: () async => true,
         onShowPromptNow: ({required screenWidth, required screenHeight}) {},
+        checkBatteryExemption: () async => true,
+        requestBatteryExemption: () async {},
       ),
     ));
     await tester.pump();
+
+    // The battery-exemption card added above the OEM list pushes these below
+    // the ListView's initial viewport + cache extent, same reason the
+    // "Show me the prompt now" test below already needs a scroll.
+    await tester.scrollUntilVisible(find.text('My phone isn\'t listed'), 300);
 
     expect(find.textContaining('Xiaomi'), findsOneWidget);
     expect(find.textContaining('Oppo'), findsOneWidget);
@@ -85,6 +100,8 @@ void main() {
           capturedWidth = screenWidth;
           capturedHeight = screenHeight;
         },
+        checkBatteryExemption: () async => true,
+        requestBatteryExemption: () async {},
       ),
     ));
     await tester.pump();

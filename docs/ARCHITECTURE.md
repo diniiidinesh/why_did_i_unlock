@@ -135,6 +135,12 @@ exists to make the "why" durable.
     calls `_sweepAbandonedIntents()` once per engine start, which both warms the store
     open and reclassifies any `open` intent_log row left by a process that died before
     dismissing it (docs/DATA_MODEL.md §3, cases 7/8).
+  - `com.whydidiunlock.lock_signal_port` (T12) — **background → overlay**, same
+    direction as `overlay_config_port` and registered by the overlay isolate for the
+    same reason. Sent from `backgroundMain`'s `onLock` handler, only when
+    `_overlayIsActive`. The overlay isolate decides what to do with it based on its own
+    `_mode` — capture screen (unanswered question) closes; a live bubble (outstanding
+    intent) stays up. See §4's Lock flow below.
 
 ## 4. Event flows
 
@@ -194,8 +200,25 @@ overlay isolate that would have dismissed it is gone), but it is NOT lost — th
 declared text, source, and timestamp all remain queryable. See docs/DATA_MODEL.md §3,
 cases 7/8.
 
-**Lock:** `ACTION_SCREEN_OFF` → `UnlockReceiver` → `onPhoneLocked()` → `onLock` → logged
-(no UI action today).
+**Lock (T12):** `ACTION_SCREEN_OFF` → `UnlockReceiver` → `onPhoneLocked()` → `onLock` →
+logged, then, if `_overlayIsActive`, `_signalLockToOverlay()` sends over
+`lock_signal_port`. The overlay isolate's listener checks its own `_mode`: a live
+**capture screen** is a stale, unanswered question, so it closes (`closeOverlay()` +
+`_signalOverlayClosed()`, same as a real dismiss) — otherwise the next unlock would
+wrongly log `overlay_active` for a screen nobody is even looking at. A live **bubble**
+(an outstanding intent) is left running, unchanged from pre-T12 behaviour — the next
+unlock still skips as `overlay_active` this iteration (multi-intent stacking is
+deferred, docs/DATA_MODEL.md §10 / the Sprint 4 plan §7.1). The decision has to be made
+in the overlay isolate, not `backgroundMain`, because only the overlay isolate's widget
+state knows which mode it's actually in.
+
+**Partially-typed text survives the close, deliberately.** The capture-screen close path
+does NOT reset `_mode`/`_intentText`/the `TextEditingController` the way `_dismissBubble`
+resets the bubble path. Since the overlay engine's widget tree survives `closeOverlay()`
+regardless (§5's caching note — the reason `_dismissBubble` needs an explicit reset at
+all), leaving this path bare means any text the user had started typing is still sitting
+in the `TextField` on the next capture screen, rather than being silently discarded.
+Only the window closes; the in-progress draft does not.
 
 **Boot:** `BOOT_COMPLETED` / `QUICKBOOT_POWERON` → `BootReceiver` →
 `startForegroundService(UnlockListenerService)` → service `onCreate` rebuilds the

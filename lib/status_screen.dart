@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'main.dart' show triggerCapturePromptManually;
 import 'oem_autostart_copy.dart';
@@ -10,6 +11,16 @@ import 'oem_autostart_copy.dart';
 /// implementation in a widget test. See `docs/ARCHITECTURE.md` §3 for the
 /// full "why route through the background isolate" story.
 typedef ManualPromptTrigger = void Function({required int screenWidth, required int screenHeight});
+
+/// Default battery-exemption check/request, factored to top-level functions
+/// (not inline closures) specifically so `StatusScreen`'s constructor can
+/// stay `const` — an inline lambda default isn't a valid compile-time
+/// constant even when it captures nothing, only a bare tear-off is.
+Future<bool> _defaultCheckBatteryExemption() => Permission.ignoreBatteryOptimizations.isGranted;
+
+Future<void> _defaultRequestBatteryExemption() async {
+  await Permission.ignoreBatteryOptimizations.request();
+}
 
 /// "Is it working?" screen: overlay permission state (with a re-request
 /// action), OEM autostart/battery guidance, an honest note on notification
@@ -27,14 +38,27 @@ class StatusScreen extends StatefulWidget {
   final Future<bool?> Function() requestPermission;
   final ManualPromptTrigger onShowPromptNow;
 
+  /// Battery-optimization-exemption check/request — the STANDARD Android
+  /// dialog (`Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` under
+  /// `permission_handler`), not the OEM-specific Autostart Manager screens
+  /// below (those have no public API and stay instructions-only). Injectable
+  /// for the same testability reason as [checkPermission]/[requestPermission]
+  /// — no real platform implementation under `flutter_test`.
+  final Future<bool> Function() checkBatteryExemption;
+  final Future<void> Function() requestBatteryExemption;
+
   const StatusScreen({
     super.key,
     Future<bool> Function()? checkPermission,
     Future<bool?> Function()? requestPermission,
     ManualPromptTrigger? onShowPromptNow,
+    Future<bool> Function()? checkBatteryExemption,
+    Future<void> Function()? requestBatteryExemption,
   })  : checkPermission = checkPermission ?? FlutterOverlayWindow.isPermissionGranted,
         requestPermission = requestPermission ?? FlutterOverlayWindow.requestPermission,
-        onShowPromptNow = onShowPromptNow ?? triggerCapturePromptManually;
+        onShowPromptNow = onShowPromptNow ?? triggerCapturePromptManually,
+        checkBatteryExemption = checkBatteryExemption ?? _defaultCheckBatteryExemption,
+        requestBatteryExemption = requestBatteryExemption ?? _defaultRequestBatteryExemption;
 
   @override
   State<StatusScreen> createState() => _StatusScreenState();
@@ -46,10 +70,14 @@ class _StatusScreenState extends State<StatusScreen> {
   /// flashing a wrong answer before the real one arrives.
   bool? _permissionGranted;
 
+  /// Same null-while-checking convention as [_permissionGranted].
+  bool? _batteryExempt;
+
   @override
   void initState() {
     super.initState();
     _refreshPermission();
+    _refreshBatteryExemption();
   }
 
   Future<void> _refreshPermission() async {
@@ -66,6 +94,19 @@ class _StatusScreenState extends State<StatusScreen> {
     // the explicit "Refresh status" action below covers the real
     // grant-then-return flow.
     await _refreshPermission();
+  }
+
+  Future<void> _refreshBatteryExemption() async {
+    final exempt = await widget.checkBatteryExemption();
+    if (mounted) setState(() => _batteryExempt = exempt);
+  }
+
+  Future<void> _requestBatteryExemption() async {
+    await widget.requestBatteryExemption();
+    // Same reasoning as _requestPermission: the system dialog returns before
+    // the user has necessarily answered it, so this mostly catches the
+    // already-granted no-op case; the real answer needs a re-check anyway.
+    await _refreshBatteryExemption();
   }
 
   void _showPromptNow() {
@@ -105,6 +146,12 @@ class _StatusScreenState extends State<StatusScreen> {
             'allow this one to keep running. If prompts stop appearing after '
             'a while, check your phone\'s setting below.',
             style: TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+          const SizedBox(height: 12),
+          _BatteryExemptionCard(
+            exempt: _batteryExempt,
+            onRequest: _requestBatteryExemption,
+            onRefresh: _refreshBatteryExemption,
           ),
           const SizedBox(height: 12),
           ...oemAutostartGuidance.map((g) => _OemTile(guidance: g)),
@@ -192,6 +239,59 @@ class _PermissionCard extends StatelessWidget {
             children: [
               if (granted != true)
                 ElevatedButton(onPressed: onGrant, child: const Text('Grant permission')),
+              OutlinedButton(onPressed: onRefresh, child: const Text('Refresh status')),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The STANDARD Android battery-optimization-exemption dialog — a single
+/// system-provided prompt that works identically on every OEM, unlike the
+/// manufacturer-specific Autostart Manager screens below (no public API,
+/// stay instructions-only). Mirrors [_PermissionCard]'s shape/states.
+class _BatteryExemptionCard extends StatelessWidget {
+  final bool? exempt;
+  final VoidCallback onRequest;
+  final VoidCallback onRefresh;
+
+  const _BatteryExemptionCard({required this.exempt, required this.onRequest, required this.onRefresh});
+
+  @override
+  Widget build(BuildContext context) {
+    final String statusText;
+    final Color statusColor;
+    if (exempt == null) {
+      statusText = 'Checking…';
+      statusColor = Colors.white54;
+    } else if (exempt == true) {
+      statusText = 'Exempt — background restrictions won\'t apply';
+      statusColor = Colors.greenAccent;
+    } else {
+      statusText = 'Not exempt';
+      statusColor = Colors.redAccent;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white10,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Battery optimization', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          Text(statusText, style: TextStyle(color: statusColor, fontSize: 14)),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            children: [
+              if (exempt != true)
+                ElevatedButton(onPressed: onRequest, child: const Text('Disable battery optimization')),
               OutlinedButton(onPressed: onRefresh, child: const Text('Refresh status')),
             ],
           ),
