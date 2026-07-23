@@ -1,0 +1,241 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_overlay_window/flutter_overlay_window.dart';
+
+import 'main.dart' show triggerCapturePromptManually;
+import 'oem_autostart_copy.dart';
+
+/// Signature matching [triggerCapturePromptManually] — injected so widget
+/// tests can assert the button was invoked with the right pixel size
+/// without going through `IsolateNameServer`, which has no real platform
+/// implementation in a widget test. See `docs/ARCHITECTURE.md` §3 for the
+/// full "why route through the background isolate" story.
+typedef ManualPromptTrigger = void Function({required int screenWidth, required int screenHeight});
+
+/// "Is it working?" screen: overlay permission state (with a re-request
+/// action), OEM autostart/battery guidance, an honest note on notification
+/// visibility, and the "show me the prompt now" button so a tester can
+/// verify the capture screen without waiting for a real unlock.
+///
+/// All three plugin-touching dependencies — permission check, permission
+/// request, and the manual-prompt trigger — are injectable constructor
+/// params defaulting to the real calls, the same shape `HistoryScreen` uses
+/// for `IntentStore`. That's what lets this screen have a widget test at
+/// all: none of `FlutterOverlayWindow`'s methods have a real platform
+/// implementation under `flutter_test`.
+class StatusScreen extends StatefulWidget {
+  final Future<bool> Function() checkPermission;
+  final Future<bool?> Function() requestPermission;
+  final ManualPromptTrigger onShowPromptNow;
+
+  const StatusScreen({
+    super.key,
+    Future<bool> Function()? checkPermission,
+    Future<bool?> Function()? requestPermission,
+    ManualPromptTrigger? onShowPromptNow,
+  })  : checkPermission = checkPermission ?? FlutterOverlayWindow.isPermissionGranted,
+        requestPermission = requestPermission ?? FlutterOverlayWindow.requestPermission,
+        onShowPromptNow = onShowPromptNow ?? triggerCapturePromptManually;
+
+  @override
+  State<StatusScreen> createState() => _StatusScreenState();
+}
+
+class _StatusScreenState extends State<StatusScreen> {
+  /// Null while the first check is in flight. Kept distinct from
+  /// true/false so the UI can show a neutral "checking…" state instead of
+  /// flashing a wrong answer before the real one arrives.
+  bool? _permissionGranted;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshPermission();
+  }
+
+  Future<void> _refreshPermission() async {
+    final granted = await widget.checkPermission();
+    if (mounted) setState(() => _permissionGranted = granted);
+  }
+
+  Future<void> _requestPermission() async {
+    await widget.requestPermission();
+    // requestPermission() opens the system "Display over other apps"
+    // settings page and returns immediately — often before the user has
+    // actually flipped the switch and come back. Re-checking here mostly
+    // catches the case where it was already granted (a no-op grant), while
+    // the explicit "Refresh status" action below covers the real
+    // grant-then-return flow.
+    await _refreshPermission();
+  }
+
+  void _showPromptNow() {
+    final mq = MediaQuery.of(context);
+    final truePixels = mq.size * mq.devicePixelRatio;
+    widget.onShowPromptNow(
+      screenWidth: truePixels.width.round(),
+      screenHeight: truePixels.height.round(),
+    );
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Requested — watch for the capture screen.')),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: const Text('Status & troubleshooting'),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          _PermissionCard(
+            granted: _permissionGranted,
+            onGrant: _requestPermission,
+            onRefresh: _refreshPermission,
+          ),
+          const SizedBox(height: 24),
+          const _SectionHeader('Battery & autostart'),
+          const SizedBox(height: 8),
+          const Text(
+            'Some phone makers aggressively kill background apps unless you '
+            'allow this one to keep running. If prompts stop appearing after '
+            'a while, check your phone\'s setting below.',
+            style: TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+          const SizedBox(height: 12),
+          ...oemAutostartGuidance.map((g) => _OemTile(guidance: g)),
+          const _GenericOemFallbackTile(),
+          const SizedBox(height: 24),
+          const _SectionHeader('Notifications'),
+          const SizedBox(height: 8),
+          const Text(
+            // Honest, not a fabricated "granted" check — the manifest does
+            // not request POST_NOTIFICATIONS yet (CLAUDE.md §2), so there is
+            // nothing real to report here beyond this note.
+            'This app doesn\'t use notifications yet — the small ongoing '
+            'notification you may see is required by Android to keep the '
+            'background monitoring service alive, not a feature notification.',
+            style: TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+          const SizedBox(height: 24),
+          const _SectionHeader('Test it now'),
+          const SizedBox(height: 8),
+          const Text(
+            'Shows the capture screen immediately, bypassing the usual '
+            'cooldown/probability/quiet-hours checks — useful for verifying '
+            'the prompt works without waiting for a real unlock. It still '
+            'needs overlay permission and won\'t double-fire over a real '
+            'prompt.',
+            style: TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+          const SizedBox(height: 12),
+          ElevatedButton(
+            onPressed: _showPromptNow,
+            child: const Text('Show me the prompt now'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String text;
+  const _SectionHeader(this.text);
+
+  @override
+  Widget build(BuildContext context) =>
+      Text(text, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600));
+}
+
+class _PermissionCard extends StatelessWidget {
+  final bool? granted;
+  final VoidCallback onGrant;
+  final VoidCallback onRefresh;
+
+  const _PermissionCard({required this.granted, required this.onGrant, required this.onRefresh});
+
+  @override
+  Widget build(BuildContext context) {
+    final String statusText;
+    final Color statusColor;
+    if (granted == null) {
+      statusText = 'Checking…';
+      statusColor = Colors.white54;
+    } else if (granted == true) {
+      statusText = 'Granted';
+      statusColor = Colors.greenAccent;
+    } else {
+      statusText = 'Not granted';
+      statusColor = Colors.redAccent;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white10,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Overlay permission', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          Text(statusText, style: TextStyle(color: statusColor, fontSize: 14)),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            children: [
+              if (granted != true)
+                ElevatedButton(onPressed: onGrant, child: const Text('Grant permission')),
+              OutlinedButton(onPressed: onRefresh, child: const Text('Refresh status')),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OemTile extends StatelessWidget {
+  final OemGuidance guidance;
+  const _OemTile({required this.guidance});
+
+  @override
+  Widget build(BuildContext context) {
+    return ExpansionTile(
+      iconColor: Colors.white70,
+      collapsedIconColor: Colors.white70,
+      title: Text(guidance.vendor, style: const TextStyle(color: Colors.white, fontSize: 14)),
+      children: guidance.steps
+          .map((step) => Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Text('• $step', style: const TextStyle(color: Colors.white70, fontSize: 13)),
+              ))
+          .toList(),
+    );
+  }
+}
+
+class _GenericOemFallbackTile extends StatelessWidget {
+  const _GenericOemFallbackTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ExpansionTile(
+      iconColor: Colors.white70,
+      collapsedIconColor: Colors.white70,
+      title: const Text('My phone isn\'t listed', style: TextStyle(color: Colors.white, fontSize: 14)),
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: Text(genericOemFallback, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+        ),
+      ],
+    );
+  }
+}
