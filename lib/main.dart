@@ -15,6 +15,7 @@ import 'intent_store.dart';
 import 'manage_presets_screen.dart';
 import 'onboarding_screen.dart';
 import 'prompt_policy.dart';
+import 'settings_screen.dart';
 import 'status_screen.dart';
 
 /// A preset as rendered on the capture screen — just the fields
@@ -985,6 +986,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
             const SizedBox(height: 24),
+            _HomeLink(label: 'Settings', screenBuilder: (_) => const SettingsScreen()),
             _HomeLink(label: 'View history', screenBuilder: (_) => const HistoryScreen()),
             _HomeLink(label: 'Manage options', screenBuilder: (_) => const ManagePresetsScreen()),
             _HomeLink(label: 'Status & troubleshooting', screenBuilder: (_) => const StatusScreen()),

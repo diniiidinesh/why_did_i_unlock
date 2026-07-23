@@ -42,6 +42,7 @@ void main() {
     expect(find.text('Why Did I Unlock?'), findsOneWidget);
     expect(find.text('Unlock prompts'), findsOneWidget);
     expect(find.byType(Switch), findsOneWidget);
+    expect(find.text('Settings'), findsOneWidget);
     expect(find.text('View history'), findsOneWidget);
     expect(find.text('Manage options'), findsOneWidget);
     expect(find.text('Status & troubleshooting'), findsOneWidget);
