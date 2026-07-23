@@ -740,4 +740,51 @@ void main() {
       expect(stats.meanSeconds, 40);
     });
   });
+
+  group('T17 exportRows', () {
+    test('emits every unlock, then orphan intents with blank unlock columns', () async {
+      final t1 = DateTime.utc(2026, 7, 24, 9, 0, 0);
+      final t2 = DateTime.utc(2026, 7, 24, 10, 0, 0);
+      final orphanAt = DateTime.utc(2026, 7, 24, 11, 0, 0);
+
+      // Orphan first: _resolveUnlockId returns null when no prompt_shown=1 row
+      // exists yet — the only public way to get unlock_id IS NULL without a
+      // raw SQL helper.
+      await store.insertEvent(_event(
+        clientId: 'orphan',
+        kind: IntentKind.noIntent,
+        source: null,
+        text: 'Just Like That',
+        declaredAt: orphanAt,
+        completedAt: orphanAt,
+      ));
+
+      await store.insertUnlock(unlockedAt: t1, promptShown: false, skipReason: SkipReason.cooldown);
+      await store.insertUnlock(unlockedAt: t2, promptShown: true);
+      await store.insertOpenIntent(_event(clientId: 'linked', declaredAt: t2, completedAt: t2, presetId: 1));
+      await store.markIntentDone(clientId: 'linked', completedAt: t2.add(const Duration(seconds: 30)));
+
+      final rows = await store.exportRows();
+      expect(rows, hasLength(3));
+
+      expect(rows[0].unlockedAt, t1);
+      expect(rows[0].promptShown, isFalse);
+      expect(rows[0].skipReason, 'cooldown');
+      expect(rows[0].intentText, isNull);
+
+      expect(rows[1].unlockedAt, t2);
+      expect(rows[1].promptShown, isTrue);
+      expect(rows[1].intentText, 'Payments');
+      expect(rows[1].intentKind, 'intent');
+      expect(rows[1].presetLabel, 'Payments'); // seeded default id 1
+      expect(rows[1].durationSeconds, 30);
+      expect(rows[1].status, 'done');
+
+      expect(rows[2].unlockedAt, isNull);
+      expect(rows[2].promptShown, isNull);
+      expect(rows[2].intentText, 'Just Like That');
+      expect(rows[2].intentKind, 'no_intent');
+      expect(rows[2].durationSeconds, 0);
+    });
+  });
 }

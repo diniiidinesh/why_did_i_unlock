@@ -21,12 +21,14 @@ void main() {
     WidgetTester tester, {
     Future<bool> Function(Uri uri)? launch,
     WidgetBuilder? managePresetsBuilder,
+    Future<void> Function()? exportAndShare,
   }) async {
     await tester.pumpWidget(MaterialApp(
       home: SettingsScreen(
         settings: settings,
         launch: launch ?? (_) async => true,
         managePresetsBuilder: managePresetsBuilder ?? (_) => const Scaffold(body: Text('Manage options stub')),
+        exportAndShare: exportAndShare,
       ),
     ));
     // Let the parallel-await load resolve.
@@ -187,5 +189,31 @@ void main() {
     await tester.pump();
 
     expect(find.text('Privacy policy isn\'t published yet.'), findsOneWidget);
+  });
+
+  testWidgets('tapping "Export data" invokes the injected exporter', (tester) async {
+    var exportCalls = 0;
+    await pumpScreen(tester, exportAndShare: () async {
+      exportCalls++;
+    });
+
+    await tester.scrollUntilVisible(find.text('Export data'), 200);
+    await tester.tap(find.text('Export data'));
+    await tester.pump();
+
+    expect(exportCalls, 1);
+    expect(find.byType(SnackBar), findsNothing);
+  });
+
+  testWidgets('an export failure shows a SnackBar', (tester) async {
+    await pumpScreen(tester, exportAndShare: () async {
+      throw Exception('share failed');
+    });
+
+    await tester.scrollUntilVisible(find.text('Export data'), 200);
+    await tester.tap(find.text('Export data'));
+    await tester.pump();
+
+    expect(find.text('Export failed. Please try again.'), findsOneWidget);
   });
 }

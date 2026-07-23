@@ -1001,4 +1001,120 @@ class IntentStore {
     }
     await batch.commit(noResult: true);
   }
+
+  // ---------------------------------------------------------------------
+  // Export (T17) — lossless CSV source rows. See docs/DATA_MODEL.md §9.
+  // ---------------------------------------------------------------------
+
+  /// Every unlock (LEFT JOIN intent + preset for outcome columns), then any
+  /// orphan intents (`unlock_id IS NULL`) with unlock columns blank — nothing
+  /// is silently dropped. Order: unlocks by `unlocked_at` ascending, then
+  /// orphans by `declared_at` ascending. Soft-deleted presets still resolve
+  /// by `preset_id` for `preset_label` (docs/DATA_MODEL.md §4).
+  Future<List<ExportRow>> exportRows() async {
+    final unlockRows = await _db.rawQuery('''
+      SELECT
+        u.unlocked_at AS unlocked_at,
+        u.prompt_shown AS prompt_shown,
+        u.skip_reason AS skip_reason,
+        i.text AS intent_text,
+        i.kind AS intent_kind,
+        i.source AS intent_source,
+        p.label AS preset_label,
+        i.preset_id AS preset_id,
+        i.declared_at AS declared_at,
+        i.completed_at AS completed_at,
+        i.status AS status
+      FROM unlock_log u
+      LEFT JOIN intent_log i ON i.unlock_id = u.id
+      LEFT JOIN intent_preset p ON p.id = i.preset_id
+      ORDER BY u.unlocked_at ASC, u.id ASC
+    ''');
+
+    final orphanRows = await _db.rawQuery('''
+      SELECT
+        NULL AS unlocked_at,
+        NULL AS prompt_shown,
+        NULL AS skip_reason,
+        i.text AS intent_text,
+        i.kind AS intent_kind,
+        i.source AS intent_source,
+        p.label AS preset_label,
+        i.preset_id AS preset_id,
+        i.declared_at AS declared_at,
+        i.completed_at AS completed_at,
+        i.status AS status
+      FROM intent_log i
+      LEFT JOIN intent_preset p ON p.id = i.preset_id
+      WHERE i.unlock_id IS NULL
+      ORDER BY i.declared_at ASC, i.id ASC
+    ''');
+
+    return [...unlockRows, ...orphanRows].map(_exportRowFromQuery).toList();
+  }
+
+  static ExportRow _exportRowFromQuery(Map<String, Object?> row) {
+    final unlockedMs = row['unlocked_at'] as int?;
+    final declaredMs = row['declared_at'] as int?;
+    final completedMs = row['completed_at'] as int?;
+    final promptShownRaw = row['prompt_shown'] as int?;
+
+    int? durationSeconds;
+    if (declaredMs != null && completedMs != null) {
+      durationSeconds = ((completedMs - declaredMs) / 1000).round();
+    }
+
+    return ExportRow(
+      unlockedAt: unlockedMs == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(unlockedMs, isUtc: true),
+      promptShown: promptShownRaw == null ? null : promptShownRaw == 1,
+      skipReason: row['skip_reason'] as String?,
+      intentText: row['intent_text'] as String?,
+      intentKind: row['intent_kind'] as String?,
+      intentSource: row['intent_source'] as String?,
+      presetLabel: row['preset_label'] as String?,
+      presetId: row['preset_id'] as int?,
+      declaredAt: declaredMs == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(declaredMs, isUtc: true),
+      completedAt: completedMs == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(completedMs, isUtc: true),
+      durationSeconds: durationSeconds,
+      status: row['status'] as String?,
+    );
+  }
+}
+
+/// One lossless CSV export row (docs/DATA_MODEL.md §9). Timestamps are UTC
+/// instants; [formatExportCsv] converts them to ISO-8601 local for the file.
+class ExportRow {
+  final DateTime? unlockedAt;
+  final bool? promptShown;
+  final String? skipReason;
+  final String? intentText;
+  final String? intentKind;
+  final String? intentSource;
+  final String? presetLabel;
+  final int? presetId;
+  final DateTime? declaredAt;
+  final DateTime? completedAt;
+  final int? durationSeconds;
+  final String? status;
+
+  const ExportRow({
+    this.unlockedAt,
+    this.promptShown,
+    this.skipReason,
+    this.intentText,
+    this.intentKind,
+    this.intentSource,
+    this.presetLabel,
+    this.presetId,
+    this.declaredAt,
+    this.completedAt,
+    this.durationSeconds,
+    this.status,
+  });
 }
