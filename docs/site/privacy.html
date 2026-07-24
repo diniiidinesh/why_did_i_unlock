@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Beacon — Privacy Policy</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1220;
+      --fg: #f5f5f5;
+      --muted: #a8b0bf;
+      --amber: #ffb300;
+      --card: #141c2c;
+    }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.55;
+    }
+    main {
+      max-width: 40rem;
+      margin: 0 auto;
+      padding: 2.5rem 1.25rem 4rem;
+    }
+    h1 { font-size: 1.75rem; margin: 0 0 0.25rem; }
+    .meta { color: var(--muted); font-size: 0.95rem; margin-bottom: 2rem; }
+    h2 { font-size: 1.15rem; margin-top: 2rem; color: var(--amber); }
+    a { color: var(--amber); }
+    table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.95rem; }
+    th, td { text-align: left; vertical-align: top; padding: 0.6rem 0.5rem; border-bottom: 1px solid #243049; }
+    th { color: var(--muted); font-weight: 600; }
+    ul { padding-left: 1.2rem; }
+    .card {
+      background: var(--card);
+      border: 1px solid #243049;
+      border-radius: 12px;
+      padding: 1rem 1.1rem;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Beacon</h1>
+    <p class="meta">Privacy Policy · Effective date: <!-- set on publish -->[DATE OF PUBLICATION]</p>
+
+    <div class="card">
+      <p><strong>The short version.</strong> This app does not collect your data. Nothing you type into it, and nothing it records about your phone use, ever leaves your device. There are no analytics, no advertising, no crash reporting, no user accounts, and no servers. The app makes no network requests of any kind.</p>
+    </div>
+
+    <h2>What the app stores, and where</h2>
+    <p>Everything below is stored <strong>only in the app's private storage on your phone</strong>:</p>
+    <table>
+      <thead><tr><th>What</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>The intent you declare at unlock</td><td>To show it as an on-screen reminder and in your history</td></tr>
+        <tr><td>Timestamps for declare / dismiss</td><td>History and prompt spacing</td></tr>
+        <tr><td>Whether an unlock had no particular reason</td><td>So you can see habit unlocks</td></tr>
+        <tr><td>Your settings</td><td>To remember your choices</td></tr>
+      </tbody>
+    </table>
+    <p>Automatic cloud backup is disabled for this app, so your intent history is not copied into Google Drive or device backups.</p>
+
+    <h2>What the app does not do</h2>
+    <ul>
+      <li>It does not transmit any information off your device.</li>
+      <li>It does not use analytics or advertising services.</li>
+      <li>It does not include third-party tracking SDKs.</li>
+      <li>It does not create an account or ask for your identity.</li>
+      <li>It does not read contacts, messages, photos, files, location, browsing history, or which apps you use.</li>
+      <li>It does not use Accessibility Services or Usage Access.</li>
+    </ul>
+
+    <h2>Permissions, and why each is needed</h2>
+    <ul>
+      <li><strong>Display over other apps</strong> — to show the intent prompt at unlock and the floating reminder afterwards.</li>
+      <li><strong>Foreground service</strong> — to keep a lightweight process alive so unlock events are not missed; Android shows an ongoing notification while it runs.</li>
+      <li><strong>Run at startup</strong> — so the app resumes after a reboot without opening it manually.</li>
+      <li><strong>Ignore battery optimizations</strong> (optional, user-initiated from Status) — so aggressive OEM battery savers do not silently kill unlock monitoring.</li>
+    </ul>
+
+    <h2>Deleting your data</h2>
+    <ul>
+      <li>Clear the app's storage (Settings → Apps → Beacon → Storage → Clear data).</li>
+      <li>Or uninstall the app.</li>
+    </ul>
+    <p>There is no server-side copy.</p>
+
+    <h2>Children</h2>
+    <p>This app is not directed at children and does not knowingly collect information from anyone, including children.</p>
+
+    <h2>Changes</h2>
+    <p>If a future version ever collects or transmits information, this policy will be updated <strong>before</strong> that version is released, and any such collection will be strictly opt-in.</p>
+
+    <h2>Contact</h2>
+    <p>Questions about this policy: <a href="mailto:hi@dineshkaliki.com">hi@dineshkaliki.com</a></p>
+  </main>
+</body>
+</html>

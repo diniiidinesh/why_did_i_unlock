@@ -252,3 +252,17 @@ Spec: `docs/erd/beacon-visual-identity-2026-07-24.md`. Automated: `test/beacon_t
 | 63 | Home: donut “Done” slice + selected Today/7d/30d chip are amber | ❌ | On-device visual |
 | 64 | Unlock prompt: unselected preset pill outlines are amber | ❌ | On-device visual |
 | 65 | Live bubble over a busy app: frosted (blurred) black@60% fill, thin amber border/glow, white text/icons — not solid purple | ❌ | On-device visual |
+
+### Verb-based default presets (2026-07-25)
+
+See `docs/erd/verb-presets-job-goers-2026-07-25.md`. Defaults:
+Check mail · Message someone · Book a cab · Order food · Watch reels.
+
+| # | Case | Status | Notes / expected |
+|---|---|---|---|
+| 66 | Fresh install unlock | ❌ | Five verb pills + Just Like That |
+| 67 | Tap **Check mail** | ❌ | Bubble with that text; `kind=intent` |
+| 68 | Just Like That | ❌ | No bubble; history shows no-intent |
+| 69 | Upgrade from build with old five untouched | ❌ | Verbs appear next unlock without Restore |
+| 70 | Upgrade after customizing presets | ❌ | Custom list preserved |
+| 71 | Restore defaults | ❌ | Confirm dialog lists verbs; list becomes the five |

@@ -123,8 +123,8 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
   Not fixed here — flagging with full repro + root cause so it doesn't need re-diagnosing.
 - **[DONE 2026-07-22] Minimal history view** — `lib/history_screen.dart` reads from the DB, renders events newest-first, styles no-intent rows distinctly. Verified against real multi-event data on-device.
 - ~~**[P2] Triage customization UI**~~ — done via T13 (`lib/settings_screen.dart`): cooldown/probability are curated preset chips + a validated Custom entry, not the originally-imagined sliders (see that screen's doc comments for why). Instance-based triage strategy (e.g. "skip every Nth unlock") is still not built — see the `[explore]` item below.
-  - **Probability options:** Everytime (100%), 75%, 50% (current default), 25%, Never (0%) — or custom percentage input.
-  - **Cooldown options:** No cooldown (0 min), 1 min (current default), 2 min, 5 min, 10 min — or custom duration input.
+  - **Probability options:** Everytime (100%, **current default as of 2026-07-25**), 75%, 50%, 25%, Never (0%) — or custom percentage input. (Old Sprint 3 default was 50%; changed after friend confusion.)
+  - **Cooldown options:** No cooldown (0 min), 1 min (current default — kept; explained in onboarding/Settings), 2 min, 5 min, 10 min — or custom duration input.
 - **[explore] Instance-based triage strategy** (e.g. "skip every Nth unlock") — a third `PromptPolicy` implementation alongside cooldown/probability; same architecture, not yet built.
 - **[P2] `status` (completed-vs-abandoned) on `intent_log`** — deferred until the UI actually supports more than one dismiss gesture (still just the × badge).
 
@@ -153,6 +153,10 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 - **[DONE 2026-07-21] "Just Like That" option** — SHIPPED (logs a purposeless unlock, closes without a bubble). Styling follow-up is item #2 at top of file.
 - **[DONE 2026-07-21] Prompt on/off master toggle** — SHIPPED (HomeScreen switch, `shared_preferences`, `_shouldPrompt()` gate). Scheduling to plug into that same gate is a future item; see `CLAUDE.md` §3-adjacent notes.
 - **[DONE 2026-07-21] Meaningful presets** — Payments/Calls/Messages/Food Order/Commute replaced the vague originals.
+- **[DONE 2026-07-25] Verb-based defaults for job-goer TG** — Enabled five: Check mail / Message someone / Book a cab / Order food / Watch reels. Seed v2 migration for untouched legacy installs; Restore defaults updated. Sole no-bubble path remains Just Like That. Spec: `docs/erd/verb-presets-job-goers-2026-07-25.md`. **Needs on-device** TEST_PLAN 66–71.
+- **[explore] Onboarding preset picker (“pick ~5–8”)** — Parked 2026-07-25. Cold users can’t predict unlock mix; onboarding is already permission-heavy. Revisit after closed-test usage patterns, as “confirm suggestions” not “design from scratch.”
+- **[explore] Suggestion catalog (inactive / Add from list) in Manage Options** — Parked 2026-07-25. Candidates: Call someone, Set alarm, Reply to someone, Pay someone, Get directions, Check social media. Seed as soft suggestions without crowding the capture screen. Enable/disable already exists; this is curated inventory + UX.
+- **[explore] Second no-bubble escape (“in a rush” / urgent skip)** — Parked 2026-07-25 / rejected for now. Same motor outcome as Just Like That, pollutes `no_intent`, trains skip-when-busy. Prefer verb coverage + later voice.
 - **[DONE 2026-07-21] Capture-screen keyboard handling revamp** — The interim v0.4.0 fix just shifted the whole column up, pushing presets off-screen. Now uses thumb-zone layout: title/presets/"Just Like That" bottom-anchor within scrollable space (LayoutBuilder + ConstrainedBox + IntrinsicHeight + mainAxisAlignment.end), text field pinned as footer just above keyboard. In PR #6, pending merge.
 - **[DONE 2026-07-21] "Just Like That" pill styling** — Was a bare italic `TextButton`; now a real outlined pill (muted relative to topic presets so it still reads as the distinct "no real reason" option). In PR #6, pending merge.
 - **[explore] Randomize preset pill order** — Presets appear in fixed order every unlock; muscle-memory tapping ("I always hit the second pill because it's Calls") is low-deliberation behavior. Prompt-timing randomization (shipped via probability gate) fights habituation by making timing unpredictable, which the research shows is neurologically effective and harmless. Position-randomization fights muscle memory but risks backfire: if pills are hard to locate, users might skip thinking and just hit "Just Like That" from friction rather than honesty — fixing one habituation by inducing another. Only builds if position-randomness is bounded (shuffle within session? vary per boot?) not truly random per-unlock. Needs UX evaluation first.
@@ -182,6 +186,7 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 ## Settings / configurability
 
 - **[DONE 2026-07-24] T13 — Settings screen** — `lib/settings_screen.dart` (Cursor), merged into `sprint4-app-shell` and wired into `HomeScreen`'s nav (Cursor's commit left it self-contained/unwired; Claude Code added the link). Prompts on/off, cooldown/probability as curated preset chips + validated Custom entry (clamped, with a SnackBar on out-of-range input — defense in depth on top of `AppSettings`'s own clamping), quiet-hours toggle + time pickers, links to Manage options and the privacy policy. Supersedes the item below.
+- **[decision 2026-07-25] Delay-before-unlock — no Settings “Coming soon” row.** Idea remains open/unscoped (`CLAUDE.md` §12). A dead Settings control creates expectation debt and looks broken in closed test; ship a real toggle only after bypass list + schedule + prompt interaction are designed.
 - ~~**[P2] Configurable durations via a Settings screen**~~ — done via T13 above. Timer duration isn't configurable yet since the timer feature itself doesn't exist (`CLAUDE.md` §3/§10) — revisit when it ships.
 - **[decision] Bubble customization (color/size/opacity)** — deferred correctly: needs (a) a preferences-persistence layer (likely `shared_preferences`, distinct from the `sqflite` intent log) and (b) monetization clarity, since this was a candidate Pro-gated feature and free-vs-Pro is undecided (CLAUDE.md §11). Don't build gating before the model is chosen.
 
@@ -224,7 +229,30 @@ doing nothing) as one cause, not several.
 - **[DONE 2026-07-23] `README.md` doc-map audit** — real gaps found and fixed: `docs/DATA_MODEL.md` had **no row at all** despite being one of the most-referenced docs; `docs/PRIVACY_POLICY.md` and `docs/debug/` were also missing. The `docs/erd/` row's description was stale too (said "not updated after sign-off," contradicting the update-log policy actually adopted). All fixed in one pass.
 - **[DONE 2026-07-23] `DATA_MODEL.md` §11/§12 numbering** — checked, sequential 1–12, stayed correct since the earlier fix.
 
-## Exploratory (bigger bets — need scoping before they enter any sprint)
+## Store listing / About follow-ups (Play)
+
+- **[P1] Wire About "Rate on Play" + "Share" to the real listing** — today both
+  open `playListingUrl` which is still a `TODO_*` placeholder
+  (`lib/brand.dart`). After the Play listing exists: set
+  `https://play.google.com/store/apps/details?id=com.whydidiunlock.why_did_i_unlock`,
+  confirm Rate opens the store, and make Share use the system share sheet
+  (`share_plus` already in the tree for CSV) with that URL + short pitch.
+  Until then the buttons correctly SnackBar "not on Play yet."
+
+- **[DONE 2026-07-25] FGS notification small icon → Beacon** —
+  `drawable/ic_stat_beacon.xml` (white silhouette) +
+  `UnlockListenerService` `.setSmallIcon(R.drawable.ic_stat_beacon)`; channel
+  renamed/id bumped to `beacon_monitoring` / display name "Beacon".
+
+- **[DONE 2026-07-25] "Report a problem" mailto + local error buffer** — About
+  → Report a problem emails `hi@…` with version/OS, a "what happened" prompt,
+  and any recent Flutter/async errors captured by `ProblemReportLog`
+  (`lib/problem_report.dart`, hooks on ui/background/overlay engines, stored
+  in SharedPreferences). Still no network crash SDK. Hard native crashes
+  remain uncaptured — email copy explains that.
+- **[decision] Full crash reporting / Crashlytics** — still deferred. See prior
+  note: opt-in network reporting only when N outgrows 1:1 support; flips Data
+  Safety in the same release.
 
 - **[explore] Suggest which app to open** — from the declared intent, surface/deep-link the relevant app (e.g. a payment intent → payments app).
 - **[explore] Detect task completion & nudge** — detect whether the user actually opened the relevant app and whether the task seems done, then nudge. **⚠️ Requires `UsageStatsManager` or `AccessibilityService`** — the exact policy-fragile surface CLAUDE.md §9 flags as the single biggest existential risk (prefer UsageStats over Accessibility). Scope the policy risk first.
