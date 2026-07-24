@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:share_plus/share_plus.dart';
 
+import 'brand.dart';
 import 'intent_store.dart';
 
 /// Exact CSV header order from docs/DATA_MODEL.md §9.
@@ -65,7 +66,7 @@ typedef CsvSharer = Future<void> Function(String filePath);
 Future<void> _defaultShare(String filePath) async {
   await Share.shareXFiles(
     [XFile(filePath, mimeType: 'text/csv')],
-    subject: 'Why Did I Unlock export',
+    subject: '$appDisplayName export',
   );
 }
 

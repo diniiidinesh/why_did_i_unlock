@@ -252,11 +252,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   String _settingsSummary(AppSettingsSnapshot snap) {
+    if (!snap.promptsEnabled) return 'Prompts are off';
     final cooldown = snap.cooldown.inMinutes;
     final pct = (snap.probability * 100).round();
-    final quiet = snap.quietHoursEnabled ? 'quiet hours on' : 'quiet hours off';
-    final prompts = snap.promptsEnabled ? 'prompts on' : 'prompts off';
-    return '$prompts · ${cooldown}m cooldown · $pct% · $quiet';
+    final quiet = snap.quietHoursEnabled ? 'Quiet hours on' : null;
+    final parts = <String>[
+      '$pct% of unlocks',
+      if (cooldown > 0) '${cooldown}m cooldown' else 'No cooldown',
+      ?quiet,
+    ];
+    return parts.join(' · ');
   }
 
   @override
@@ -274,7 +279,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
             children: [
               const Text(
-                'Why Did I Unlock?',
+                appDisplayName,
                 style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 20),
@@ -299,8 +304,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 if (isEmpty)
                   const _HomeCard(
                     child: Text(
-                      'No unlocks logged yet. Once the overlay is watching, '
-                      'today\'s counts and breakdown will show up here.',
+                      'No unlocks yet. Lock and unlock your phone to start.',
                       style: TextStyle(color: Colors.white70, height: 1.35),
                     ),
                   )
@@ -345,13 +349,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           ))
                         else ...[
                           Text(
-                            '$_unlockCount unlocks · $_promptShownCount prompts shown',
+                            '$_unlockCount unlocks · $_promptShownCount prompts',
                             style: const TextStyle(color: Colors.white70, fontSize: 15),
-                          ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'Unlock count is what this app observed — a floor if the service was offline.',
-                            style: TextStyle(color: Colors.white38, fontSize: 12),
                           ),
                         ],
                       ],
@@ -404,13 +403,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Mean ${_formatDuration(_durationStats!.meanSeconds)} · ${_durationStats!.sampleCount} sessions',
+                            '${_durationStats!.sampleCount} completed',
                             style: const TextStyle(color: Colors.white70, fontSize: 13),
-                          ),
-                          const SizedBox(height: 6),
-                          const Text(
-                            'Includes time while the screen was off — lock gaps aren\'t excluded yet.',
-                            style: TextStyle(color: Colors.white38, fontSize: 12),
                           ),
                         ],
                       ],
@@ -449,10 +443,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 'More',
                 style: TextStyle(color: Colors.white54, fontSize: 13, fontWeight: FontWeight.w600),
               ),
-              _HomeLink(label: 'Settings', onPressed: () => _openRoute((_) => const SettingsScreen())),
               _HomeLink(label: 'View history', onPressed: () => _openRoute((_) => const HistoryScreen())),
               _HomeLink(label: 'Manage options', onPressed: () => _openRoute((_) => const ManagePresetsScreen())),
-              _HomeLink(label: 'Status & troubleshooting', onPressed: () => _openRoute((_) => const StatusScreen())),
               _HomeLink(label: 'About', onPressed: () => _openRoute((_) => const AboutScreen())),
             ],
           ),
@@ -474,13 +466,13 @@ class _StatusCard extends StatelessWidget {
     final String statusText;
     final Color statusColor;
     if (granted == null) {
-      statusText = 'Checking overlay permission…';
+      statusText = 'Checking…';
       statusColor = Colors.white54;
     } else if (granted) {
-      statusText = 'Overlay permission granted — monitoring can run.';
+      statusText = 'Ready — overlay permission granted';
       statusColor = const Color(0xFF81C784);
     } else {
-      statusText = 'Overlay permission needed before unlock prompts can appear.';
+      statusText = 'Needs overlay permission';
       statusColor = const Color(0xFFFFB74D);
     }
 

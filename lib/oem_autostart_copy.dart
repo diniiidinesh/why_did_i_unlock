@@ -13,6 +13,8 @@
 /// just stop working" reports this product is exposed to.
 library;
 
+import 'brand.dart';
+
 /// One OEM's autostart/battery-exemption setting. [steps] is deliberately
 /// short, generic phrasing ("Settings app name → menu path") rather than a
 /// screenshot-by-version walkthrough — OEM settings menus change between
@@ -29,32 +31,34 @@ class OemGuidance {
 /// Ordered so the OEMs named explicitly in `CLAUDE.md` §8 as most aggressive
 /// (Xiaomi/Oppo/Vivo — also the most relevant for the India market, this
 /// app's most likely early audience) come first.
-const List<OemGuidance> oemAutostartGuidance = [
+///
+/// Not `const` — steps interpolate [appDisplayName] from `brand.dart`.
+final List<OemGuidance> oemAutostartGuidance = [
   OemGuidance(
     vendor: 'Xiaomi / Redmi / POCO (MIUI, HyperOS)',
     steps: [
-      'Settings → Apps → Manage apps → Why Did I Unlock → Autostart → turn ON',
-      'Settings → Battery & performance → App battery saver → Why Did I Unlock → No restrictions',
+      'Settings → Apps → Manage apps → $appDisplayName → Autostart → turn ON',
+      'Settings → Battery & performance → App battery saver → $appDisplayName → No restrictions',
     ],
   ),
   OemGuidance(
     vendor: 'Oppo / Realme / OnePlus (ColorOS)',
     steps: [
-      'Settings → Battery → App battery management → Why Did I Unlock → Allow background activity',
-      'Settings → Apps → Autostart management → turn ON for Why Did I Unlock',
+      'Settings → Battery → App battery management → $appDisplayName → Allow background activity',
+      'Settings → Apps → Autostart management → turn ON for $appDisplayName',
     ],
   ),
   OemGuidance(
     vendor: 'Vivo (FuntouchOS / OriginOS)',
     steps: [
-      'Settings → Battery → Background power consumption management → Why Did I Unlock → Allow',
-      'i Manager → App manager → Autostart manager → turn ON for Why Did I Unlock',
+      'Settings → Battery → Background power consumption management → $appDisplayName → Allow',
+      'i Manager → App manager → Autostart manager → turn ON for $appDisplayName',
     ],
   ),
   OemGuidance(
     vendor: 'Samsung',
     steps: [
-      'Settings → Apps → Why Did I Unlock → Battery → Unrestricted',
+      'Settings → Apps → $appDisplayName → Battery → Unrestricted',
       'Device care → Battery → Background usage limits → make sure the app is NOT in "Put unused apps to sleep"',
     ],
   ),
@@ -63,8 +67,8 @@ const List<OemGuidance> oemAutostartGuidance = [
 /// Shown when a user's device doesn't match any vendor above, or the vendor
 /// list above ever goes stale — a fallback that still points at the right
 /// underlying Android setting name rather than leaving the user stuck.
-const String genericOemFallback =
+final String genericOemFallback =
     'Look in your phone\'s Settings app for "Battery optimization", "Background '
-    'app management", or "Autostart", and make sure Why Did I Unlock is allowed to '
+    'app management", or "Autostart", and make sure $appDisplayName is allowed to '
     'run in the background / is excluded from battery optimization. The exact menu '
     'wording varies by phone maker.';

@@ -3,6 +3,7 @@ import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'app_settings.dart';
+import 'brand.dart';
 import 'oem_autostart_copy.dart';
 
 /// Five-step first-run flow: value prop → how it works → overlay permission
@@ -248,21 +249,29 @@ class _StepDots extends StatelessWidget {
 /// step follows this shape so the flow reads consistently while each step's
 /// widget below only supplies its own copy/extra content.
 class _StepBody extends StatelessWidget {
-  final IconData icon;
+  final IconData? icon;
+  final Widget? leading;
   final String headline;
   final String body;
   final Widget? extra;
 
-  const _StepBody({required this.icon, required this.headline, required this.body, this.extra});
+  const _StepBody({
+    this.icon,
+    this.leading,
+    required this.headline,
+    required this.body,
+    this.extra,
+  }) : assert(icon != null || leading != null);
 
   @override
   Widget build(BuildContext context) {
+    final lead = leading ?? Icon(icon!, color: Colors.white70, size: 40);
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(24, 32, 24, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: Colors.white70, size: 40),
+          lead,
           const SizedBox(height: 24),
           Text(headline, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w700)),
           const SizedBox(height: 12),
@@ -279,8 +288,13 @@ class _ValuePropStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const _StepBody(
-      icon: Icons.lock_clock_outlined,
+    return _StepBody(
+      leading: Image.asset(
+        brandMarkAsset,
+        width: 48,
+        height: 48,
+        filterQuality: FilterQuality.high,
+      ),
       headline: 'Notice why you picked up your phone',
       body:
           'Most unlocks happen on autopilot. This app asks what you\'re unlocking '
@@ -299,10 +313,12 @@ class _HowItWorksStep extends StatelessWidget {
       icon: Icons.timeline_outlined,
       headline: 'How it works',
       body:
-          'Unlock your phone, and sometimes you\'ll be asked what you\'re doing. '
-          'Tap a preset or type your own reason, and it follows you as a small '
-          'bubble across apps — a gentle reminder of what you came to do, until '
-          'you dismiss it.',
+          'Unlock your phone and you\'ll be asked what you\'re doing. Tap a '
+          'preset or type your own reason — it follows you as a small bubble '
+          'across apps until you dismiss it.\n\n'
+          'By default you\'re asked on every unlock, except within 1 minute of '
+          'the last prompt (so rapid lock/unlock doesn\'t nag). Change that '
+          'gap — or how often you\'re asked — anytime in Settings.',
     );
   }
 }

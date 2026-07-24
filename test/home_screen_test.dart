@@ -53,8 +53,8 @@ void main() {
     await tester.pump();
     for (var i = 0; i < 30; i++) {
       final hasStatus = find.textContaining('Overlay permission').evaluate().isNotEmpty;
-      final hasEmpty = find.textContaining('No unlocks logged yet').evaluate().isNotEmpty;
-      final hasCounts = find.textContaining('prompts shown').evaluate().isNotEmpty;
+      final hasEmpty = find.textContaining('No unlocks yet').evaluate().isNotEmpty;
+      final hasCounts = find.textContaining('prompts').evaluate().isNotEmpty;
       if (hasStatus && (hasEmpty || hasCounts)) break;
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
       await tester.pump();
@@ -65,13 +65,13 @@ void main() {
     final store = await openStore(tester);
     await pumpHome(tester, store);
 
-    expect(find.text('Why Did I Unlock?'), findsOneWidget);
-    expect(find.textContaining('No unlocks logged yet'), findsOneWidget);
+    expect(find.text('Beacon'), findsOneWidget);
+    expect(find.textContaining('No unlocks yet'), findsOneWidget);
     expect(find.text('Settings'), findsWidgets);
     await tester.scrollUntilVisible(find.text('About'), 200);
     expect(find.text('View history'), findsOneWidget);
     expect(find.text('Manage options'), findsOneWidget);
-    expect(find.text('Status & troubleshooting'), findsWidgets);
+    expect(find.text('Status & troubleshooting'), findsOneWidget);
     expect(find.text('About'), findsOneWidget);
     expect(find.byType(OutcomeDonut), findsNothing);
 
@@ -102,7 +102,7 @@ void main() {
 
     await pumpHome(tester, store);
 
-    expect(find.textContaining('2 unlocks · 1 prompts shown'), findsOneWidget);
+    expect(find.textContaining('2 unlocks · 1 prompts'), findsOneWidget);
     expect(find.byType(OutcomeDonut), findsOneWidget);
     expect(find.textContaining('Done'), findsWidgets);
     expect(find.textContaining('Abandoned'), findsWidgets);
@@ -134,7 +134,7 @@ void main() {
     final store = await openStore(tester);
     await pumpHome(tester, store);
 
-    expect(find.textContaining('No unlocks logged yet'), findsOneWidget);
+    expect(find.textContaining('No unlocks yet'), findsOneWidget);
 
     final now = DateTime.now();
     await tester.runAsync(() async {
@@ -148,12 +148,12 @@ void main() {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 150)));
     await tester.pump();
     for (var i = 0; i < 30; i++) {
-      if (find.textContaining('prompts shown').evaluate().isNotEmpty) break;
+      if (find.textContaining('prompts').evaluate().isNotEmpty) break;
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
       await tester.pump();
     }
 
-    expect(find.textContaining('1 unlocks · 1 prompts shown'), findsOneWidget);
+    expect(find.textContaining('1 unlocks · 1 prompts'), findsOneWidget);
     expect(find.byType(OutcomeDonut), findsOneWidget);
 
     await tester.runAsync(() => store.close());

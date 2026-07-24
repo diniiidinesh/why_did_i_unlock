@@ -40,7 +40,9 @@ class UnlockListenerService : Service() {
     private var lastReportedHeight: Int = 0
 
     companion object {
-        private const val CHANNEL_ID = "unlock_listener"
+        // Bumped 2026-07-25 so existing installs pick up the "Beacon" channel
+        // name + ic_stat_beacon (Android freezes channel metadata after create).
+        private const val CHANNEL_ID = "beacon_monitoring"
         private const val NOTIFICATION_ID = 1
         private const val BG_ENGINE_ID = "wdiu_background_engine"
         private const val METHOD_CHANNEL = "com.whydidiunlock/unlock"
@@ -140,19 +142,20 @@ class UnlockListenerService : Service() {
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Unlock Listener",
+            "Beacon",
             NotificationManager.IMPORTANCE_MIN
         ).apply {
             setShowBadge(false)
+            description = "Keeps unlock monitoring running"
         }
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
     private fun buildNotification(): Notification {
         return Notification.Builder(this, CHANNEL_ID)
-            .setContentTitle("Why Did I Unlock?")
+            .setContentTitle("Beacon")
             .setContentText("Monitoring unlock events")
-            .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
+            .setSmallIcon(R.drawable.ic_stat_beacon)
             .setOngoing(true)
             .build()
     }
