@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:why_did_i_unlock/intent_store.dart';
 
@@ -8,7 +10,7 @@ IntentEvent _event({
   String clientId = 'c1',
   IntentKind kind = IntentKind.intent,
   IntentSource? source = IntentSource.preset,
-  String text = 'Payments',
+  String text = 'Check mail',
   DateTime? declaredAt,
   DateTime? completedAt,
   int? presetId,
@@ -32,6 +34,8 @@ void main() {
   late IntentStore store;
 
   setUp(() async {
+    // Seed-version migration reads SharedPreferencesAsync on every open().
+    SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
     // ":memory:" — fresh in-memory DB per test, no shared state, no disk I/O.
     store = await IntentStore.open(path: inMemoryDatabasePath);
   });
@@ -44,7 +48,7 @@ void main() {
     await store.insertEvent(_event());
     final events = await store.recentEvents();
     expect(events, hasLength(1));
-    expect(events.first.text, 'Payments');
+    expect(events.first.text, 'Check mail');
   });
 
   test('2. empty DB returns empty list', () async {
@@ -65,7 +69,7 @@ void main() {
     await store.insertEvent(_event(clientId: 'dup', text: 'different text'));
     final events = await store.recentEvents();
     expect(events, hasLength(1));
-    expect(events.first.text, 'Payments'); // first write wins, second ignored
+    expect(events.first.text, 'Check mail'); // first write wins, second ignored
   });
 
   test('5a. fromMessage rejects empty text', () {
@@ -224,7 +228,7 @@ void main() {
         'client_id': 'pre-existing',
         'kind': 'intent',
         'source': 'preset',
-        'text': 'Payments',
+        'text': 'Check mail',
         'declared_at': 1000,
         'completed_at': 2000,
       });
@@ -244,7 +248,7 @@ void main() {
       expect(await store.recentUnlocks(), isEmpty);
       final presets = await store.allPresets();
       expect(presets, hasLength(5));
-      expect(presets.map((p) => p.label), containsAll(['Payments', 'Calls', 'Messages', 'Food Order', 'Commute']));
+      expect(presets.map((p) => p.label), containsAll(defaultPresetLabels));
 
       await store.close();
       await file.delete();
@@ -460,9 +464,9 @@ void main() {
   });
 
   group('25. presets', () {
-    test('migration seeds exactly the historical five, in order, enabled', () async {
+    test('migration seeds exactly the verb defaults, in order, enabled', () async {
       final presets = await store.activePresets();
-      expect(presets.map((p) => p.label), ['Payments', 'Calls', 'Messages', 'Food Order', 'Commute']);
+      expect(presets.map((p) => p.label), defaultPresetLabels);
       expect(presets.every((p) => p.enabled), isTrue);
     });
 
@@ -484,37 +488,37 @@ void main() {
 
     test('renaming a preset does not change past history text', () async {
       final presets = await store.activePresets();
-      final paymentsId = presets.firstWhere((p) => p.label == 'Payments').id;
-      await store.insertOpenIntent(_event(clientId: 'hist1', text: 'Payments', presetId: paymentsId));
+      final mailId = presets.firstWhere((p) => p.label == 'Check mail').id;
+      await store.insertOpenIntent(_event(clientId: 'hist1', text: 'Check mail', presetId: mailId));
       await store.markIntentDone(clientId: 'hist1', completedAt: DateTime.utc(2026, 1, 1, 10, 5, 0));
 
-      await store.renamePreset(paymentsId, 'Bill Pay');
+      await store.renamePreset(mailId, 'Bill Pay');
 
       final events = await store.recentEvents();
-      expect(events.first.text, 'Payments'); // snapshot, unchanged
-      expect(events.first.presetId, paymentsId); // series preserved
+      expect(events.first.text, 'Check mail'); // snapshot, unchanged
+      expect(events.first.presetId, mailId); // series preserved
 
       final renamed = await store.allPresets();
-      expect(renamed.firstWhere((p) => p.id == paymentsId).label, 'Bill Pay');
+      expect(renamed.firstWhere((p) => p.id == mailId).label, 'Bill Pay');
     });
 
     test('soft-deleting a preset hides it from activePresets but keeps allPresets and history resolvable', () async {
       final presets = await store.activePresets();
-      final callsId = presets.firstWhere((p) => p.label == 'Calls').id;
-      await store.insertOpenIntent(_event(clientId: 'hist2', text: 'Calls', presetId: callsId));
+      final messageId = presets.firstWhere((p) => p.label == 'Message someone').id;
+      await store.insertOpenIntent(_event(clientId: 'hist2', text: 'Message someone', presetId: messageId));
 
-      await store.deletePreset(callsId);
+      await store.deletePreset(messageId);
 
       final active = await store.activePresets();
-      expect(active.map((p) => p.label), isNot(contains('Calls')));
+      expect(active.map((p) => p.label), isNot(contains('Message someone')));
 
       final all = await store.allPresets();
-      final deleted = all.firstWhere((p) => p.id == callsId);
+      final deleted = all.firstWhere((p) => p.id == messageId);
       expect(deleted.isDeleted, isTrue);
       expect(deleted.enabled, isFalse);
 
       final events = await store.recentEvents();
-      expect(events.first.presetId, callsId); // still resolvable
+      expect(events.first.presetId, messageId); // still resolvable
     });
 
     test('setPresetEnabled(false) then (true) round-trips', () async {
@@ -556,23 +560,69 @@ void main() {
 
       await store.restoreDefaultPresets();
       final restored = await store.activePresets();
-      expect(restored.map((p) => p.label), ['Payments', 'Calls', 'Messages', 'Food Order', 'Commute']);
+      expect(restored.map((p) => p.label), defaultPresetLabels);
     });
 
     test('restoreDefaultPresets soft-deletes, keeping old preset_id references resolvable', () async {
       // Regression: an earlier implementation hard-deleted every row here,
       // which orphaned every intent_log.preset_id pointing at them — silently
       // breaking the historical series that column exists to preserve.
-      final paymentsId = (await store.activePresets()).firstWhere((p) => p.label == 'Payments').id;
-      await store.insertOpenIntent(_event(clientId: 'pre-restore', text: 'Payments', presetId: paymentsId));
+      final mailId = (await store.activePresets()).firstWhere((p) => p.label == 'Check mail').id;
+      await store.insertOpenIntent(_event(clientId: 'pre-restore', text: 'Check mail', presetId: mailId));
 
       await store.restoreDefaultPresets();
 
       // The old row still exists (soft-deleted), so the history link resolves.
       final all = await store.allPresets();
-      final oldRow = all.firstWhere((p) => p.id == paymentsId);
+      final oldRow = all.firstWhere((p) => p.id == mailId);
       expect(oldRow.isDeleted, isTrue);
-      expect((await store.recentEvents()).first.presetId, paymentsId);
+      expect((await store.recentEvents()).first.presetId, mailId);
+    });
+
+    test('seed v2 migrates untouched legacy defaults to verb labels', () async {
+      final tempPath = '${Directory.systemTemp.path}/intent_store_seed_v2_migrate.db';
+      final file = File(tempPath);
+      if (await file.exists()) await file.delete();
+
+      SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
+      var s = await IntentStore.open(path: tempPath);
+      for (final p in await s.allPresets()) {
+        await s.deletePreset(p.id);
+      }
+      for (final label in legacyDefaultPresetLabels) {
+        await s.createPreset(label);
+      }
+      expect(
+        (await s.activePresets()).map((p) => p.label).toSet(),
+        legacyDefaultPresetLabels.toSet(),
+      );
+      await s.close();
+
+      // Fresh prefs at seed v1 — next open should rewrite untouched legacy set.
+      SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
+      s = await IntentStore.open(path: tempPath);
+      expect((await s.activePresets()).map((p) => p.label), defaultPresetLabels);
+      await s.close();
+      await file.delete();
+    });
+
+    test('seed v2 leaves a customized list alone', () async {
+      final tempPath = '${Directory.systemTemp.path}/intent_store_seed_v2_custom.db';
+      final file = File(tempPath);
+      if (await file.exists()) await file.delete();
+
+      SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
+      var s = await IntentStore.open(path: tempPath);
+      await s.renamePreset((await s.activePresets()).first.id, 'My mail');
+      await s.close();
+
+      SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
+      s = await IntentStore.open(path: tempPath);
+      final labels = (await s.activePresets()).map((p) => p.label).toList();
+      expect(labels.first, 'My mail');
+      expect(labels, isNot(equals(defaultPresetLabels)));
+      await s.close();
+      await file.delete();
     });
 
     test('the stored-preset cap ignores soft-deleted rows', () async {
@@ -665,7 +715,7 @@ void main() {
       expect(events.first.status, IntentStatus.abandoned);
       // The intent is NOT lost — this is the whole point of writing at
       // declaration time instead of only at dismissal (docs/DATA_MODEL.md §4).
-      expect(events.first.text, 'Payments');
+      expect(events.first.text, 'Check mail');
     });
   });
 
@@ -807,9 +857,9 @@ void main() {
 
       expect(rows[1].unlockedAt, t2);
       expect(rows[1].promptShown, isTrue);
-      expect(rows[1].intentText, 'Payments');
+      expect(rows[1].intentText, 'Check mail');
       expect(rows[1].intentKind, 'intent');
-      expect(rows[1].presetLabel, 'Payments'); // seeded default id 1
+      expect(rows[1].presetLabel, 'Check mail'); // seeded default id 1
       expect(rows[1].durationSeconds, 30);
       expect(rows[1].status, 'done');
 

@@ -5,7 +5,15 @@ import 'package:why_did_i_unlock/bubble_widget.dart';
 
 void main() {
   group('iconForIntentLabel', () {
-    test('maps seed presets', () {
+    test('maps current verb defaults', () {
+      expect(iconForIntentLabel('Check mail'), Icons.mail_outline);
+      expect(iconForIntentLabel('Message someone'), Icons.chat);
+      expect(iconForIntentLabel('Book a cab'), Icons.local_taxi);
+      expect(iconForIntentLabel('Order food'), Icons.restaurant);
+      expect(iconForIntentLabel('Watch reels'), Icons.play_circle_outline);
+    });
+
+    test('still maps legacy category defaults for history bubbles', () {
       expect(iconForIntentLabel('Payments'), Icons.account_balance_wallet);
       expect(iconForIntentLabel('Calls'), Icons.call);
       expect(iconForIntentLabel('Messages'), Icons.chat);
@@ -19,7 +27,8 @@ void main() {
   });
 
   group('letterAvatarForCustomIntent', () {
-    test('null for seed presets', () {
+    test('null for seed presets (verb and legacy)', () {
+      expect(letterAvatarForCustomIntent('Message someone'), isNull);
       expect(letterAvatarForCustomIntent('Messages'), isNull);
     });
 

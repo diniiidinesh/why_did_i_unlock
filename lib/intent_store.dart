@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:path/path.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 
 /// Defensive backstop on stored intent text, independent of the UI layer's
@@ -257,9 +258,10 @@ class UnlockEvent {
 }
 
 /// One row in `intent_preset` — a user-editable capture-screen pill. Seeded
-/// on first migration with the historical hardcoded five (Payments, Calls,
-/// Messages, Food Order, Commute) so behaviour is unchanged until the user
-/// edits anything.
+/// on first install with [defaultPresetLabels] (verb phrases; see
+/// `docs/erd/verb-presets-job-goers-2026-07-25.md`). Untouched installs that
+/// still have [legacyDefaultPresetLabels] are migrated once via
+/// [defaultPresetsSeedVersionKey].
 ///
 /// [tier] and [allowedPackages] are forward-compat columns, unused this
 /// iteration — see docs/DATA_MODEL.md §10 (delay-to-reveal prompts and
@@ -340,16 +342,31 @@ class IntentDismissal {
 const String _dbFileName = 'intents.db';
 const int _schemaVersion = 2;
 
-/// The five presets shipped since Sprint 2 (`lib/main.dart`'s old
-/// `intentPresets` constant) — seeded into `intent_preset` on first v2
-/// migration so existing behaviour is unchanged until a user edits anything.
-const List<String> _defaultPresetLabels = [
+/// The five presets shipped on fresh install / Restore defaults.
+/// Verb phrases tuned for job-goer unlocks — see
+/// `docs/erd/verb-presets-job-goers-2026-07-25.md`.
+const List<String> defaultPresetLabels = [
+  'Check mail',
+  'Message someone',
+  'Book a cab',
+  'Order food',
+  'Watch reels',
+];
+
+/// Pre-verb seed (schema v2 era). Used only to detect "untouched defaults"
+/// installs that should auto-migrate to [defaultPresetLabels].
+const List<String> legacyDefaultPresetLabels = [
   'Payments',
   'Calls',
   'Messages',
   'Food Order',
   'Commute',
 ];
+
+/// Prefs key for [defaultPresetLabels] seed generation. Bumped when the
+/// shipped default set changes so untouched installs can migrate once.
+const String defaultPresetsSeedVersionKey = 'default_presets_seed_version';
+const int defaultPresetsSeedVersion = 2;
 
 /// A dashboard time window (T14) — every insight query is windowed and
 /// index-backed (docs/DATA_MODEL.md §8), never a full-table scan, since
@@ -448,7 +465,48 @@ class IntentStore {
     // methods only") — only caught on a real device, since sqflite_common_ffi
     // (used by desktop unit tests) tolerates execute() for this PRAGMA.
     await db.rawQuery('PRAGMA journal_mode=WAL');
-    return IntentStore._(db);
+    final store = IntentStore._(db);
+    await store._ensureDefaultPresetSeed();
+    return store;
+  }
+
+  /// Once per install: if prefs say we're still on seed v1 and the enabled
+  /// list is exactly [legacyDefaultPresetLabels], soft-delete those rows and
+  /// re-seed [defaultPresetLabels]. Customized lists are left alone; only the
+  /// version flag advances. See `docs/erd/verb-presets-job-goers-2026-07-25.md`.
+  Future<void> _ensureDefaultPresetSeed() async {
+    final prefs = SharedPreferencesAsync();
+    final version = await prefs.getInt(defaultPresetsSeedVersionKey) ?? 1;
+    if (version >= defaultPresetsSeedVersion) return;
+
+    final active = await activePresets();
+    final labels = active.map((p) => p.label).toSet();
+    final legacy = legacyDefaultPresetLabels.toSet();
+    if (active.length == legacy.length && labels.containsAll(legacy)) {
+      final now = DateTime.now().toUtc().millisecondsSinceEpoch;
+      for (final preset in active) {
+        await _db.update(
+          'intent_preset',
+          {'deleted_at': now, 'enabled': 0},
+          where: 'id = ?',
+          whereArgs: [preset.id],
+        );
+      }
+      final seededAt = DateTime.now().toUtc().millisecondsSinceEpoch;
+      final batch = _db.batch();
+      for (var i = 0; i < defaultPresetLabels.length; i++) {
+        batch.insert('intent_preset', {
+          'label': defaultPresetLabels[i],
+          'sort_order': i,
+          'enabled': 1,
+          'tier': 'standard',
+          'created_at': seededAt,
+        });
+      }
+      await batch.commit(noResult: true);
+    }
+
+    await prefs.setInt(defaultPresetsSeedVersionKey, defaultPresetsSeedVersion);
   }
 
   static Future<void> _createV1Schema(Database db) async {
@@ -505,9 +563,9 @@ class IntentStore {
     ''');
     final seededAt = DateTime.now().toUtc().millisecondsSinceEpoch;
     final batch = db.batch();
-    for (var i = 0; i < _defaultPresetLabels.length; i++) {
+    for (var i = 0; i < defaultPresetLabels.length; i++) {
       batch.insert('intent_preset', {
-        'label': _defaultPresetLabels[i],
+        'label': defaultPresetLabels[i],
         'sort_order': i,
         'enabled': 1,
         'tier': 'standard',
@@ -979,8 +1037,8 @@ class IntentStore {
     await batch.commit(noResult: true);
   }
 
-  /// Soft-deletes every existing preset and re-seeds the original five — the
-  /// "restore defaults" safety net for a user who has disabled or deleted
+  /// Soft-deletes every existing preset and re-seeds [defaultPresetLabels] —
+  /// the "restore defaults" safety net for a user who has disabled or deleted
   /// every preset (docs/DATA_MODEL.md §7: the minimum enabled count is
   /// deliberately zero, so this is the recovery path, not a forced floor).
   ///
@@ -999,9 +1057,9 @@ class IntentStore {
     );
     final seededAt = DateTime.now().toUtc().millisecondsSinceEpoch;
     final batch = _db.batch();
-    for (var i = 0; i < _defaultPresetLabels.length; i++) {
+    for (var i = 0; i < defaultPresetLabels.length; i++) {
       batch.insert('intent_preset', {
-        'label': _defaultPresetLabels[i],
+        'label': defaultPresetLabels[i],
         'sort_order': i,
         'enabled': 1,
         'tier': 'standard',

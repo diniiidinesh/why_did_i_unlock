@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:why_did_i_unlock/history_screen.dart';
 import 'package:why_did_i_unlock/intent_store.dart';
@@ -7,6 +9,10 @@ import 'package:why_did_i_unlock/intent_store.dart';
 void main() {
   sqfliteFfiInit();
   databaseFactory = databaseFactoryFfi;
+
+  setUp(() {
+    SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
+  });
 
   testWidgets(
     '15. HistoryScreen renders one row per event, newest first, styles no_intent distinctly',
