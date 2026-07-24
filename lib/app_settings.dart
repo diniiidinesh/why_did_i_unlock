@@ -56,7 +56,11 @@ class AppSettings {
   /// `promptProbability`) so behaviour is unchanged for anyone who never opens
   /// Settings.
   static const int defaultCooldownMinutes = 1;
-  static const double defaultProbability = 0.5;
+  /// 100% — ask on every unlock once cooldown clears. The old 50% default
+  /// felt broken ("sometimes nothing happens") more often than it helped
+  /// resist habituation; power users can still dial probability down in
+  /// Settings.
+  static const double defaultProbability = 1.0;
   static const bool defaultPromptsEnabled = true;
   static const bool defaultQuietHoursEnabled = false;
   static const int defaultQuietHoursStartMinutes = 22 * 60; // 22:00

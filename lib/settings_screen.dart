@@ -12,7 +12,7 @@ import 'your_data_card.dart';
 /// own local declaration (rather than importing the other file's private
 /// `_defaultLaunch`) so this screen has no compile-time dependency on
 /// `AboutScreen` beyond the one string constant it deliberately reuses
-/// (`privacyPolicyUrl`) to avoid a second copy of that TODO_ placeholder.
+/// (`privacyPolicyUrl`) so Settings and About share one constant.
 typedef UrlLauncher = Future<bool> Function(Uri uri);
 
 Future<bool> _defaultLaunch(Uri uri) => launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -274,14 +274,26 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                   onChanged: _setPromptsEnabled,
                 ),
                 const _SectionDivider(),
-                const _SectionHeader('Cooldown'),
+                const _SectionHeader(
+                  'Cooldown',
+                  subtitle:
+                      'Minimum gap after a prompt before the next one. Default '
+                      '1 min stops rapid lock/unlock from asking twice. Set to '
+                      '0 for no gap.',
+                ),
                 _CooldownRow(
                   minutes: cooldownMinutes,
                   onPresetSelected: _setCooldownMinutes,
                   onCustomSubmitted: _submitCustomCooldown,
                 ),
                 const _SectionDivider(),
-                const _SectionHeader('Prompt probability'),
+                const _SectionHeader(
+                  'Prompt probability',
+                  subtitle:
+                      'Chance of being asked once cooldown has cleared. '
+                      'Default 100% = every unlock. Lower it if prompts feel '
+                      'too frequent.',
+                ),
                 _ProbabilityRow(
                   probability: probability,
                   onPresetSelected: _setProbabilityPercent,
@@ -345,12 +357,22 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
 
 class _SectionHeader extends StatelessWidget {
   final String text;
-  const _SectionHeader(this.text);
+  final String? subtitle;
+  const _SectionHeader(this.text, {this.subtitle});
 
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-        child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(text, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
+            if (subtitle != null) ...[
+              const SizedBox(height: 4),
+              Text(subtitle!, style: const TextStyle(color: Colors.white54, fontSize: 12, height: 1.35)),
+            ],
+          ],
+        ),
       );
 }
 
