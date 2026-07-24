@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 
 import 'about_screen.dart';
 import 'app_settings.dart';
+import 'beacon_theme.dart';
 import 'history_screen.dart';
 import 'insights/outcome_donut.dart';
 import 'intent_store.dart';
@@ -17,6 +20,13 @@ import 'status_screen.dart';
 /// dragging the three-engine entrypoints into every widget test. Every
 /// plugin-touching dependency is injectable — same pattern as
 /// [HistoryScreen] / [StatusScreen] / [SettingsScreen].
+///
+/// Insight / settings / permission data is loaded in [initState] and again
+/// whenever the app resumes (`WidgetsBindingObserver`) or the user
+/// pull-to-refreshes / returns from a pushed route — otherwise a long-lived
+/// Home `State` would keep the first snapshot forever (same "fetched once,
+/// never re-fetched" shape as `docs/ARCHITECTURE.md` §8.1, on the main UI
+/// engine rather than the overlay).
 class HomeScreen extends StatefulWidget {
   final Future<IntentStore> Function()? openStore;
   final AppSettings settings;
@@ -33,7 +43,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   IntentStore? _store;
   /// True only when this State opened the default on-device store — injected
   /// [HomeScreen.openStore] remains owned by the caller (widget tests).
@@ -52,7 +62,47 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Unlock writes land in the background engine while this UI State stays
+    // mounted. Resume is the signal that fresh insight rows may exist —
+    // same reason OnboardingScreen re-checks permission on resume.
+    if (state == AppLifecycleState.resumed) {
+      _refreshVisible();
+    }
+  }
+
+  /// Re-reads permission, settings snapshot, and insight queries without
+  /// reopening the store. Used by pull-to-refresh, app resume, and return
+  /// from a pushed route.
+  Future<void> _refreshVisible() async {
+    if (!mounted || _store == null) return;
+    try {
+      final results = await (
+        widget.checkPermission(),
+        widget.settings.loadSnapshot(),
+      ).wait;
+      if (!mounted) return;
+      setState(() {
+        _permissionGranted = results.$1;
+        _settingsSnapshot = results.$2;
+      });
+      await _loadInsights();
+    } catch (_) {
+      if (mounted) setState(() => _loadFailed = true);
+    }
+  }
+
+  Future<void> _openRoute(WidgetBuilder builder) async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: builder));
+    // Settings / Status / History / Manage can change prefs, permission, or
+    // (via delete-all) the underlying logs — refresh when we become visible
+    // again even if the process never left `resumed`.
+    if (mounted) await _refreshVisible();
   }
 
   Future<void> _load() async {
@@ -65,12 +115,24 @@ class _HomeScreenState extends State<HomeScreen> {
         store = await IntentStore.open(ownConnection: true);
         _ownsStore = true;
       }
-      final results = await (
+      // Defensive timeouts on prefs + overlay-permission plugin calls — same
+      // class of "native/plugin Future never completes" failure already
+      // guarded on the unlock path (`_withTimeout` in main.dart). Without
+      // these, Home stays on CircularProgressIndicator forever until
+      // force-stop (observed after reboot with a wedged process).
+      final granted = await _awaitWithTimeout(
+        'Home.checkPermission()',
         widget.checkPermission(),
+      );
+      final snapshot = await _awaitWithTimeout(
+        'AppSettings.loadSnapshot()',
         widget.settings.loadSnapshot(),
-      ).wait;
-      final granted = results.$1;
-      final snapshot = results.$2;
+      );
+      if (granted == null || snapshot == null) {
+        if (_ownsStore) await store.close();
+        if (mounted) setState(() => _loadFailed = true);
+        return;
+      }
 
       if (!mounted) {
         if (_ownsStore) await store.close();
@@ -86,6 +148,17 @@ class _HomeScreenState extends State<HomeScreen> {
       await _loadInsights();
     } catch (_) {
       if (mounted) setState(() => _loadFailed = true);
+    }
+  }
+
+  /// Mirrors `main.dart`'s `_withTimeout` for the main-UI engine (that helper
+  /// is library-private to `main.dart` and cannot be imported here).
+  Future<T?> _awaitWithTimeout<T>(String label, Future<T> future) async {
+    try {
+      return await future.timeout(const Duration(seconds: 5));
+    } on TimeoutException {
+      debugPrint('⏱️ $label timed out after 5s — failing Home load rather than risk a permanent stall');
+      return null;
     }
   }
 
@@ -131,14 +204,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     if (_ownsStore) _store?.close();
     super.dispose();
   }
 
   List<DonutSlice> _donutSlices(List<OutcomeCount> outcomes) {
     const colors = {
-      OutcomeCategory.intentDone: Color(0xFF4CAF50),
-      OutcomeCategory.intentAbandoned: Color(0xFFFF9800),
+      OutcomeCategory.intentDone: BeaconColors.amber,
+      OutcomeCategory.intentAbandoned: Color(0xFFEF6C00),
       OutcomeCategory.noIntent: Color(0xFF9E9E9E),
     };
     const labels = {
@@ -194,17 +268,7 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: Colors.black,
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: () async {
-            await _loadInsights();
-            final granted = await widget.checkPermission();
-            final snapshot = await widget.settings.loadSnapshot();
-            if (mounted) {
-              setState(() {
-                _permissionGranted = granted;
-                _settingsSnapshot = snapshot;
-              });
-            }
-          },
+          onRefresh: _refreshVisible,
           child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
@@ -229,11 +293,7 @@ class _HomeScreenState extends State<HomeScreen> {
               else ...[
                 _StatusCard(
                   permissionGranted: _permissionGranted,
-                  onOpenStatus: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const StatusScreen()),
-                    );
-                  },
+                  onOpenStatus: () => _openRoute((_) => const StatusScreen()),
                 ),
                 const SizedBox(height: 12),
                 if (isEmpty)
@@ -266,10 +326,14 @@ class _HomeScreenState extends State<HomeScreen> {
                           },
                           style: ButtonStyle(
                             foregroundColor: WidgetStateProperty.resolveWith((states) {
-                              return states.contains(WidgetState.selected) ? Colors.black : Colors.white70;
+                              return states.contains(WidgetState.selected)
+                                  ? BeaconColors.onAmber
+                                  : Colors.white70;
                             }),
                             backgroundColor: WidgetStateProperty.resolveWith((states) {
-                              return states.contains(WidgetState.selected) ? Colors.white : Colors.white10;
+                              return states.contains(WidgetState.selected)
+                                  ? BeaconColors.amber
+                                  : Colors.white10;
                             }),
                           ),
                         ),
@@ -322,7 +386,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          'Time to complete',
+                          'Time to mark done',
                           style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 8),
@@ -372,11 +436,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       Align(
                         alignment: Alignment.centerLeft,
                         child: TextButton(
-                          onPressed: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                            );
-                          },
+                          onPressed: () => _openRoute((_) => const SettingsScreen()),
                           child: const Text('Open Settings'),
                         ),
                       ),
@@ -389,11 +449,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 'More',
                 style: TextStyle(color: Colors.white54, fontSize: 13, fontWeight: FontWeight.w600),
               ),
-              _HomeLink(label: 'Settings', screenBuilder: (_) => const SettingsScreen()),
-              _HomeLink(label: 'View history', screenBuilder: (_) => const HistoryScreen()),
-              _HomeLink(label: 'Manage options', screenBuilder: (_) => const ManagePresetsScreen()),
-              _HomeLink(label: 'Status & troubleshooting', screenBuilder: (_) => const StatusScreen()),
-              _HomeLink(label: 'About', screenBuilder: (_) => const AboutScreen()),
+              _HomeLink(label: 'Settings', onPressed: () => _openRoute((_) => const SettingsScreen())),
+              _HomeLink(label: 'View history', onPressed: () => _openRoute((_) => const HistoryScreen())),
+              _HomeLink(label: 'Manage options', onPressed: () => _openRoute((_) => const ManagePresetsScreen())),
+              _HomeLink(label: 'Status & troubleshooting', onPressed: () => _openRoute((_) => const StatusScreen())),
+              _HomeLink(label: 'About', onPressed: () => _openRoute((_) => const AboutScreen())),
             ],
           ),
         ),
@@ -468,16 +528,14 @@ class _HomeCard extends StatelessWidget {
 /// One Home navigation entry — same TextButton style as the pre-T18 Home list.
 class _HomeLink extends StatelessWidget {
   final String label;
-  final WidgetBuilder screenBuilder;
+  final VoidCallback onPressed;
 
-  const _HomeLink({required this.label, required this.screenBuilder});
+  const _HomeLink({required this.label, required this.onPressed});
 
   @override
   Widget build(BuildContext context) {
     return TextButton(
-      onPressed: () {
-        Navigator.of(context).push(MaterialPageRoute(builder: screenBuilder));
-      },
+      onPressed: onPressed,
       child: Text(label, style: const TextStyle(color: Colors.white70, fontSize: 16)),
     );
   }

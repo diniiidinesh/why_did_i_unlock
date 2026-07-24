@@ -11,8 +11,9 @@
 | `docs/ARCHITECTURE.md` | Engine topology, native components, event flows, plugin gotchas | The native/overlay/engine layer changes. |
 | `docs/PRD.md` | Product requirements, current-vs-planned feature state | A feature ships or scope shifts. |
 | `docs/BACKLOG.md` | Tactical deferred work (features/fixes/ideas) + priorities | Something is deferred, shipped (mark `[DONE date]`), or reprioritized. |
-| `docs/erd/` | Archived sprint plans (ERD + IA + task breakdown), one dated file per sprint | May be updated as implementation proceeds or scope changes — append a dated entry to that file's "Update log" section (top of file) describing what changed and why, rather than silently rewriting the body. A new sprint still gets its own new dated file. |
+| `docs/erd/` | Archived sprint plans (ERD + IA + task breakdown), one dated file per sprint; also dated design-token notes (e.g. Beacon) | May be updated as implementation proceeds or scope changes — append a dated entry to that file's "Update log" section (top of file) describing what changed and why, rather than silently rewriting the body. A new sprint still gets its own new dated file. |
 | `README.md` | Front door + doc index | New doc added, or status headline changes. |
+| `docs/debug/` | Dated session logs **and RCAs** from real on-device investigations | New investigation closed or a fix needs a durable "how we found it" record (prefer one dated file per incident cluster; link from BACKLOG/ARCHITECTURE, don't duplicate the full write-up elsewhere) |
 | Claude Code local memory | Same-machine convenience only — **does NOT sync across machines** | Keep as pointers to the git-tracked docs, not a second copy. |
 
 Rule: each fact lives in **one** doc; others link to it. Strategic decisions =

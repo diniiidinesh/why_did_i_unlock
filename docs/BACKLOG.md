@@ -3,6 +3,24 @@
 > Deferred engineering/feature work and ideas not yet built. Git-tracked on purpose
 > (survives machine switches).
 >
+> ### TOP OF NEXT THREAD (2026-07-24)
+>
+> Branch `cursor/sprint4-stage-b` @ `0.6.1+9`. Code for Stage B + bubble hybrid +
+> Beacon + orientation is landed; wrap-up is **on-device verify**, not more design.
+>
+> 1. **Beacon visual QA** — Settings toggles amber On; Manage “+” FAB amber; Home
+>    donut “Done” + window chips amber; unlock preset outlines amber; frosted bubble
+>    over a busy app (`docs/TEST_PLAN.md` 61–65; tokens in
+>    `docs/erd/beacon-visual-identity-2026-07-24.md`).
+> 2. **Bubble hybrid matrix** — cases 54–56, 58 (declare→collapse, Done, Snooze,
+>    Just Like That). Rotation/snap 57/59/60 partially exercised — reconfirm after
+>    theme change.
+> 3. **P0 post-reboot overlay stall** — reboot with bubble open; expect presets +
+>    prompts without force-stop (`docs/debug/rca-post-reboot-overlay-stall-presets-2026-07-24.md`).
+> 4. **P0 OEM autostart** — still the India-market reliability cliff (Vivo field report).
+> 5. **Timer / countdown** — next product differentiator after Stage B verify
+>    (`CLAUDE.md` §10).
+>
 > **Sprint 3 shipped (v0.5.0+7, merged to `main` 2026-07-22).** Local intent-history
 > storage (`sqflite`, `intent_log`), prompt-frequency triage (1-min cooldown + 50% prob),
 > and minimal read-only history view are all built, tested (27/27 pass, all manual
@@ -30,6 +48,8 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 
 ## Reliability / correctness
 
+- **[P0 → fix landed, needs on-device verify 2026-07-24] Post-reboot / force-stop-only recovery: hung `showOverlay()` left `_overlayIsActive` stuck true** — After reboot (often with bubble still open), unlocks stopped prompting; opening the app could stick on a loader/blank screen; force-stop + reopen restored normal behavior. Diagnosis (Claude Code, Cursor applied): `showOverlay()` was the one unlock-path plugin call NOT under `_withTimeout`; `_overlayIsActive = true` is set *before* that await, so a never-returning `showOverlay()` made every later unlock silently skip as `overlay_active` until process death. Fix in `lib/main.dart` `_presentCaptureOverlay`: wrap `showOverlay()` in `_withTimeout`, on timeout reset `_overlayIsActive` and log `⏱️ showOverlay() timed out — resetting _overlayIsActive`; unlock logged as `plugin_timeout`. Defensive prefs timeouts also on `AppLauncher._load` + Home load. **Same-day sibling (log-proven):** first post-reboot unlock could show the capture screen with **zero presets** because a timed-out `activePresets()` was sent as `[]` and cached in the overlay — fixed by not sending on null + retries + waiting for a real config reply. **Full RCA (fingerprints, playbook, ruled-outs):** [`docs/debug/rca-post-reboot-overlay-stall-presets-2026-07-24.md`](debug/rca-post-reboot-overlay-stall-presets-2026-07-24.md). **Verify:** reboot with bubble open; expect either normal prompts + presets, or one `⏱️ showOverlay()...` then normal `🎲 Triage: prompting` / `🟣 showOverlay called` on the *next* unlock — no force-stop; never `📤 Sent 0` / `_presets now has 0` immediately after `⏱️ IntentStore.activePresets()`. If stall recurs with **no** `⏱️` line, hypothesis is wrong — reopen investigation. See `docs/ARCHITECTURE.md` §5.
+
 - **[DONE 2026-07-23] Restart monitoring after an app update** — `UpdateReceiver` added, listening for `ACTION_MY_PACKAGE_REPLACED` and restarting `UnlockListenerService`. Found via an on-device build push during Sprint 4: `flutter run` always auto-launches after install, which masked that a real update (Play push, or a manually installed APK) left monitoring dead until the user reopened the app — distinct mechanism from the reboot gap (no "stopped state" involved). Verified on-device (`docs/TEST_PLAN.md` case 45) — **but with an unresolved caveat**: the fix worked reliably once the app had been opened at least once since boot; the very first reinstall attempt on a fully-dormant process produced no trace of the receiver firing at all, not yet explained. Not reproduced a second time, but flagged in case it recurs. See `docs/ARCHITECTURE.md` §2.
 
 - **[DONE 2026-07-22] `android:allowBackup="false"`** — SHIPPED alongside Sprint 3 storage (was unset/defaulting to `true`). Prevents Android auto-backup from sweeping up intent history.
@@ -42,6 +62,14 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 - **[DONE 2026-07-24] T14 — insight queries** — `IntentStore` gains `unlockCount`/`promptShownCount` (windowed today/7d/30d), `outcomeBreakdown` (plain counts per `OutcomeCategory`, feeding T18's `DonutSlice`s), and `completionDurationStats` (SQL-computed median + mean, per docs/DATA_MODEL.md §8's "COUNT then ORDER BY...LIMIT 1 OFFSET n/2" decision). All windowed and index-backed (`idx_unlocked_at`/`idx_declared_at`), never full-table scans. **Known simplification, flagged not solved:** duration stats don't exclude intents whose open period spanned a screen-off, since there's no persisted lock-event table to detect that from — `onLock` is still debugPrint-only. T18 (Cursor) can now build the Home cards/donut against this API.
 - **[DONE 2026-07-24] T17 — CSV export** — `IntentStore.exportRows()` (unlocks LEFT JOIN intent/preset, then orphan intents), `lib/export_csv.dart` (RFC4180 + ISO-8601 local), Settings/Your-data "Export data" via `share_plus`. Automated: `test/export_csv_test.dart` + store export cases. Needs on-device share-sheet smoke.
 - **[DONE 2026-07-24] T18 — Home insight cards + Your data** — `lib/home_screen.dart` (status, today/7d/30d counts, outcome donut, duration stats, settings summary, nav); Settings `YourDataCard` (counts, oldest, retention chips, export, delete-all keeping presets, delete-older-than); store helpers `userDataCounts`/`oldestRecordAt`/`deleteAllUserData`/`pruneOlderThan`. Automated: `test/home_screen_test.dart` + settings Your-data cases. Opportunistic foreground prune still deferred.
+
+### Home insights / Settings follow-ups (post-T18)
+
+- **[P2] Outcome donut — prompt-level (per-preset) breakdown** — today's donut is outcome categories only (`IntentStore.outcomeBreakdown` → T15/T18). Want a split of **which presets** contributed inside a slice (e.g. within "done", how many were Payments vs Calls). A full dedicated per-preset breakdown screen is optional later; **MVP:** tap/long-press (or hover on desktop) a slice → tooltip/sheet showing preset-level counts for that outcome. Needs a store query that groups by `(outcome category, preset_id/label)` for the active insight window — not just category totals. Requested 2026-07-24.
+
+- **[P2] Multiple quiet-hours windows** — `AppSettings.quietHoursWindow` + Settings UI + `QuietHoursPolicy` + `docs/DATA_MODEL.md` §11 today hold a **single** start/end pair. Supporting several windows (e.g. nap + overnight) needs a settings schema change to a **list** of windows (not one pair), Settings UI to add/remove/edit windows, and policy logic that suppresses if *any* window contains `now` (including each window's midnight wrap). No `intent_log` migration — prefs/settings only — but treat as a real settings-format bump with a migration from the single-window shape. Requested 2026-07-24.
+
+- **[explore] Home insight window: calendar days and ISO weeks** — today the Home chips are rolling `today` / `7d` / `30d`. Request: also let the user toggle **calendar days** (already how "today" works; extend to pick N days or a day picker) and **ISO weeks** as bucketing. ISO week grouping is **new** logic across `IntentStore.unlockCount` / `promptShownCount` / `outcomeBreakdown` / `completionDurationStats` (and Home UI), not a trivial chip rename — don't start until it's clear this is worth the complexity over the existing rolling 7d/30d windows. Requested 2026-07-24.
 
 ## Storage / history (Sprint 3 — DONE)
 
@@ -128,10 +156,28 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 - **[DONE 2026-07-21] Capture-screen keyboard handling revamp** — The interim v0.4.0 fix just shifted the whole column up, pushing presets off-screen. Now uses thumb-zone layout: title/presets/"Just Like That" bottom-anchor within scrollable space (LayoutBuilder + ConstrainedBox + IntrinsicHeight + mainAxisAlignment.end), text field pinned as footer just above keyboard. In PR #6, pending merge.
 - **[DONE 2026-07-21] "Just Like That" pill styling** — Was a bare italic `TextButton`; now a real outlined pill (muted relative to topic presets so it still reads as the distinct "no real reason" option). In PR #6, pending merge.
 - **[explore] Randomize preset pill order** — Presets appear in fixed order every unlock; muscle-memory tapping ("I always hit the second pill because it's Calls") is low-deliberation behavior. Prompt-timing randomization (shipped via probability gate) fights habituation by making timing unpredictable, which the research shows is neurologically effective and harmless. Position-randomization fights muscle memory but risks backfire: if pills are hard to locate, users might skip thinking and just hit "Just Like That" from friction rather than honesty — fixing one habituation by inducing another. Only builds if position-randomness is bounded (shuffle within session? vary per boot?) not truly random per-unlock. Needs UX evaluation first.
-- **[P2] Drag / edge-snap behavior** — the bubble can be dragged to extreme/partly-offscreen edges. Consider Messenger-style edge-snap (`positionGravity` supports left/right/auto) and/or guaranteeing the × stays reachable.
-- **[P2] Adaptive bubble sizing** — width should adapt to intent text up to a max before truncating; consider a smaller-but-legible font. Currently fixed 200×56dp, single line, 14sp, ellipsis.
-- **[P2] Smaller footprint + richer actions** — shrink the bubble's on-screen footprint; consider replacing the single × with separate **Done** and **Snooze** actions.
-- **[explore] Icon + tap-to-expand hybrid bubble** — each intent gets its own icon; collapsed bubble shows just the icon, tap expands to full text (Messenger chat-head style). Readable pill was chosen for Sprint 2 as simpler; this is a later evaluation. Relates to the Done/Snooze idea.
+- **[DONE 2026-07-24] Drag / edge-snap behavior** — Bubble uses `PositionGravity.none`
+  + background `_snapBubbleToEdge` (plugin `auto` caches screen size once and
+  snaps mid-landscape after rotate). Expand while left-docked also re-snaps so
+  the pill stays fully on-screen. Half-peek Messenger dock still optional.
+- **[DONE 2026-07-24] Bubble survives screen rotation** — Native
+  `UnlockListenerService.onConfigurationChanged` → `onOrientationChanged`
+  `{width,height}` (same `ScreenMetrics` as unlock) → background **one**
+  close+reopen. Overlay Dart metrics path removed. Snap uses last native
+  W×H÷dpr (not overlay `displays`). **On-device:** cases 57/59/60 exercised
+  (expect `📐 ORIENTATION EVENT` then `📐 Orientation: one bubble reopen…` —
+  not `📌` spam; landscape left snap `screen≈914…` not `x=359`). Reconfirm
+  after Beacon theme change.
+- **[DONE 2026-07-24] Adaptive bubble sizing** — Expanded width hugs text up to 240dp (`lib/bubble_widget.dart`).
+- **[DONE 2026-07-24] Smaller footprint + richer actions** — Collapsed 52dp chat-head; Expanded has **Done** (tick) + **Snooze** (temporary hide, unlock ends early). Plan: `docs/erd/bubble-ux-hybrid-plan-2026-07-24.md`.
+- **[DONE 2026-07-24] Icon + tap-to-expand hybrid bubble** — Confirm-then-collapse (1C): declare opens Expanded, auto-collapses ~2s; tap toggles. Material icons per preset; letter avatar for custom.
+- **[DONE 2026-07-24] Beacon visual identity** — Replaced purple `#6200EE` with amber
+  `#FFB300` + frosted glass (`lib/beacon_theme.dart` → `beaconDarkTheme()` on main UI
+  + overlay). Bubble: black@60% + backdrop blur + amber border/glow + white glyphs.
+  Also: Settings switches, Manage FAB, Home donut “Done” / window chips, unlock
+  preset outlines. Spec: `docs/erd/beacon-visual-identity-2026-07-24.md`. Automated:
+  `test/beacon_theme_test.dart`. **Needs on-device visual pass** (TEST_PLAN 61–65).
+  Store brand name still open (`CLAUDE.md` §12) — Beacon ≠ Play rename.
 
 ## Settings / configurability
 
@@ -159,10 +205,10 @@ doing nothing) as one cause, not several.
   here, this is a genuine regression needing real investigation, not a tooling artifact —
   escalate immediately. If it works normally, the diagnosis above is confirmed and this
   item closes.
-- **[P1] `tool/preview_screens.dart` needs a warning comment** (Cursor's file, not edited
-  here) — safe for pure-UI screen previews only; anything touching the background/overlay
-  engines or `IsolateNameServer` needs the real entrypoint. Suggested wording already
-  handed to Cursor in-session.
+- **[DONE 2026-07-23] `tool/preview_screens.dart` warning** — Header doc comment states
+  this is a separate entrypoint without `backgroundMain`/`overlayMain`; safe for
+  pure-UI previews only. Also wired to `beaconDarkTheme()` (2026-07-24) so Manage FAB
+  / switches match production accents during harness QA.
 - **[DONE 2026-07-23]** `triggerCapturePromptManually()` now returns `bool` (was `void`) —
   `false` when the background engine's port can't be found, so the Status screen can show
   an honest "background engine not reachable" instead of always implying success. See

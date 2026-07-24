@@ -129,4 +129,33 @@ void main() {
 
     await tester.runAsync(() => store.close());
   });
+
+  testWidgets('app resume re-fetches insights written while Home stayed mounted', (tester) async {
+    final store = await openStore(tester);
+    await pumpHome(tester, store);
+
+    expect(find.textContaining('No unlocks logged yet'), findsOneWidget);
+
+    final now = DateTime.now();
+    await tester.runAsync(() async {
+      await store.insertUnlock(unlockedAt: now, promptShown: true);
+      await store.insertEvent(_event(clientId: 'after', at: now));
+    });
+
+    // Same State is still alive — without resume refresh this would stay empty
+    // until kill/reopen (docs/ARCHITECTURE.md §8.1).
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 150)));
+    await tester.pump();
+    for (var i = 0; i < 30; i++) {
+      if (find.textContaining('prompts shown').evaluate().isNotEmpty) break;
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+      await tester.pump();
+    }
+
+    expect(find.textContaining('1 unlocks · 1 prompts shown'), findsOneWidget);
+    expect(find.byType(OutcomeDonut), findsOneWidget);
+
+    await tester.runAsync(() => store.close());
+  });
 }

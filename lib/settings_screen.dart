@@ -49,8 +49,9 @@ const List<int> probabilityPresetPercent = [25, 50, 75, 100];
 /// out-of-range Custom entry, rather than letting a user type 999 and see
 /// it silently succeed with no indication anything was adjusted.
 ///
-/// The "Your data" card (T18) owns export, retention, and delete controls and
-/// reuses [exportAndShare] / [openStore] injectables for widget tests.
+/// CSV export / Your data live here; prefs and event counts are re-read on
+/// app resume via [WidgetsBindingObserver] so a long-lived Settings route
+/// does not keep a stale `initState` snapshot (`docs/ARCHITECTURE.md` §8.1).
 class SettingsScreen extends StatefulWidget {
   final AppSettings settings;
   final UrlLauncher launch;
@@ -71,7 +72,7 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObserver {
   /// Null while the first load is in flight, mirroring the other Sprint 4
   /// screens' null-vs-loaded pattern.
   bool? _promptsEnabled;
@@ -83,7 +84,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Prefs can change from another isolate / future surface; resume is the
+    // cheap invalidation signal (docs/ARCHITECTURE.md §8.1). In-screen edits
+    // already update local state via setState — this covers returning from
+    // background after an update or an external write.
+    if (state == AppLifecycleState.resumed) {
+      _load();
+    }
   }
 
   Future<void> _load() async {
@@ -271,7 +290,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const _SectionDivider(),
                 const _SectionHeader('Quiet hours'),
                 SwitchListTile(
-                  title: const Text('Suppress prompts overnight', style: TextStyle(color: Colors.white)),
+                  title: const Text('Suppress prompts', style: TextStyle(color: Colors.white)),
                   value: quietHoursEnabled,
                   onChanged: _setQuietHoursEnabled,
                 ),

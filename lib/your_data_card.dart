@@ -25,7 +25,7 @@ class YourDataCard extends StatefulWidget {
   State<YourDataCard> createState() => _YourDataCardState();
 }
 
-class _YourDataCardState extends State<YourDataCard> {
+class _YourDataCardState extends State<YourDataCard> with WidgetsBindingObserver {
   IntentStore? _store;
   /// True when this card opened the default on-device store. Injected
   /// [YourDataCard.openStore] stays owned by the caller (tests).
@@ -38,7 +38,39 @@ class _YourDataCardState extends State<YourDataCard> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Event counts grow in the background writer while Settings stays
+    // mounted — re-read on resume (docs/ARCHITECTURE.md §8.1).
+    if (state == AppLifecycleState.resumed) {
+      _refreshOnResume();
+    }
+  }
+
+  Future<void> _refreshOnResume() async {
+    if (_store == null) {
+      await _load();
+      return;
+    }
+    try {
+      final results = await (
+        _store!.userDataCounts(),
+        _store!.oldestRecordAt(),
+        widget.settings.retentionPeriod(),
+      ).wait;
+      if (!mounted) return;
+      setState(() {
+        _counts = results.$1;
+        _oldest = results.$2;
+        _retention = results.$3;
+      });
+    } catch (_) {
+      // Soft-fail on resume — leave the last good snapshot on screen.
+    }
   }
 
   Future<void> _load() async {
@@ -85,6 +117,7 @@ class _YourDataCardState extends State<YourDataCard> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     if (_ownsStore) _store?.close();
     super.dispose();
   }

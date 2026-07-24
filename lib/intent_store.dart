@@ -62,6 +62,10 @@ enum SkipReason {
   invalidScreenSize,
   pluginTimeout,
   quietHours,
+
+  /// Unlock while a bubble was snoozed — restored the bubble instead of a
+  /// capture prompt (`docs/erd/bubble-ux-hybrid-plan-2026-07-24.md` R5b).
+  snoozeEnded,
 }
 
 String _kindToDb(IntentKind kind) => kind == IntentKind.intent ? 'intent' : 'no_intent';
@@ -99,6 +103,7 @@ String _skipReasonToDb(SkipReason reason) => switch (reason) {
       SkipReason.invalidScreenSize => 'invalid_screen_size',
       SkipReason.pluginTimeout => 'plugin_timeout',
       SkipReason.quietHours => 'quiet_hours',
+      SkipReason.snoozeEnded => 'snooze_ended',
     };
 
 SkipReason? _skipReasonFromDb(String? value) => switch (value) {
@@ -110,6 +115,7 @@ SkipReason? _skipReasonFromDb(String? value) => switch (value) {
       'invalid_screen_size' => SkipReason.invalidScreenSize,
       'plugin_timeout' => SkipReason.pluginTimeout,
       'quiet_hours' => SkipReason.quietHours,
+      'snooze_ended' => SkipReason.snoozeEnded,
       _ => null,
     };
 
@@ -783,10 +789,13 @@ class IntentStore {
   }
 
   /// Completion-duration stats (median headline, mean secondary — see
-  /// docs/DATA_MODEL.md §6/§9: "time to complete a task" really means "time
-  /// until the bubble was dismissed") over `status='done'` rows DECLARED
-  /// within [window]. Null on zero matching rows — a real "not enough data
-  /// yet" state, never a fabricated zero duration.
+  /// docs/DATA_MODEL.md §6 and plan §6: Home labels this "Time to mark done"
+  /// because it is time-until-dismissed, not task completion) over
+  /// `kind='intent' AND status='done'`
+  /// rows DECLARED within [window]. `no_intent` ("Just Like That") rows are
+  /// always written with `completed_at == declared_at` (zero duration) and
+  /// must not drag median/mean down. Null on zero matching rows — a real
+  /// "not enough data yet" state, never a fabricated zero duration.
   ///
   /// Median is computed exactly per docs/DATA_MODEL.md §8's decision: COUNT
   /// first, then a single `ORDER BY ... LIMIT 1 OFFSET n ~/ 2` query — one
@@ -805,9 +814,9 @@ class IntentStore {
       '''
       SELECT COUNT(*) AS n, AVG(completed_at - declared_at) AS mean_ms
       FROM intent_log
-      WHERE status = ? AND declared_at >= ?
+      WHERE kind = ? AND status = ? AND declared_at >= ?
       ''',
-      [_statusToDb(IntentStatus.done), since.millisecondsSinceEpoch],
+      [_kindToDb(IntentKind.intent), _statusToDb(IntentStatus.done), since.millisecondsSinceEpoch],
     );
     final n = Sqflite.firstIntValue(countRows) ?? 0;
     if (n == 0) return null;
@@ -817,11 +826,11 @@ class IntentStore {
       '''
       SELECT (completed_at - declared_at) AS duration_ms
       FROM intent_log
-      WHERE status = ? AND declared_at >= ?
+      WHERE kind = ? AND status = ? AND declared_at >= ?
       ORDER BY duration_ms
       LIMIT 1 OFFSET ?
       ''',
-      [_statusToDb(IntentStatus.done), since.millisecondsSinceEpoch, n ~/ 2],
+      [_kindToDb(IntentKind.intent), _statusToDb(IntentStatus.done), since.millisecondsSinceEpoch, n ~/ 2],
     );
     final medianMs = (medianRows.first['duration_ms'] as num).toDouble();
 

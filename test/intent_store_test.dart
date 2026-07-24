@@ -285,6 +285,16 @@ void main() {
       expect(unlocks.first.skipReason, SkipReason.quietHours);
     });
 
+    test('insertUnlock + recentUnlocks round-trips SkipReason.snoozeEnded', () async {
+      await store.insertUnlock(
+        unlockedAt: DateTime.utc(2026, 1, 1, 3, 0, 0),
+        promptShown: false,
+        skipReason: SkipReason.snoozeEnded,
+      );
+      final unlocks = await store.recentUnlocks();
+      expect(unlocks.first.skipReason, SkipReason.snoozeEnded);
+    });
+
     test('recentUnlocks respects the limit argument', () async {
       for (var i = 0; i < 5; i++) {
         await store.insertUnlock(unlockedAt: DateTime.utc(2026, 1, 1, 9 + i), promptShown: true);
@@ -738,6 +748,29 @@ void main() {
       expect(stats!.sampleCount, 3);
       expect(stats.medianSeconds, 20);
       expect(stats.meanSeconds, 40);
+    });
+
+    test('completionDurationStats ignores no_intent (Just Like That) zero-duration rows', () async {
+      final now = DateTime.now();
+      await store.insertOpenIntent(_event(clientId: 'real', declaredAt: now, completedAt: now));
+      await store.markIntentDone(clientId: 'real', completedAt: now.add(const Duration(seconds: 60)));
+
+      // Same window, status=done, but kind=no_intent with completed_at==declared_at
+      // (the real write shape). Pre-fix this dragged median/mean toward zero.
+      await store.insertEvent(_event(
+        clientId: 'jlt',
+        kind: IntentKind.noIntent,
+        source: null,
+        text: 'Just Like That',
+        declaredAt: now,
+        completedAt: now,
+      ));
+
+      final stats = await store.completionDurationStats(window: InsightWindow.today, now: now);
+      expect(stats, isNotNull);
+      expect(stats!.sampleCount, 1);
+      expect(stats.medianSeconds, 60);
+      expect(stats.meanSeconds, 60);
     });
   });
 

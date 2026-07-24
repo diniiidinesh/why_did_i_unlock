@@ -30,6 +30,9 @@ for the exact assertions.
 | `test/status_screen_test.dart` | **Sprint 4 (T6).** `StatusScreen`: live permission status text, "Grant permission" hidden once granted, tapping it calls `requestPermission` then re-checks, every OEM guidance vendor + the "not listed" fallback render, "Show me the prompt now" calls the injected trigger with the true device-pixel size (`MediaQuery.size * devicePixelRatio`, rounded) — same injection pattern, no `FlutterOverlayWindow`/`IsolateNameServer` platform code touched. |
 | `test/onboarding_screen_test.dart` | **Sprint 4 (T4).** `OnboardingScreen`'s 5 steps in order, Back/Continue navigation, permission step reflects injected `checkPermission` live and never blocks `Continue`, "Grant permission" requests then re-checks, OEM step shares `lib/oem_autostart_copy.dart` with the Status screen, final "Get started" calls `completeOnboarding` (→ `AppSettings.setOnboardingCompleted(true)` in the real default) then `onFinished`. |
 | `test/manage_presets_screen_test.dart` | **Sprint 4 (T16).** `ManagePresetsScreen` against a **real** `IntentStore` (`sqflite_common_ffi`, same real-isolate-I/O pattern as `history_screen_test.dart`), not a fake double — reorder via `ReorderableDragStartListener` drag, rename, soft-delete (leaves the row soft-deleted, never touches its `intent_log` history), restore-defaults (same — old row stays soft-deleted, not hard-deleted), and the two real `docs/DATA_MODEL.md` §7 edge cases: enabling past the 8-enabled cap and creating past the 30-stored cap both surface the store's own `PresetLimitExceeded` message as a `SnackBar` rather than crashing. Soft-deleted presets are confirmed hidden from this list. |
+| `test/bubble_widget_test.dart` | **Bubble UX hybrid.** Icon map + letter avatar; expanded width clamp; collapsed/expanded chrome; Done/Snooze callbacks. |
+| `test/bubble_overlay_geometry_test.dart` | **Bubble dock/snap math** under `centerRight` gravity (left/right x, Y clamp after rotate — guards `y=-376` vanish). |
+| `test/beacon_theme_test.dart` | **Beacon visual tokens.** Amber `#FFB300`, glass fill black@60%, `beaconDarkTheme().colorScheme.primary` is amber. |
 
 ### What automated tests deliberately do **not** cover
 
@@ -223,3 +226,29 @@ adb install -r build/app/outputs/flutter-apk/app-release.apk
 adb logcat -c && adb logcat -s WDIUUpdate WDIUBoot flutter
 ```
 Then lock/unlock the phone without ever tapping the app icon.
+
+### Bubble UX hybrid (2026-07-24)
+
+Spec: `docs/erd/bubble-ux-hybrid-plan-2026-07-24.md`. Automated coverage: `test/bubble_widget_test.dart`, `test/bubble_overlay_geometry_test.dart`.
+
+| # | Case | Status | Expected behaviour |
+|---|---|---|---|
+| 54 | Declare preset → Expanded shows icon+text+Done+Snooze → ~2s → Collapsed 52dp | ❌ | On-device |
+| 55 | Tap collapsed → expand; tap Done → intent `done`, bubble gone | ❌ | On-device |
+| 56 | Snooze → bubble gone; wait or unlock → collapsed returns; `skip_reason=snooze_ended` on unlock path | ❌ | On-device |
+| 57 | Rotate while bubble live (edge-docked) → stays visible | 🟡 | Native `onOrientationChanged` → background one reopen. Logs: `📐 ORIENTATION EVENT` then `one bubble reopen`. No `📌` spam. Partially exercised 2026-07-24 — reconfirm after Beacon. |
+| 58 | Just Like That still no bubble | ❌ | Regression |
+| 59 | Drag to **left** → expand → full pill on-screen | 🟡 | Expand is close+reopen + left move (not resize alone). Partially exercised 2026-07-24. |
+| 60 | Landscape drag mid-screen, release → snaps to nearer edge | 🟡 | Snap must use **native** W×H÷dpr (not overlay displays). Pass log: `screen=914.x…` not left `x=359` after landscape. Partially exercised 2026-07-24. |
+
+### Beacon visual identity (2026-07-24)
+
+Spec: `docs/erd/beacon-visual-identity-2026-07-24.md`. Automated: `test/beacon_theme_test.dart`. Replaces purple `#6200EE` with amber `#FFB300` + frosted glass.
+
+| # | Case | Status | Expected behaviour |
+|---|---|---|---|
+| 61 | Settings: prompt / quiet-hours switches On → amber track (not purple) | ❌ | On-device visual |
+| 62 | Manage options: FAB “+” background is amber | ❌ | On-device visual |
+| 63 | Home: donut “Done” slice + selected Today/7d/30d chip are amber | ❌ | On-device visual |
+| 64 | Unlock prompt: unselected preset pill outlines are amber | ❌ | On-device visual |
+| 65 | Live bubble over a busy app: frosted (blurred) black@60% fill, thin amber border/glow, white text/icons — not solid purple | ❌ | On-device visual |

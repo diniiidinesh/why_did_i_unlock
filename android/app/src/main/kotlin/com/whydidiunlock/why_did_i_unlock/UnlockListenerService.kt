@@ -6,7 +6,9 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.res.Configuration
 import android.os.IBinder
+import android.util.Log
 import io.flutter.FlutterInjector
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
@@ -24,10 +26,18 @@ import io.flutter.plugin.common.MethodChannel
  * runs the `backgroundMain` Dart entry point and, because it auto-registers
  * plugins, can call `flutter_overlay_window` (showOverlay) even with no
  * Activity alive. See docs/ARCHITECTURE.md for the full engine topology.
+ *
+ * Also pushes [onOrientationChanged] when the display size changes (rotation):
+ * the overlay/background Dart isolates must not invent screen size from their
+ * own views — same rationale as unlock metrics via [ScreenMetrics].
  */
 class UnlockListenerService : Service() {
 
     private lateinit var unlockReceiver: UnlockReceiver
+
+    /** Dedupes [onConfigurationChanged] storms that don't change pixel size. */
+    private var lastReportedWidth: Int = 0
+    private var lastReportedHeight: Int = 0
 
     companion object {
         private const val CHANNEL_ID = "unlock_listener"
@@ -50,6 +60,13 @@ class UnlockListenerService : Service() {
         fun onPhoneLocked() {
             methodChannel?.invokeMethod("onLock", null)
         }
+
+        fun onOrientationChanged(width: Int, height: Int) {
+            methodChannel?.invokeMethod(
+                "onOrientationChanged",
+                mapOf("width" to width, "height" to height)
+            )
+        }
     }
 
     override fun onCreate() {
@@ -57,12 +74,35 @@ class UnlockListenerService : Service() {
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
         ensureBackgroundEngine()
+        val (w, h) = ScreenMetrics.getRealScreenSize(this)
+        lastReportedWidth = w
+        lastReportedHeight = h
         unlockReceiver = UnlockReceiver()
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_USER_PRESENT)
             addAction(Intent.ACTION_SCREEN_OFF)
         }
         registerReceiver(unlockReceiver, filter)
+    }
+
+    /**
+     * Android calls this on a running Service when configuration changes
+     * (including orientation / screenSize). No manifest `configChanges` flag
+     * needed — that flag only applies to Activities.
+     */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val (width, height) = ScreenMetrics.getRealScreenSize(this)
+        if (width == lastReportedWidth && height == lastReportedHeight) {
+            return
+        }
+        lastReportedWidth = width
+        lastReportedHeight = height
+        Log.d(
+            "UnlockListenerService",
+            "📐 onConfigurationChanged → ${width}x$height (orientation=${newConfig.orientation})"
+        )
+        onOrientationChanged(width, height)
     }
 
     /**
