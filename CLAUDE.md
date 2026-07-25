@@ -1,7 +1,7 @@
 # CLAUDE.md — Why Did I Unlock
 
 > Operational context for Claude Code. Read this fully at the start of every session.
-> Recent state: **Merged to `main` 2026-07-27** (PR #9 Stage B, then PR #8 Beacon rebrand), version `0.6.1+9`. **Store brand:** Play title `Beacon: Mindful Phone Use`, on-device `Beacon` (`lib/brand.dart`); privacy live at `https://dineshkaliki.com/beacon/privacy/`. Also shipped: T17 CSV export, T18 Home insight cards, bubble UX hybrid, Beacon amber theme, the P0 stale-preset-cache and P1 manual-trigger-cooldown fixes, branding assets + FGS icon, Report a problem, prompt default **100%** + cooldown explained, **verb default presets** (Check mail / Message someone / Book a cab / Order food / Pay someone), Home mean + pull-to-retry, **OEM autostart UX** (manufacturer highlight, full onboarding steps, Home nudge) + overlay find-hint (no auto-advance). Next: on-device QA (`docs/TEST_PLAN.md` 54–76) + Play closed test (`docs/PLAY_SUBMISSION.md`) — laptop temporarily down for repair, so on-device items are blocked until it's back; Play Console listing/testing setup itself is not. Owner: Dinesh. (For *when* things changed, use `git log` — this line is not a hand-maintained changelog.)
+> Recent state: **`cursor/beacon-play-listing` (2026-07-25), version `0.6.1+9`.** Builds on Stage B (`cursor/sprint4-stage-b`). **Store brand:** Play title `Beacon: Mindful Phone Use`, on-device `Beacon` (`lib/brand.dart`); privacy live at `https://dineshkaliki.com/beacon/privacy/`. Also on this branch: branding assets + FGS icon, Report a problem, prompt default **100%** + cooldown explained, **verb default presets** (Check mail / Message someone / Book a cab / Order food / Pay someone), Home mean + pull-to-retry, **OEM autostart UX** (manufacturer highlight, full onboarding steps, Home nudge) + overlay find-hint (no auto-advance). Next: on-device QA (`docs/TEST_PLAN.md` 54–76) + Play closed test (`docs/PLAY_SUBMISSION.md`). Owner: Dinesh. (For *when* things changed, use `git log` — this line is not a hand-maintained changelog.)
 > New here? Start with `README.md` (front door + doc map). Authoritative docs: this file (operational context), `docs/ARCHITECTURE.md` (system design), `docs/PRD.md` (product).
 > **This file — not Claude Code's local memory — is the durable source of truth across machines.** Claude Code's auto-memory (`~/.claude/projects/.../memory/`) is local-filesystem-only with no cross-device sync; anything that needs to survive a machine switch belongs here or elsewhere in the repo, not only in memory.
 
@@ -99,7 +99,7 @@ Code & assets:
 - `android/app/src/main/AndroidManifest.xml` — permissions + service/receiver declarations.
 - `android/app/keystore/upload-keystore.jks`, `android/key.properties` — release signing (gitignored, see §5).
 - `assets/icon/icon.png` — Beacon launcher icon source (amber mark; used by `flutter_launcher_icons`).
-- `pubspec.yaml` — Dart/Flutter dependencies (`version` currently `0.6.1+9` on `main`).
+- `pubspec.yaml` — Dart/Flutter dependencies (`version` currently `0.6.1+9` on this branch).
 
 Docs: for **what each doc is**, see the doc map in `README.md`; for **when to update each**, see `docs/DOC_UPKEEP.md`. Not re-listed here, to keep a single owner per fact. One operational reminder that belongs next to the code: **read `docs/ARCHITECTURE.md` before touching the native layer or overlay flow.**
 
