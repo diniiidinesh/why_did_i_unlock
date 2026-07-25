@@ -606,6 +606,32 @@ void main() {
       await file.delete();
     });
 
+    test('seed v3 migrates untouched verb-v2 defaults (Watch reels → Pay someone)', () async {
+      final tempPath = '${Directory.systemTemp.path}/intent_store_seed_v3_migrate.db';
+      final file = File(tempPath);
+      if (await file.exists()) await file.delete();
+
+      SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
+      var s = await IntentStore.open(path: tempPath);
+      for (final p in await s.allPresets()) {
+        await s.deletePreset(p.id);
+      }
+      for (final label in verbPresetLabelsV2) {
+        await s.createPreset(label);
+      }
+      expect(
+        (await s.activePresets()).map((p) => p.label).toSet(),
+        verbPresetLabelsV2.toSet(),
+      );
+      await s.close();
+
+      SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
+      s = await IntentStore.open(path: tempPath);
+      expect((await s.activePresets()).map((p) => p.label), defaultPresetLabels);
+      await s.close();
+      await file.delete();
+    });
+
     test('seed v2 leaves a customized list alone', () async {
       final tempPath = '${Directory.systemTemp.path}/intent_store_seed_v2_custom.db';
       final file = File(tempPath);

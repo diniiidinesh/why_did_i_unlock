@@ -14,8 +14,12 @@
   path, park onboarding picker / suggestion catalog / second no-bubble / voice
   in `docs/BACKLOG.md`. Delay-before-unlock stays strategic-open (no Settings
   "Coming soon" row).
-- **2026-07-25 (rev 2)** — **Call someone** → **Message someone** (WhatsApp-first;
-  call-averse users). Call someone parked in suggestion catalog.
+- **2026-07-25 (rev 3)** — **Watch reels** → **Pay someone** (commute/UPI
+  coverage). Seed version bumped to 3; untouched v2 verb installs migrate.
+  Watch reels parked in suggestion catalog.
+- **2026-07-25 (on-device note)** — Installs that already customized the enabled
+  set (e.g. added “Testing”) correctly **skip** auto-migration; Restore
+  defaults / clear data is the escape hatch. Not a bug.
 
 ---
 
@@ -42,7 +46,7 @@ catalog backlog.
 | 2 | **Message someone** | Retune | WhatsApp-first TG; replaces Call someone (not everyone likes calls). Call stays in suggestion catalog |
 | 3 | **Book a cab** | Friend | Replaces Get directions / Commute — cab is the regular trip unlock; maps/directions are not |
 | 4 | **Order food** | Friend | Bring Food Order back as a verb; job-goer lunch/dinner unlocks are real |
-| 5 | **Watch reels** | Friend | Honest social/doomscroll declare — bubble accountability is the product wedge |
+| 5 | **Pay someone** | Retune | UPI / transfers — high-stakes commute unlock; replaced Watch reels in defaults |
 
 **Not in the enabled five (park → suggestion catalog / Manage):**
 
@@ -50,24 +54,18 @@ catalog backlog.
 |---|---|
 | Set alarm | Real but low deliberation value; rare vs daily unlocks; easy custom/Manage add |
 | Call someone | Friend listed it; broader TG is message-first — catalog, not default |
-| Reply to someone / Pay someone | Strong India TG hypotheses; covered partly by Message someone; Pay not on friend’s list |
+| Watch reels | Friend listed it; honest doomscroll label — catalog (Pay someone took the fifth slot) |
+| Reply to someone / Pay someone | Reply still catalog; **Pay someone is now a default** |
 | Get directions / Commute work/home | Friend: directions not regular; “Commute …” reverts toward categories |
 | Check social media | See §1.2.1 |
 
 Hard length check: all five ≤ `presetLabelUiMaxLength` (24).
 
-### 1.2.1 “Check social media” vs “Watch reels”
+### 1.2.1 “Check social media” / “Watch reels”
 
-**Prefer Watch reels as the default; do not also add Check social media.**
-
-- Friend already named the behaviour (**Watch reels**) — that’s the chip he’ll
-  trust.
-- Broader “Check social media” is fuzzier (LinkedIn work vs Instagram vs
-  WhatsApp Status) and invites low-deliberation taps without naming the habit.
-- For this app, an honest **reels/scroll** label + bubble is *desirable*: it
-  turns autopilot social into a declared session instead of **Just Like That**.
-- If closed-test users ask for Instagram/Twitter/LinkedIn, add those as Manage
-  suggestions — don’t dilute the default row with a second social chip.
+**Not in the enabled five.** Prefer adding via Manage / future suggestion catalog
+if closed-test users ask. Pay someone took the fifth default slot for UPI
+coverage.
 
 ### 1.3 One no-bubble path — not two
 
@@ -87,7 +85,6 @@ in this change. That would:
 - train “tap the bottom escape when busy.”
 
 Urgent mail/work is solved by **Check mail** (and friends can rename/add in Manage).
-**Watch reels** is still an intent with a bubble — not a skip.
 Voice (later) covers free-form under urgency; it still opens a bubble.
 
 ### 1.4 Explicitly out of scope (parked → BACKLOG)
@@ -168,7 +165,8 @@ flowchart TD
 ```
 
 **Old five (v1 seed):** `Payments`, `Calls`, `Messages`, `Food Order`, `Commute`  
-**New five (v2 seed):** `Check mail`, `Message someone`, `Book a cab`, `Order food`, `Watch reels`
+**New five (v3 seed):** `Check mail`, `Message someone`, `Book a cab`, `Order food`, `Pay someone`  
+**Prior verb five (v2 seed):** `Check mail`, `Message someone`, `Book a cab`, `Order food`, `Watch reels`
 
 Constants live in `lib/intent_store.dart` (`_defaultPresetLabels`). Bubble icon
 map in `lib/bubble_icons.dart` must recognize the new lowercase labels (and can

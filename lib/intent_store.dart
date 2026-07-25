@@ -350,7 +350,7 @@ const List<String> defaultPresetLabels = [
   'Message someone',
   'Book a cab',
   'Order food',
-  'Watch reels',
+  'Pay someone',
 ];
 
 /// Pre-verb seed (schema v2 era). Used only to detect "untouched defaults"
@@ -363,10 +363,20 @@ const List<String> legacyDefaultPresetLabels = [
   'Commute',
 ];
 
+/// First verb seed (Watch reels instead of Pay someone). Untouched v2 installs
+/// migrate to [defaultPresetLabels] when [defaultPresetsSeedVersion] bumps.
+const List<String> verbPresetLabelsV2 = [
+  'Check mail',
+  'Message someone',
+  'Book a cab',
+  'Order food',
+  'Watch reels',
+];
+
 /// Prefs key for [defaultPresetLabels] seed generation. Bumped when the
 /// shipped default set changes so untouched installs can migrate once.
 const String defaultPresetsSeedVersionKey = 'default_presets_seed_version';
-const int defaultPresetsSeedVersion = 2;
+const int defaultPresetsSeedVersion = 3;
 
 /// A dashboard time window (T14) — every insight query is windowed and
 /// index-backed (docs/DATA_MODEL.md §8), never a full-table scan, since
@@ -470,10 +480,11 @@ class IntentStore {
     return store;
   }
 
-  /// Once per install: if prefs say we're still on seed v1 and the enabled
-  /// list is exactly [legacyDefaultPresetLabels], soft-delete those rows and
-  /// re-seed [defaultPresetLabels]. Customized lists are left alone; only the
-  /// version flag advances. See `docs/erd/verb-presets-job-goers-2026-07-25.md`.
+  /// Once per install: if prefs say we're behind [defaultPresetsSeedVersion]
+  /// and the enabled list is exactly a known prior default set (legacy five or
+  /// [verbPresetLabelsV2]), soft-delete those rows and re-seed
+  /// [defaultPresetLabels]. Customized lists are left alone; only the version
+  /// flag advances. See `docs/erd/verb-presets-job-goers-2026-07-25.md`.
   Future<void> _ensureDefaultPresetSeed() async {
     final prefs = SharedPreferencesAsync();
     final version = await prefs.getInt(defaultPresetsSeedVersionKey) ?? 1;
@@ -481,8 +492,11 @@ class IntentStore {
 
     final active = await activePresets();
     final labels = active.map((p) => p.label).toSet();
-    final legacy = legacyDefaultPresetLabels.toSet();
-    if (active.length == legacy.length && labels.containsAll(legacy)) {
+    // Require unique labels equal to a prior default set (no customs mixed in).
+    final matchesPriorDefaults = active.length == labels.length &&
+        (_sameLabelSet(labels, legacyDefaultPresetLabels) ||
+            _sameLabelSet(labels, verbPresetLabelsV2));
+    if (matchesPriorDefaults) {
       final now = DateTime.now().toUtc().millisecondsSinceEpoch;
       for (final preset in active) {
         await _db.update(
@@ -507,6 +521,11 @@ class IntentStore {
     }
 
     await prefs.setInt(defaultPresetsSeedVersionKey, defaultPresetsSeedVersion);
+  }
+
+  static bool _sameLabelSet(Set<String> actual, List<String> expected) {
+    final want = expected.toSet();
+    return actual.length == want.length && actual.containsAll(want);
   }
 
   static Future<void> _createV1Schema(Database db) async {

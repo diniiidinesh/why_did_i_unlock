@@ -10,10 +10,11 @@ void main() {
       expect(iconForIntentLabel('Message someone'), Icons.chat);
       expect(iconForIntentLabel('Book a cab'), Icons.local_taxi);
       expect(iconForIntentLabel('Order food'), Icons.restaurant);
-      expect(iconForIntentLabel('Watch reels'), Icons.play_circle_outline);
+      expect(iconForIntentLabel('Pay someone'), Icons.account_balance_wallet);
     });
 
-    test('still maps legacy category defaults for history bubbles', () {
+    test('still maps prior verb and legacy defaults for history bubbles', () {
+      expect(iconForIntentLabel('Watch reels'), Icons.play_circle_outline);
       expect(iconForIntentLabel('Payments'), Icons.account_balance_wallet);
       expect(iconForIntentLabel('Calls'), Icons.call);
       expect(iconForIntentLabel('Messages'), Icons.chat);

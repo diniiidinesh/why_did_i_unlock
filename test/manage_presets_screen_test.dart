@@ -178,10 +178,10 @@ void main() {
     await tester.runAsync(() async => store = await openTestStore());
 
     await pumpScreen(tester, store);
-    expect(find.text('Watch reels'), findsOneWidget);
+    expect(find.text('Pay someone'), findsOneWidget);
 
     await tester.tap(find.descendant(
-      of: find.widgetWithText(ListTile, 'Watch reels'),
+      of: find.widgetWithText(ListTile, 'Pay someone'),
       matching: find.byIcon(Icons.delete_outline),
     ));
     await tester.pump();
@@ -191,7 +191,7 @@ void main() {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
     await tester.pump();
 
-    expect(find.text('Watch reels'), findsNothing);
+    expect(find.text('Pay someone'), findsNothing);
 
     await tester.runAsync(() => store.close());
   });

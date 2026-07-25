@@ -156,7 +156,7 @@ This app runs a persistent overlay and a foreground service, which is exactly wh
 | Responsiveness | No hardcoded pixel sizing; use logical density / `MediaQuery` so layout holds from budget screens to foldables |
 | Device coverage | Test on at least one low-end device (≤3GB RAM, older Android) and one modern device — **never rely on emulators** for unlock or overlay behavior, they don't reproduce it. Always verify `--release` build performance, not just debug. |
 | minSdk / targetSdk | Baseline API 29 (Android 10). Lowering further widens reach (relevant for budget Android, especially in the India market) but complicates the overlay stack — treat as a deliberate call, not a default. |
-| OEM resilience | Aggressive OEMs (Xiaomi/Oppo/Vivo) are known to kill background services. If overlay permission is denied or the service is killed, degrade gracefully to a notification-based reminder rather than failing silently. |
+| OEM resilience | Aggressive OEMs (Xiaomi/Oppo/Vivo) are known to kill background services. **Built (guidance UX 2026-07-25):** onboarding + Status manufacturer-matched Autostart steps, battery-exemption dialog, Home nudge. Graceful degradation to a notification when the service is killed is still **Planned** (not built). |
 
 ---
 
@@ -194,14 +194,14 @@ Countdown reaches visual thresholds (e.g., approaching expiry → expired), bubb
 |---|---|---|
 | Unlock Detection | **Built & confirmed** | Sprint 1. Verified reliable across repeated unlock cycles on real device. |
 | Floating Bubble (mechanism) | **Built & confirmed** | Sprint 1. |
-| Intent Capture Screen (presets + custom text) | **Built & confirmed** | Sprint 2. Default labels: verb-based job-goer set (2026-07-25) — Check mail / Message someone / Book a cab / Order food / Watch reels. See `docs/erd/verb-presets-job-goers-2026-07-25.md`. |
+| Intent Capture Screen (presets + custom text) | **Built & confirmed** | Sprint 2. Default labels: verb-based job-goer set (2026-07-25) — Check mail / Message someone / Book a cab / Order food / Pay someone. See `docs/erd/verb-presets-job-goers-2026-07-25.md`. |
 | Bubble displaying declared intent | **Built & confirmed** | Sprint 2 text pill → **2026-07-24** hybrid chat-head + Beacon frosted glass. |
 | Manual Completion (mark intent done) | **Built & confirmed** | Sprint 2 ×; **2026-07-24** Done tick (+ Snooze hide). See `docs/erd/bubble-ux-hybrid-plan-2026-07-24.md`. |
 | Bubble hybrid (collapse / icons) | **Built** | Confirm-then-collapse + icons; on-device matrix `docs/TEST_PLAN.md` 54–60. |
 | Beacon visual identity | **Built** | Amber `#FFB300` + frosted glass; `docs/erd/beacon-visual-identity-2026-07-24.md`. Visual QA 61–65 pending. |
 | Single-active-intent behavior | **Built & confirmed (by design)** | A fresh unlock while an intent is incomplete does not re-trigger capture — existing bubble persists until completed. Design a decision for Sprint 3+ features to respect, not a bug. |
-| Intent History (local log) | **Built (Sprint 3, branch not yet merged)** | `sqflite` `intent_log` — see §4.1. A minimal read-only history screen exists off `HomeScreen`; no dashboard/aggregate view yet. |
-| Cooldown / smart triage | **Built (Sprint 3, branch not yet merged)** | Cooldown + probability composite, not cooldown alone — see §4.3. |
+| Intent History (local log) | **Built (Sprint 3+)** | `sqflite` `intent_log` — see §4.1. History screen + Home insight cards (T18: outcomes donut, duration Median/Mean, Your data). |
+| Cooldown / smart triage | **Built (Sprint 3+; defaults 2026-07-25)** | Default: 1-min cooldown + **100%** probability (tunable in Settings). See §4.3. |
 
 ### P1 — Should have (post-MVP core loop)
 

@@ -7,13 +7,14 @@ import 'package:flutter/material.dart';
 IconData iconForIntentLabel(String? label) {
   final key = (label ?? '').trim().toLowerCase();
   return switch (key) {
-    // Current defaults (verb seed v2)
+    // Current defaults (verb seed v3)
     'check mail' => Icons.mail_outline,
     'message someone' => Icons.chat,
     'book a cab' => Icons.local_taxi,
     'order food' => Icons.restaurant,
+    'pay someone' => Icons.account_balance_wallet,
+    // Prior verb seed (v2) + legacy category defaults for history bubbles
     'watch reels' => Icons.play_circle_outline,
-    // Legacy defaults (still resolve for history / old bubbles)
     'payments' => Icons.account_balance_wallet,
     'calls' => Icons.call,
     'messages' => Icons.chat,
@@ -29,6 +30,7 @@ const Set<String> _knownPresetLabelsLower = {
   'message someone',
   'book a cab',
   'order food',
+  'pay someone',
   'watch reels',
   'payments',
   'calls',
