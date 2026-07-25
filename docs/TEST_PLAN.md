@@ -27,8 +27,9 @@ for the exact assertions.
 | `test/export_csv_test.dart` | **Sprint 4 (T17).** CSV header/columns, RFC4180 escaping, ISO-8601 local timestamps, duration_seconds. |
 | `test/outcome_donut_test.dart` | **Sprint 4 (T15).** `OutcomeDonut` (pure `CustomPainter`, no store dependency): legend percentages per slice, optional `centerLabel`, empty state for both an empty slice list and a slice list that sums to zero (no divide-by-zero). |
 | `test/about_screen_test.dart` | **Sprint 4 (T5).** `AboutScreen`: renders name/version/every action row, injected `version` override, `mailto:` URI built correctly (address + subject/body), a launch failure or thrown exception surfaces as a `SnackBar` (not silent), Support section has no payment link. All `url_launcher` calls are injected — no platform channel touched. |
-| `test/status_screen_test.dart` | **Sprint 4 (T6).** `StatusScreen`: live permission status text, "Grant permission" hidden once granted, tapping it calls `requestPermission` then re-checks, every OEM guidance vendor + the "not listed" fallback render, "Show me the prompt now" calls the injected trigger with the true device-pixel size (`MediaQuery.size * devicePixelRatio`, rounded) — same injection pattern, no `FlutterOverlayWindow`/`IsolateNameServer` platform code touched. |
-| `test/onboarding_screen_test.dart` | **Sprint 4 (T4).** `OnboardingScreen`'s 5 steps in order, Back/Continue navigation, permission step reflects injected `checkPermission` live and never blocks `Continue`, "Grant permission" requests then re-checks, OEM step shares `lib/oem_autostart_copy.dart` with the Status screen, final "Get started" calls `completeOnboarding` (→ `AppSettings.setOnboardingCompleted(true)` in the real default) then `onFinished`. |
+| `test/status_screen_test.dart` | **Sprint 4 (T6) + OEM UX.** Permission / battery cards; OEM vendors + not-listed; manufacturer highlight + Beacon find-hint; “Show me the prompt now” pixel size. |
+| `test/onboarding_screen_test.dart` | **Sprint 4 (T4) + OEM/overlay friction.** 5 steps; find-hint; grant/resume re-checks status (no auto-advance); matched OEM steps vs generic fallback; Continue never blocked on permission. |
+| `test/oem_autostart_copy_test.dart` | **OEM UX.** `matchOemGuidance` / list prefer / find-hint naming. |
 | `test/manage_presets_screen_test.dart` | **Sprint 4 (T16).** `ManagePresetsScreen` against a **real** `IntentStore` (`sqflite_common_ffi`, same real-isolate-I/O pattern as `history_screen_test.dart`), not a fake double — reorder via `ReorderableDragStartListener` drag, rename, soft-delete (leaves the row soft-deleted, never touches its `intent_log` history), restore-defaults (same — old row stays soft-deleted, not hard-deleted), and the two real `docs/DATA_MODEL.md` §7 edge cases: enabling past the 8-enabled cap and creating past the 30-stored cap both surface the store's own `PresetLimitExceeded` message as a `SnackBar` rather than crashing. Soft-deleted presets are confirmed hidden from this list. |
 | `test/bubble_widget_test.dart` | **Bubble UX hybrid.** Icon map + letter avatar; expanded width clamp; collapsed/expanded chrome; Done/Snooze callbacks. |
 | `test/bubble_overlay_geometry_test.dart` | **Bubble dock/snap math** under `centerRight` gravity (left/right x, Y clamp after rotate — guards `y=-376` vanish). |
@@ -62,7 +63,7 @@ Status legend: ✅ verified · 🟡 partially verified · ❌ not yet run · ⛔
 | 16 | Declare intent → dismiss → row written (kind=intent, correct source) & shown in History | 🟡 | Write confirmed via logs (`💾 Stored event`); visual History re-check pending |
 | 17 | "Just Like That" → no bubble, `no_intent` row written & shown in History | 🟡 | Write confirmed via logs; visual History re-check pending |
 | 18 | Cooldown floor blocks re-prompt within 1 min | ✅ | Logs: `COOLDOWN active (elapsed … < 0:01:00)`, repeatedly |
-| 19 | Probability varies across unlocks (not every time, ~half at p=0.5) | ✅ | Logs: real hit/miss mix over many draws |
+| 19 | Probability varies across unlocks (not every time, ~half at p=0.5) | ✅ | Logs: real hit/miss mix over many draws. **Note 2026-07-25:** default is now **100%** — re-test variability only after lowering probability in Settings. |
 | 20 | Cross-engine: swipe from Recents → declare/dismiss → row still written | 🟡 | Relay proven in pre-build spike; re-run with final `IntentEvent` write code pending |
 | 21 | Concurrent read/write: History open during a write → no crash (WAL) | 🟡 | Drove the `ownConnection` fix (sqflite `singleInstance`); needs a clean re-run |
 | 22 | Reboot → monitoring resumes → dismiss writes a row (direct-boot path) | ❌ | Not yet run |
@@ -256,13 +257,19 @@ Spec: `docs/erd/beacon-visual-identity-2026-07-24.md`. Automated: `test/beacon_t
 ### Verb-based default presets (2026-07-25)
 
 See `docs/erd/verb-presets-job-goers-2026-07-25.md`. Defaults:
-Check mail · Message someone · Book a cab · Order food · Watch reels.
+Check mail · Message someone · Book a cab · Order food · Pay someone.
 
 | # | Case | Status | Notes / expected |
 |---|---|---|---|
-| 66 | Fresh install unlock | ❌ | Five verb pills + Just Like That |
+| 66 | Fresh install unlock | ❌ | Five verb pills (Check mail / Message someone / Book a cab / Order food / **Pay someone**) + Just Like That |
 | 67 | Tap **Check mail** | ❌ | Bubble with that text; `kind=intent` |
 | 68 | Just Like That | ❌ | No bubble; history shows no-intent |
 | 69 | Upgrade from build with old five untouched | ❌ | Verbs appear next unlock without Restore |
-| 70 | Upgrade after customizing presets | ❌ | Custom list preserved |
-| 71 | Restore defaults | ❌ | Confirm dialog lists verbs; list becomes the five |
+| 70 | Upgrade after customizing presets | ❌ | Custom list preserved (seed version may still bump) |
+| 71 | Restore defaults | ❌ | Confirm dialog lists verbs incl. Pay someone; list becomes the five |
+| 72 | Home “Couldn't load” / pull-to-retry | ❌ | Force a failed or null-store Home state (or cold open after kill); pull down → insights reload without reinstall |
+| 73 | Onboarding overlay step find-hint | ❌ | Copy names **Beacon**; Grant opens system list; return after grant → status shows Granted; user taps Continue (no auto-advance) |
+| 74 | Status: OEM highlight on matched maker | ❌ | Matched tile first + “Looks like your phone”; steps include leave smart optimize (Don’t optimize / Not optimized / No restrictions) |
+| 75 | Home OEM nudge | ❌ | With battery not exempt: “Keep monitoring alive” → Open Status / Dismiss; dismiss stays gone after reopen |
+| 76 | Friend Vivo/Xiaomi Autostart soak | ❌ | Vivo: App info → Battery usage → Background power control → **Allow background power usage** (not smart control); leave app closed 30–60 min; unlock still prompts. |
+| 77 | OnePlus/Oppo Power consumption controls | ❌ | App info → Battery usage → Allow background ON + Optimize battery use → Don’t optimize (not Always ask) |

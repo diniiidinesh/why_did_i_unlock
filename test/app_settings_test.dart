@@ -38,6 +38,12 @@ void main() {
     test('onboardingCompleted defaults false — a fresh install shows onboarding', () async {
       expect(await settings.onboardingCompleted(), isFalse);
     });
+
+    test('oemAutostartNudgeDismissed defaults false and round-trips', () async {
+      expect(await settings.oemAutostartNudgeDismissed(), isFalse);
+      await settings.setOemAutostartNudgeDismissed(true);
+      expect(await settings.oemAutostartNudgeDismissed(), isTrue);
+    });
   });
 
   group('31. round-trips', () {

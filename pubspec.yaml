@@ -56,6 +56,9 @@ dependencies:
   # the OS share sheet instead (docs/erd/sprint4-app-shell-plan §9,
   # docs/DATA_MODEL.md §9). No network call by the app itself.
   share_plus: ^10.1.4
+  # OEM guidance highlight (Status / onboarding): reads Build.MANUFACTURER
+  # without custom Kotlin. See lib/device_manufacturer.dart + oem_autostart_copy.
+  device_info_plus: ^11.2.0
 
 dev_dependencies:
   flutter_test:

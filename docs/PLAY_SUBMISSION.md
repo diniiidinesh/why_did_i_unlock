@@ -26,7 +26,7 @@
 | Distribution | Worldwide |
 | Target audience | All ages; not directed at children (IARC will still run) |
 | Contact / Console email | `hi@dineshkaliki.com` |
-| Privacy host | `dineshkaliki.com` (path TBD — see §7) |
+| Privacy host | `https://dineshkaliki.com/beacon/privacy/` (live; see §7) |
 | Account type | **Recommend Personal / Individual** for ASAP closed test (see §4) |
 | Kotlin notification rename | Approved |
 
@@ -174,14 +174,17 @@ by the Flutter engine, **not** `QUERY_ALL_PACKAGES`.
 
 ## 3. Adjacent submission gates
 
-- **[DONE 2026-07-24] Store brand name.** **Beacon** (see §0 / §3c). In-app
-  string rename + launcher icon still pending on branch
+- **[DONE 2026-07-24/25] Store brand name.** **Beacon** (see §0 / §3c). In-app
+  strings, launcher/splash, and FGS `ic_stat_beacon` shipped on
   `cursor/beacon-play-listing`.
 - **[DONE 2026-07-25] Privacy policy URL.** Hosted at
   `https://dineshkaliki.com/beacon/privacy/` (`beacon-site` + Cloudflare DNS).
   Wired in `lib/brand.dart`.
 - **[DONE 2026-07-24] Verify resolved `targetSdk`.** Pinned to 29/36
   (minSdk/targetSdk), see §3b.3.
+- **[DONE 2026-07-25] Contact email + Report a problem.** `hi@dineshkaliki.com`
+  wired; About → Report a problem mailto + local error buffer
+  (`lib/problem_report.dart`).
 - **[ ] Store listing must explain the overlay.** Draft copy + screenshot brief
   in §3c. Phone screenshots must be **real device captures** (see §3c — AI
   mockups alone are a policy risk).
@@ -193,20 +196,21 @@ by the Flutter engine, **not** `QUERY_ALL_PACKAGES`.
   is a manifest change requiring sign-off per `CLAUDE.md` §7.
 - **[ ] `applicationId` is permanent:** `com.whydidiunlock.why_did_i_unlock`.
   It appears in the Play URL forever and cannot be changed after first publish.
-  The display name can change freely; this cannot.
-- **[ ] Fill in-app `TODO_*_UNRESOLVED` placeholders** — inventory in §3a.
+  The display name can change freely; this cannot. **Acknowledge before first
+  upload** — not a code task.
+- **[ ] Fill remaining in-app `TODO_*_UNRESOLVED`** — only `playListingUrl` left
+  (§3a); fill after the Play listing exists.
 
 ## 3a. In-app placeholder inventory (`TODO_*_UNRESOLVED`)
 
 Grep target: `TODO_.*_UNRESOLVED`. **Do not invent values** — fill when the real
-URL/email is ready. Contact email is decided (`hi@dineshkaliki.com`) but not yet
-wired in code.
+listing URL exists.
 
 | Constant / token | File | Notes |
 |---|---|---|
-| `feedbackEmail` | `lib/brand.dart` | **Wired:** `hi@dineshkaliki.com`. Re-exported via `lib/about_screen.dart`. |
-| `privacyPolicyUrl` | `lib/brand.dart` | **Wired:** `https://dineshkaliki.com/beacon/privacy/` |
-| `playListingUrl` = `https://TODO_PLAY_LISTING_URL_UNRESOLVED.placeholder.invalid` | `lib/brand.dart` | Fill after the Play listing exists (`…?id=com.whydidiunlock.why_did_i_unlock`). |
+| `feedbackEmail` | `lib/brand.dart` | **DONE:** `hi@dineshkaliki.com`. Re-exported via `lib/about_screen.dart`. |
+| `privacyPolicyUrl` | `lib/brand.dart` | **DONE:** `https://dineshkaliki.com/beacon/privacy/` |
+| `playListingUrl` = `https://TODO_PLAY_LISTING_URL_UNRESOLVED.placeholder.invalid` | `lib/brand.dart` | **Pending** — fill after the Play listing exists (`…?id=com.whydidiunlock.why_did_i_unlock`). Rate/Share SnackBar “not on Play yet” until then. |
 
 Comment-only mentions (no runtime value): `docs/erd/sprint4-app-shell-plan-2026-07-23.md`.
 
@@ -225,8 +229,9 @@ No `TODO_*_UNRESOLVED` tokens under `android/` as of this inventory.
 4. **[Release hygiene] Version for uploads.** Current `pubspec.yaml`:
    `0.6.1+9`. Each Play upload needs a **higher** `+N` versionCode than the
    previous upload.
-5. **[Pending] Display rename → Beacon** + Kotlin notification title (approved) +
-   About constants (email / privacy URL / Play URL).
+5. **[DONE 2026-07-25] Display rename → Beacon** + Kotlin notification title +
+   About email / privacy URL. **Still pending:** `playListingUrl` (after listing
+   exists).
 
 ## 3c. Store listing draft (Beacon)
 
@@ -354,7 +359,7 @@ Help](https://support.google.com/googleplay/android-developer/answer/14151465)):
 - [ ] Complete App content: Data Safety (§2), ads = no, content rating (IARC),
       target audience / news / COVID / data-safety questionnaires as shown.
 - [ ] Paste FGS special-use + battery-optimization justifications (§1).
-- [ ] Upload privacy policy URL once §7 is live.
+- [ ] Upload privacy policy URL (`https://dineshkaliki.com/beacon/privacy/` — live).
 - [ ] Store listing: title, short/full description (§3c), feature graphic, icon,
       **real** phone screenshots.
 - [ ] Countries: worldwide; pricing: free.
@@ -409,24 +414,18 @@ worth more than everything above it.)_
 
 ## 7. Privacy policy hosting on `dineshkaliki.com`
 
-Play needs a **public HTTPS URL**, viewable without login. You own the domain —
-use it.
+**[DONE 2026-07-25]** Live at `https://dineshkaliki.com/beacon/privacy/`
+(`beacon-site` + Cloudflare DNS). Wired in `lib/brand.dart`. Incognito-check
+before each Console paste if the site ever moves.
 
-### Recommended path (no site yet): public repo + GitHub Pages
+### How it was stood up (reference)
 
-1. Create a **new public** GitHub repo (e.g. `beacon-site` or `dineshkaliki-com`).
-2. Copy `docs/site/privacy.html` from this app repo → `privacy/index.html` in
-   the site repo. Set the effective date. Enable GitHub Pages (deploy from
-   `main` / `/` or `/docs`).
-3. In the domain registrar for `dineshkaliki.com`, point DNS at GitHub Pages
-   (A/AAAA + `www` CNAME per GitHub’s custom-domain docs). In the repo: Settings
-   → Pages → Custom domain → `dineshkaliki.com`.
-4. Stable URL to use everywhere: `https://dineshkaliki.com/beacon/privacy/`
-5. Incognito check (no login wall) → paste into Play Console → set
-   `privacyPolicyUrl` in `lib/brand.dart` → re-run tests.
+1. Public site repo (`beacon-site`) with privacy HTML.
+2. DNS for `dineshkaliki.com` → Cloudflare / Pages as configured.
+3. Stable URL: `https://dineshkaliki.com/beacon/privacy/`
 
-Markdown source of truth remains `docs/PRIVACY_POLICY.md` (name + email filled;
-date still `[DATE OF PUBLICATION]` until go-live).
+Markdown source of truth remains `docs/PRIVACY_POLICY.md` (keep in sync with the
+hosted HTML when the policy text changes).
 
 ---
 
