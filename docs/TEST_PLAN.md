@@ -139,7 +139,7 @@ which is expected, not a bug: see `CLAUDE.md` §5's security review).
 | 43 | Logging failure cannot suppress a prompt | ❌ | Hard to force deliberately; verify the weaker version — across a long session, no unlock is ever *missing* a prompt that triage said should show. Any `⚠️ Failed to log unlock (non-fatal)` in logs must be followed by the prompt still appearing. |
 | 44 | Battery/latency sanity after adding a write per unlock | ❌ | Unlock→prompt still feels immediate (`CLAUDE.md` §8's ~500ms target); no new jank. The `unlock_log` insert is deliberately after `showOverlay()`, so a regression here would indicate the ordering broke. |
 
-**Stage B landed on `cursor/sprint4-stage-b` (T17/T18 + P0/P1 fixes):** Home insight
+**Stage B landed (merged to `main` 2026-07-27; T17/T18 + P0/P1 fixes):** Home insight
 cards and Settings Your-data are wired; CSV export is in Your data. Remaining manual
 gaps are on-device smoke for export share-sheet, P0 preset refresh, and P1 manual-session
 cooldown (see BACKLOG tags). Settings quiet-hours cases 40–41 still worth a real unlock

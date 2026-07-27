@@ -120,7 +120,7 @@ v1.0 of this PRD asserted things about "Sprint 1" that weren't accurate against 
 | Overlay/Bubble | `flutter_overlay_window` package, backed by Android `SYSTEM_ALERT_WINDOW` | Built (decorative bubble only — see §2). |
 | Unlock Detection | Native Kotlin: `BroadcastReceiver` for `ACTION_USER_PRESENT` → foreground service → Flutter via `MethodChannel` | Built. |
 | State Management | **OPEN — not yet chosen.** v1.0 named Riverpod as a candidate; that was aspirational, not a decision. Choose when the app's state needs actually require it, not preemptively. | Not built |
-| Local Storage | **`sqflite`.** `intent_log` table: `kind` (intent/no_intent) + `source` (preset/custom) as separate columns, `text`, `declared_at`/`completed_at`, idempotent `client_id`. WAL journal mode (background engine writes, history screen reads concurrently). See `CLAUDE.md` §3 / `docs/ARCHITECTURE.md` §5 for the write-path architecture and two real Android-specific bugs found building it. | Built (Sprint 3, branch not yet merged) |
+| Local Storage | **`sqflite`.** `intent_log` table: `kind` (intent/no_intent) + `source` (preset/custom) as separate columns, `text`, `declared_at`/`completed_at`, idempotent `client_id`. WAL journal mode (background engine writes, history screen reads concurrently). See `CLAUDE.md` §3 / `docs/ARCHITECTURE.md` §5 for the write-path architecture and two real Android-specific bugs found building it. | Built (Sprint 3, merged to `main`) |
 | Voice Input | Android `SpeechRecognizer` API (on-device, no network) — plausible approach, not yet implemented | Not built |
 | Analytics | None. Per product principle (§8), no analytics or network calls in the base/free experience regardless of monetization outcome. | N/A by design |
 

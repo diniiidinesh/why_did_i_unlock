@@ -13,7 +13,13 @@
 | `docs/BACKLOG.md` | Tactical deferred work (features/fixes/ideas) + priorities | Something is deferred, shipped (mark `[DONE date]`), or reprioritized. |
 | `docs/erd/` | Archived sprint plans (ERD + IA + task breakdown), one dated file per sprint; also dated design-token notes (e.g. Beacon) | May be updated as implementation proceeds or scope changes — append a dated entry to that file's "Update log" section (top of file) describing what changed and why, rather than silently rewriting the body. A new sprint still gets its own new dated file. |
 | `README.md` | Front door + doc index | New doc added, or status headline changes. |
+| `docs/DATA_MODEL.md` | On-device schema (ERD) + invariants | The `intent_log`/`unlock_log`/preset schema changes. |
+| `docs/TEST_PLAN.md` | Automated + manual on-device test tracker | A new behaviour area is touched, or a manual case is run — mark Status/Evidence in place. |
+| `docs/PLAY_SUBMISSION.md` | Play listing/review prep — FGS justification, Data Safety, closed-test checklist | A submission gate is done, a new dependency changes what Data Safety must say, or Google responds to a real review (log it in §6). |
+| `docs/PRIVACY_POLICY.md` | Privacy policy source of truth | The policy text changes — keep the hosted copy (`beacon-site` repo / `docs/site/privacy.html` mirror) in sync in the same change. |
+| `docs/SETUP.md` | Dev-environment bring-up (toolchain, device) | Setup steps or toolchain floor change. |
 | `docs/debug/` | Dated session logs **and RCAs** from real on-device investigations | New investigation closed or a fix needs a durable "how we found it" record (prefer one dated file per incident cluster; link from BACKLOG/ARCHITECTURE, don't duplicate the full write-up elsewhere) |
+| `docs/archive/` | Superseded historical docs, reference only | Never — if it needs updating, it's not archived, move it back. |
 | Claude Code local memory | Same-machine convenience only — **does NOT sync across machines** | Keep as pointers to the git-tracked docs, not a second copy. |
 
 Rule: each fact lives in **one** doc; others link to it. Strategic decisions =
@@ -41,6 +47,18 @@ README's descriptions. CLAUDE.md §6 points here rather than re-listing the docs
    everywhere else, let git track when.
 6. **Version + tag** on merge of a meaningful batch: bump `pubspec.yaml`
    `version:`, update the matching note in CLAUDE.md §2, `git tag -a vX.Y.Z`.
+7. **When a feature/fix branch merges to `main`, grep for stale merge-state
+   language in the same pass** — this rots silently otherwise. Run something like
+   `grep -rln "not yet merged\|on branch\|on this branch\|<old-branch-name>" -- '*.md'`
+   (skip `docs/erd/` and `docs/debug/` — those are point-in-time archives *by
+   design*, see the doc-map row above, and are meant to still say what was true
+   when they were written). Fix every real hit that now claims something is
+   unmerged/in-progress when it actually shipped. Found 2026-07-27: `CLAUDE.md`,
+   `README.md`, `docs/BACKLOG.md`, `docs/PLAY_SUBMISSION.md`, `docs/PRD.md`, and
+   `docs/TEST_PLAN.md` were all still describing merged work as "branch, not yet
+   merged" days after the merge — nobody had grepped for it, each doc had just been
+   edited in isolation. A repo-wide grep at merge time is cheaper than a fresh
+   session re-deriving "wait, is this actually live?" from git log.
 
 ## When context is running low (like end of a long thread)
 
