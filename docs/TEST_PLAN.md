@@ -20,13 +20,19 @@ for the exact assertions.
 | `test/intent_store_test.dart` | `IntentStore` repository. **Sprint 3 (1–9):** insert/read, empty DB, SQL-injection literal stored verbatim, idempotent `client_id`, `fromMessage` validation (7 sub-cases incl. `presetId` typing + `toMessage` round-trip), no-intent row shape, `recentEvents` limit+ordering, `lastCompletedAt` across kinds, reopen. **Sprint 4 (20–25):** real v1→v2 migration from a hand-built v1 file, `unlock_log` round-trip incl. every `SkipReason`, declare→dismiss lifecycle (`open`/`done`/`abandoned`, idempotency, no-op on unknown id, **no resurrection of abandoned rows**), `unlock_id` stateless resolution (incl. later-skipped-unlock and no-prompted-unlock cases), preset CRUD + limits + soft-delete + restore-defaults. |
 | `test/app_settings_test.dart` | `AppSettings` (30–35): defaults match the previously-hardcoded constants, round-trips, **clamping on both write and read**, retention enum mapping + sentinel, quiet-hours flag independent of window, `loadSnapshot` batching, cross-instance visibility. |
 | `test/prompt_policy_test.dart` | Triage policies. **Sprint 3 (10–12):** `ProbabilityPromptPolicy` bounds + seeded determinism, `TimeCooldownPolicy` boundary (`>=`), `CompositePromptPolicy` AND-semantics. **Sprint 4 (40–42):** `QuietHoursPolicy` same-day window, **overnight wraparound**, inclusive-start/exclusive-end boundaries, degenerate zero-width window fails open. |
-| `test/widget_test.dart` | `HomeScreen` renders title/toggle/history entry (13); `IntentCaptureScreen` renders presets/pill/field/OK (14), an empty preset list (16, T11's zero-presets state), tapping a preset passes its id back through `onSubmit` (17), custom text carries no `presetId` (18). |
+| `test/widget_test.dart` | `HomeScreen` title + nav entries (13, no Unlock-prompts Switch); `IntentCaptureScreen` presets/pill/field/OK (14), empty presets (16), preset id via `onSubmit` (17), custom text no `presetId` (18); AppLauncher onboarding gate (19). |
 | `test/history_screen_test.dart` | `HistoryScreen` renders events newest-first, styles `no_intent` rows distinctly (15). |
+| `test/home_screen_test.dart` | **Sprint 4 (T18).** Home insight cards: empty first-run copy, seeded counts + donut categories + median duration, null duration empty copy. Injected store + permission; `tester.runAsync` for sqflite. |
+| `test/settings_screen_test.dart` | **Sprint 4 (T13 + T17/T18).** Prompts/cooldown/probability/quiet hours round-trips; Manage options / privacy / Export; retention chips; delete-all keeps presets. |
+| `test/export_csv_test.dart` | **Sprint 4 (T17).** CSV header/columns, RFC4180 escaping, ISO-8601 local timestamps, duration_seconds. |
 | `test/outcome_donut_test.dart` | **Sprint 4 (T15).** `OutcomeDonut` (pure `CustomPainter`, no store dependency): legend percentages per slice, optional `centerLabel`, empty state for both an empty slice list and a slice list that sums to zero (no divide-by-zero). |
 | `test/about_screen_test.dart` | **Sprint 4 (T5).** `AboutScreen`: renders name/version/every action row, injected `version` override, `mailto:` URI built correctly (address + subject/body), a launch failure or thrown exception surfaces as a `SnackBar` (not silent), Support section has no payment link. All `url_launcher` calls are injected — no platform channel touched. |
 | `test/status_screen_test.dart` | **Sprint 4 (T6).** `StatusScreen`: live permission status text, "Grant permission" hidden once granted, tapping it calls `requestPermission` then re-checks, every OEM guidance vendor + the "not listed" fallback render, "Show me the prompt now" calls the injected trigger with the true device-pixel size (`MediaQuery.size * devicePixelRatio`, rounded) — same injection pattern, no `FlutterOverlayWindow`/`IsolateNameServer` platform code touched. |
 | `test/onboarding_screen_test.dart` | **Sprint 4 (T4).** `OnboardingScreen`'s 5 steps in order, Back/Continue navigation, permission step reflects injected `checkPermission` live and never blocks `Continue`, "Grant permission" requests then re-checks, OEM step shares `lib/oem_autostart_copy.dart` with the Status screen, final "Get started" calls `completeOnboarding` (→ `AppSettings.setOnboardingCompleted(true)` in the real default) then `onFinished`. |
 | `test/manage_presets_screen_test.dart` | **Sprint 4 (T16).** `ManagePresetsScreen` against a **real** `IntentStore` (`sqflite_common_ffi`, same real-isolate-I/O pattern as `history_screen_test.dart`), not a fake double — reorder via `ReorderableDragStartListener` drag, rename, soft-delete (leaves the row soft-deleted, never touches its `intent_log` history), restore-defaults (same — old row stays soft-deleted, not hard-deleted), and the two real `docs/DATA_MODEL.md` §7 edge cases: enabling past the 8-enabled cap and creating past the 30-stored cap both surface the store's own `PresetLimitExceeded` message as a `SnackBar` rather than crashing. Soft-deleted presets are confirmed hidden from this list. |
+| `test/bubble_widget_test.dart` | **Bubble UX hybrid.** Icon map + letter avatar; expanded width clamp; collapsed/expanded chrome; Done/Snooze callbacks. |
+| `test/bubble_overlay_geometry_test.dart` | **Bubble dock/snap math** under `centerRight` gravity (left/right x, Y clamp after rotate — guards `y=-376` vanish). |
+| `test/beacon_theme_test.dart` | **Beacon visual tokens.** Amber `#FFB300`, glass fill black@60%, `beaconDarkTheme().colorScheme.primary` is amber. |
 
 ### What automated tests deliberately do **not** cover
 
@@ -132,12 +138,11 @@ which is expected, not a bug: see `CLAUDE.md` §5's security review).
 | 43 | Logging failure cannot suppress a prompt | ❌ | Hard to force deliberately; verify the weaker version — across a long session, no unlock is ever *missing* a prompt that triage said should show. Any `⚠️ Failed to log unlock (non-fatal)` in logs must be followed by the prompt still appearing. |
 | 44 | Battery/latency sanity after adding a write per unlock | ❌ | Unlock→prompt still feels immediate (`CLAUDE.md` §8's ~500ms target); no new jank. The `unlock_log` insert is deliberately after `showOverlay()`, so a regression here would indicate the ordering broke. |
 
-**Not yet reachable (needs later tasks):** preset editing (T16) — the screen itself landed
-(`lib/manage_presets_screen.dart`, automated tests in the table above) but isn't wired into
-`MyApp`/`HomeScreen` navigation yet, so it has no manual on-device matrix entry until T18
-does that wiring — same story for the T4/T5/T6/T15 screens below. Settings screen round-trip
-including the cross-isolate propagation check (T13), CSV export (T17). Cases will be added
-as those land rather than listed here as permanently ❌.
+**Stage B landed on `cursor/sprint4-stage-b` (T17/T18 + P0/P1 fixes):** Home insight
+cards and Settings Your-data are wired; CSV export is in Your data. Remaining manual
+gaps are on-device smoke for export share-sheet, P0 preset refresh, and P1 manual-session
+cooldown (see BACKLOG tags). Settings quiet-hours cases 40–41 still worth a real unlock
+pass with the live Settings UI.
 
 ### Sprint 4 — declaration-time writes and the abandoned-intent sweep (T10)
 
@@ -164,7 +169,8 @@ the WAL sidecar (hit exactly this on 2026-07-23; see that section's note).
 **Case 53 update (2026-07-23):** the Status screen itself (`lib/status_screen.dart`) has now
 landed, with the "Show me the prompt now" button calling `triggerCapturePromptManually` exactly
 as this case describes — see the automated-test row above for what's covered without a device.
-Case 53 stays ⛔ regardless: nothing wires `StatusScreen` into app navigation yet (T18), so
+Case 53: Status is reachable from Home (and from the Home status card) since Stage A/T18
+wiring — re-run the Status matrix when convenient; the earlier "unwired" ⛔ no longer applies.
 there's still no way to reach it on a real device to run the manual checks below.
 
 **Why case 49 matters most:** every other Sprint 4 change so far has been additive
@@ -220,3 +226,29 @@ adb install -r build/app/outputs/flutter-apk/app-release.apk
 adb logcat -c && adb logcat -s WDIUUpdate WDIUBoot flutter
 ```
 Then lock/unlock the phone without ever tapping the app icon.
+
+### Bubble UX hybrid (2026-07-24)
+
+Spec: `docs/erd/bubble-ux-hybrid-plan-2026-07-24.md`. Automated coverage: `test/bubble_widget_test.dart`, `test/bubble_overlay_geometry_test.dart`.
+
+| # | Case | Status | Expected behaviour |
+|---|---|---|---|
+| 54 | Declare preset → Expanded shows icon+text+Done+Snooze → ~2s → Collapsed 52dp | ❌ | On-device |
+| 55 | Tap collapsed → expand; tap Done → intent `done`, bubble gone | ❌ | On-device |
+| 56 | Snooze → bubble gone; wait or unlock → collapsed returns; `skip_reason=snooze_ended` on unlock path | ❌ | On-device |
+| 57 | Rotate while bubble live (edge-docked) → stays visible | 🟡 | Native `onOrientationChanged` → background one reopen. Logs: `📐 ORIENTATION EVENT` then `one bubble reopen`. No `📌` spam. Partially exercised 2026-07-24 — reconfirm after Beacon. |
+| 58 | Just Like That still no bubble | ❌ | Regression |
+| 59 | Drag to **left** → expand → full pill on-screen | 🟡 | Expand is close+reopen + left move (not resize alone). Partially exercised 2026-07-24. |
+| 60 | Landscape drag mid-screen, release → snaps to nearer edge | 🟡 | Snap must use **native** W×H÷dpr (not overlay displays). Pass log: `screen=914.x…` not left `x=359` after landscape. Partially exercised 2026-07-24. |
+
+### Beacon visual identity (2026-07-24)
+
+Spec: `docs/erd/beacon-visual-identity-2026-07-24.md`. Automated: `test/beacon_theme_test.dart`. Replaces purple `#6200EE` with amber `#FFB300` + frosted glass.
+
+| # | Case | Status | Expected behaviour |
+|---|---|---|---|
+| 61 | Settings: prompt / quiet-hours switches On → amber track (not purple) | ❌ | On-device visual |
+| 62 | Manage options: FAB “+” background is amber | ❌ | On-device visual |
+| 63 | Home: donut “Done” slice + selected Today/7d/30d chip are amber | ❌ | On-device visual |
+| 64 | Unlock prompt: unselected preset pill outlines are amber | ❌ | On-device visual |
+| 65 | Live bubble over a busy app: frosted (blurred) black@60% fill, thin amber border/glow, white text/icons — not solid purple | ❌ | On-device visual |

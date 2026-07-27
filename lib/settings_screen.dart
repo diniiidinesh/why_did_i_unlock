@@ -3,7 +3,10 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'about_screen.dart' show privacyPolicyUrl;
 import 'app_settings.dart';
+import 'export_csv.dart';
+import 'intent_store.dart';
 import 'manage_presets_screen.dart';
+import 'your_data_card.dart';
 
 /// Same typedef shape as `about_screen.dart`'s `UrlLauncher` — kept as its
 /// own local declaration (rather than importing the other file's private
@@ -24,11 +27,13 @@ const List<int> cooldownPresetMinutes = [0, 1, 5, 10, 15, 30];
 const List<int> probabilityPresetPercent = [25, 50, 75, 100];
 
 /// Settings screen: prompt on/off, cooldown, probability, quiet hours, and
-/// links to Manage presets / the privacy policy.
+/// links to Manage options / CSV export / the privacy policy.
 ///
-/// Self-contained and read-only of `HomeScreen` — nothing here wires this
-/// screen into navigation (that's a different task). Every plugin-touching
-/// dependency is an injectable constructor param defaulting to the real
+/// Reachable from `HomeScreen`'s nav list since Sprint 4's Stage A merge —
+/// this screen itself stays fully self-contained (no dependency on
+/// `HomeScreen`), which is what let it be built and widget-tested before
+/// that wiring existed. Every plugin-touching dependency is an injectable
+/// constructor param defaulting to the real
 /// implementation, the same pattern `StatusScreen`/`AboutScreen`/
 /// `ManagePresetsScreen` already use, which is what lets this screen have a
 /// widget test at all: `AppSettings` needs a fake `SharedPreferencesAsync`
@@ -43,23 +48,31 @@ const List<int> probabilityPresetPercent = [25, 50, 75, 100];
 /// screen additionally validates and gives feedback (a `SnackBar`) on an
 /// out-of-range Custom entry, rather than letting a user type 999 and see
 /// it silently succeed with no indication anything was adjusted.
+///
+/// CSV export / Your data live here; prefs and event counts are re-read on
+/// app resume via [WidgetsBindingObserver] so a long-lived Settings route
+/// does not keep a stale `initState` snapshot (`docs/ARCHITECTURE.md` §8.1).
 class SettingsScreen extends StatefulWidget {
   final AppSettings settings;
   final UrlLauncher launch;
   final WidgetBuilder? managePresetsBuilder;
+  final Future<void> Function()? exportAndShare;
+  final Future<IntentStore> Function()? openStore;
 
   const SettingsScreen({
     super.key,
     this.settings = const AppSettings(),
     UrlLauncher? launch,
     this.managePresetsBuilder,
+    this.exportAndShare,
+    this.openStore,
   }) : launch = launch ?? _defaultLaunch;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObserver {
   /// Null while the first load is in flight, mirroring the other Sprint 4
   /// screens' null-vs-loaded pattern.
   bool? _promptsEnabled;
@@ -71,7 +84,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Prefs can change from another isolate / future surface; resume is the
+    // cheap invalidation signal (docs/ARCHITECTURE.md §8.1). In-screen edits
+    // already update local state via setState — this covers returning from
+    // background after an update or an external write.
+    if (state == AppLifecycleState.resumed) {
+      _load();
+    }
   }
 
   Future<void> _load() async {
@@ -259,7 +290,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const _SectionDivider(),
                 const _SectionHeader('Quiet hours'),
                 SwitchListTile(
-                  title: const Text('Suppress prompts overnight', style: TextStyle(color: Colors.white)),
+                  title: const Text('Suppress prompts', style: TextStyle(color: Colors.white)),
                   value: quietHoursEnabled,
                   onChanged: _setQuietHoursEnabled,
                 ),
@@ -286,10 +317,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   iconColor: Colors.white70,
                   textColor: Colors.white,
                   leading: const Icon(Icons.tune),
-                  title: const Text('Manage presets'),
+                  title: const Text('Manage options'),
                   trailing: const Icon(Icons.chevron_right, color: Colors.white38),
                   onTap: _openManagePresets,
                 ),
+                const _SectionDivider(),
+                YourDataCard(
+                  settings: widget.settings,
+                  openStore: widget.openStore,
+                  exportAndShare: widget.exportAndShare ?? exportAndShareCsv,
+                  showSnackBar: _showSnackBar,
+                ),
+                const _SectionDivider(),
                 ListTile(
                   iconColor: Colors.white70,
                   textColor: Colors.white,

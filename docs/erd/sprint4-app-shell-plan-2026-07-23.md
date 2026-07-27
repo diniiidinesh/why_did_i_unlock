@@ -20,6 +20,16 @@ rewriting history. For current, up-to-date information see:
 
 ## Update log
 
+- **2026-07-24 (Stage B wrap):** T17/T18 + Home nav wiring landed on
+  `cursor/sprint4-stage-b`. Same branch also shipped bubble UX hybrid + Beacon visual
+  identity + native orientation reopen (`ScreenMetrics`) — see
+  `docs/erd/bubble-ux-hybrid-plan-2026-07-24.md` and
+  `docs/erd/beacon-visual-identity-2026-07-24.md`. Version bump `0.6.1+9`. Remaining
+  work is on-device verify (`docs/BACKLOG.md` TOP OF NEXT THREAD), not more Stage B
+  feature scope.
+- **2026-07-24 (copy):** §6 metric card label → **"Time to mark done"** (was informal
+  "Time to complete a task"); Settings quiet-hours switch → **"Suppress prompts"**
+  (dropped "overnight" — section header already says Quiet hours).
 - **2026-07-23 (sign-off):** initial plan approved as written below.
 - **2026-07-23 (later same day):** time-based "quiet hours" scheduling (a prompt
   suppression window, e.g. 23:00-07:00) added to scope during implementation. Not
@@ -368,9 +378,10 @@ privacy policy · share · rate on Play · support page with copy but no payment
 
 ## 6. Metric honesty
 
-"Time to complete a task" is really **time until the bubble was dismissed**. Label it
-that way; **median headline, mean secondary**; exclude events spanning a screen-off
-period. `status` lets the timing card filter to `done` and drop `abandoned`.
+"Time to complete a task" is really **time until the bubble was dismissed**. Home
+card label: **"Time to mark done"** (not "Time to complete"); **median headline,
+mean secondary**; exclude events spanning a screen-off period. `status` lets the
+timing card filter to `done` and drop `abandoned`.
 
 ## 7. Deferred, but accommodated
 

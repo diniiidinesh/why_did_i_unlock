@@ -175,6 +175,7 @@ is always valid regardless of whether presets have arrived yet.
 | `invalid_screen_size` | native `getRealMetrics` returned 0×0, or channel args malformed | ~never |
 | `plugin_timeout` | `_withTimeout` fired — a plugin native call didn't return in 5s | ~never |
 | `quiet_hours` | current time falls inside the user's configured quiet-hours window | common if the user sets a window — see §11 |
+| `snooze_ended` | unlock while a bubble was snoozed — restored collapsed bubble instead of capture | uncommon; see `docs/erd/bubble-ux-hybrid-plan-2026-07-24.md` R5b |
 
 The last two are **defensive guards, not expected paths.** They exist because this
 codebase has been bitten by a native call that never returned
@@ -193,7 +194,8 @@ wrong at the platform layer.
 | Prompt shown, locked or powered off unanswered | `prompt_shown=1` | none |
 | Declared, restart or OEM kill before dismissing | `prompt_shown=1` | `open` → `abandoned` |
 | Relay fails at dismissal | `prompt_shown=1` | stays `open` → `abandoned` |
-| Bubble live, phone locked and unlocked again | `prompt_shown=0`, `overlay_active` | none |
+| Bubble live, phone locked and unlocked again | `prompt_shown=0`, `overlay_active` | none (bubble stays) |
+| Unlock while bubble snoozed | `prompt_shown=0`, `snooze_ended` | none (collapsed bubble restored) |
 | Screen wakes without unlocking | no row | none |
 | **Service dead (force-stop / OEM kill)** | **no rows** | none |
 

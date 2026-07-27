@@ -1,16 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:why_did_i_unlock/about_screen.dart';
+import 'package:why_did_i_unlock/beacon_theme.dart';
 import 'package:why_did_i_unlock/insights/outcome_donut.dart';
 import 'package:why_did_i_unlock/manage_presets_screen.dart';
 import 'package:why_did_i_unlock/onboarding_screen.dart';
 import 'package:why_did_i_unlock/status_screen.dart';
 
-/// DEV-ONLY manual-QA harness for the Sprint 4 Cursor UI screens
-/// (T4/T5/T6/T15/T16) — NOT part of the shipped app and NOT wired into
-/// `lib/main.dart` (that file is Claude Code's; wiring these into real
-/// navigation is T18, still pending). This lets a human open each screen
-/// on a real device/emulator today, before T18 lands, without touching
-/// `main.dart` at all.
+/// DEV-ONLY manual-QA harness for Sprint 4 UI screens (T4/T5/T6/T15/T16).
+/// NOT part of the shipped app.
+///
+/// ⚠️ SEPARATE ENTRYPOINT — this file does NOT import `lib/main.dart`, so
+/// `backgroundMain()` / `overlayMain()` (`@pragma("vm:entry-point")`) are
+/// **absent** from this build. Safe for pure-UI screen previews only. Anything
+/// that needs unlock monitoring, `IsolateNameServer` ports, or a live overlay
+/// must use the real entrypoint: `flutter run --release` (no `-t`).
 ///
 /// Run it with a separate entrypoint flag, e.g.:
 ///
@@ -19,10 +22,8 @@ import 'package:why_did_i_unlock/status_screen.dart';
 /// Every screen below is pushed with its REAL default dependencies (real
 /// `FlutterOverlayWindow` permission calls, a real on-device `IntentStore`
 /// connection, real `url_launcher`) — this is genuine manual verification
-/// against the same code path the real app will eventually use, not a
-/// mocked walkthrough. That's also exactly why `flutter test` can't
-/// substitute for this: none of those real plugin calls have a platform
-/// implementation under the test framework.
+/// against the same *screen* code paths, not a mocked walkthrough. Theme matches
+/// production via `beaconDarkTheme()`.
 void main() {
   runApp(const _PreviewApp());
 }
@@ -34,7 +35,7 @@ class _PreviewApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Sprint 4 screen preview (dev only)',
-      theme: ThemeData.dark(),
+      theme: beaconDarkTheme(),
       home: const _PreviewMenu(),
     );
   }

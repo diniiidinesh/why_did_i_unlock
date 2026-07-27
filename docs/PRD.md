@@ -81,10 +81,10 @@ v1.0 of this PRD asserted things about "Sprint 1" that weren't accurate against 
 **Built and confirmed working (Sprint 1 + Sprint 2 + post-v0.3.0 reliability fixes, real-device `--release`):**
 - Unlock/lock detection: `UnlockReceiver` (for `ACTION_USER_PRESENT` / `ACTION_SCREEN_OFF`) → `UnlockListenerService` (foreground service) → a **persistent background Flutter engine** → Flutter. (This replaced the original `MainActivity`-hosted method channel, which died when the app was swiped from Recents — see below.)
 - Intent-capture screen appears on unlock (presets / custom text), covering the full display.
-- **The floating bubble displays the actual declared intent text** — the earlier decorative purple-circle placeholder has been superseded.
+- **The floating bubble displays the actual declared intent** — hybrid chat-head (2026-07-24): brief Expanded confirm (icon + text + Done tick + Snooze), then ~52dp Collapsed icon; tap to re-expand. Chrome is **Beacon** frosted glass (black@60% + amber `#FFB300` border/glow), not solid purple. Specs: `docs/erd/bubble-ux-hybrid-plan-2026-07-24.md`, `docs/erd/beacon-visual-identity-2026-07-24.md`.
 - Bubble persists across app switches, with one confirmed OS-level exception: it does not render over the Settings app, which is expected Android anti-"tapjacking" behavior (suppressing overlays on sensitive system screens since Android 12) — not a defect.
-- Manual completion works: tapping the bubble's × dismisses/clears it.
-- **Single-active-intent behavior is confirmed and intentional:** unlocking again while an intent is still incomplete does not re-trigger a fresh capture screen — the existing bubble simply persists. A new capture screen only appears once the current intent is dismissed. This is a real product/behavioral constraint to design around in Sprint 3+ (e.g. smart triage and cooldown logic should compose with this, not assume every unlock gets a fresh prompt).
+- Manual completion: **Done** (tick) marks the intent complete. **Snooze** temporarily hides the bubble (10 min, or until next unlock).
+- **Single-active-intent behavior is confirmed and intentional:** unlocking again while an intent is still incomplete does not re-trigger a fresh capture screen — the existing bubble simply persists (or, if snoozed, unlock restores the collapsed bubble). A new capture screen only appears once the current intent is dismissed.
 - **Post-v0.3.0 reliability fixes (merged, verified):** monitoring now survives the app being swiped out of Recents (the persistent background engine, hosted by the foreground service, is decoupled from `MainActivity`); the service restarts after device reboot (`BootReceiver`); and the capture screen covers the full display (an overlay gravity/sizing fix). See `docs/ARCHITECTURE.md` for the resulting three-engine topology.
 - Foreground service survived a background-kill test on a Realme/ColorOS device after a manual app reopen. **OEM battery-optimization exemption and autostart are still not configured/tested for long-running reliability** (aggressive OEMs can block boot-restart and kill the service) — treat background survival as demonstrated but not yet production-hardened on those OEMs. Tracked in `docs/BACKLOG.md` (P1).
 
@@ -195,8 +195,10 @@ Countdown reaches visual thresholds (e.g., approaching expiry → expired), bubb
 | Unlock Detection | **Built & confirmed** | Sprint 1. Verified reliable across repeated unlock cycles on real device. |
 | Floating Bubble (mechanism) | **Built & confirmed** | Sprint 1. |
 | Intent Capture Screen (presets + custom text) | **Built & confirmed** | Sprint 2. Verified on real device, `--release` build. |
-| Bubble displaying declared intent | **Built & confirmed** | Sprint 2. Bubble now shows actual intent text; decorative placeholder is superseded. |
-| Manual Completion (mark intent done) | **Built & confirmed** | Sprint 2. Tapping bubble → mark done → bubble clears, verified working. |
+| Bubble displaying declared intent | **Built & confirmed** | Sprint 2 text pill → **2026-07-24** hybrid chat-head + Beacon frosted glass. |
+| Manual Completion (mark intent done) | **Built & confirmed** | Sprint 2 ×; **2026-07-24** Done tick (+ Snooze hide). See `docs/erd/bubble-ux-hybrid-plan-2026-07-24.md`. |
+| Bubble hybrid (collapse / icons) | **Built** | Confirm-then-collapse + icons; on-device matrix `docs/TEST_PLAN.md` 54–60. |
+| Beacon visual identity | **Built** | Amber `#FFB300` + frosted glass; `docs/erd/beacon-visual-identity-2026-07-24.md`. Visual QA 61–65 pending. |
 | Single-active-intent behavior | **Built & confirmed (by design)** | A fresh unlock while an intent is incomplete does not re-trigger capture — existing bubble persists until completed. Design a decision for Sprint 3+ features to respect, not a bug. |
 | Intent History (local log) | **Built (Sprint 3, branch not yet merged)** | `sqflite` `intent_log` — see §4.1. A minimal read-only history screen exists off `HomeScreen`; no dashboard/aggregate view yet. |
 | Cooldown / smart triage | **Built (Sprint 3, branch not yet merged)** | Cooldown + probability composite, not cooldown alone — see §4.3. |
@@ -246,7 +248,7 @@ This section is deliberately non-committal, because it isn't settled:
 
 | Decision | Status |
 |---|---|
-| **Store brand / naming** | Started as "IntentLock," working name shifted to "Why Did I Unlock." Neither is settled as the public store brand — both have real drawbacks (IntentLock reads as a security/MDM product; "Why Did I Unlock" is a strong tagline but long, hard to search, and semantically close to Intenty). Code package name (`why_did_i_unlock`) is unaffected either way — it doesn't need to match the eventual store brand. |
+| **Store brand / naming** | Started as "IntentLock," working name shifted to "Why Did I Unlock." Neither is settled as the public store brand — both have real drawbacks (IntentLock reads as a security/MDM product; "Why Did I Unlock" is a strong tagline but long, hard to search, and semantically close to Intenty). Code package name (`why_did_i_unlock`) is unaffected either way — it doesn't need to match the eventual store brand. **Beacon (2026-07-24) is the shipped visual system (amber + frosted glass), not a Play Store rename** — see `docs/erd/beacon-visual-identity-2026-07-24.md` / `CLAUDE.md` §12. |
 | **iOS strategy** | The floating-bubble mechanic cannot be replicated on iOS the way it works on Android — it would need to be rebuilt on Shortcuts + Focus Filters, effectively making it a separate product. Undecided whether to deprioritize, build separately, or drop. |
 | **Monetization model** | Freemium vs. donation-based vs. hybrid — see §8 in full. |
 | **Bubble: free or Pro** | See §8. Previously assumed Pro; now open. |

@@ -285,6 +285,16 @@ void main() {
       expect(unlocks.first.skipReason, SkipReason.quietHours);
     });
 
+    test('insertUnlock + recentUnlocks round-trips SkipReason.snoozeEnded', () async {
+      await store.insertUnlock(
+        unlockedAt: DateTime.utc(2026, 1, 1, 3, 0, 0),
+        promptShown: false,
+        skipReason: SkipReason.snoozeEnded,
+      );
+      final unlocks = await store.recentUnlocks();
+      expect(unlocks.first.skipReason, SkipReason.snoozeEnded);
+    });
+
     test('recentUnlocks respects the limit argument', () async {
       for (var i = 0; i < 5; i++) {
         await store.insertUnlock(unlockedAt: DateTime.utc(2026, 1, 1, 9 + i), promptShown: true);
@@ -738,6 +748,123 @@ void main() {
       expect(stats!.sampleCount, 3);
       expect(stats.medianSeconds, 20);
       expect(stats.meanSeconds, 40);
+    });
+
+    test('completionDurationStats ignores no_intent (Just Like That) zero-duration rows', () async {
+      final now = DateTime.now();
+      await store.insertOpenIntent(_event(clientId: 'real', declaredAt: now, completedAt: now));
+      await store.markIntentDone(clientId: 'real', completedAt: now.add(const Duration(seconds: 60)));
+
+      // Same window, status=done, but kind=no_intent with completed_at==declared_at
+      // (the real write shape). Pre-fix this dragged median/mean toward zero.
+      await store.insertEvent(_event(
+        clientId: 'jlt',
+        kind: IntentKind.noIntent,
+        source: null,
+        text: 'Just Like That',
+        declaredAt: now,
+        completedAt: now,
+      ));
+
+      final stats = await store.completionDurationStats(window: InsightWindow.today, now: now);
+      expect(stats, isNotNull);
+      expect(stats!.sampleCount, 1);
+      expect(stats.medianSeconds, 60);
+      expect(stats.meanSeconds, 60);
+    });
+  });
+
+  group('T17 exportRows', () {
+    test('emits every unlock, then orphan intents with blank unlock columns', () async {
+      final t1 = DateTime.utc(2026, 7, 24, 9, 0, 0);
+      final t2 = DateTime.utc(2026, 7, 24, 10, 0, 0);
+      final orphanAt = DateTime.utc(2026, 7, 24, 11, 0, 0);
+
+      // Orphan first: _resolveUnlockId returns null when no prompt_shown=1 row
+      // exists yet — the only public way to get unlock_id IS NULL without a
+      // raw SQL helper.
+      await store.insertEvent(_event(
+        clientId: 'orphan',
+        kind: IntentKind.noIntent,
+        source: null,
+        text: 'Just Like That',
+        declaredAt: orphanAt,
+        completedAt: orphanAt,
+      ));
+
+      await store.insertUnlock(unlockedAt: t1, promptShown: false, skipReason: SkipReason.cooldown);
+      await store.insertUnlock(unlockedAt: t2, promptShown: true);
+      await store.insertOpenIntent(_event(clientId: 'linked', declaredAt: t2, completedAt: t2, presetId: 1));
+      await store.markIntentDone(clientId: 'linked', completedAt: t2.add(const Duration(seconds: 30)));
+
+      final rows = await store.exportRows();
+      expect(rows, hasLength(3));
+
+      expect(rows[0].unlockedAt, t1);
+      expect(rows[0].promptShown, isFalse);
+      expect(rows[0].skipReason, 'cooldown');
+      expect(rows[0].intentText, isNull);
+
+      expect(rows[1].unlockedAt, t2);
+      expect(rows[1].promptShown, isTrue);
+      expect(rows[1].intentText, 'Payments');
+      expect(rows[1].intentKind, 'intent');
+      expect(rows[1].presetLabel, 'Payments'); // seeded default id 1
+      expect(rows[1].durationSeconds, 30);
+      expect(rows[1].status, 'done');
+
+      expect(rows[2].unlockedAt, isNull);
+      expect(rows[2].promptShown, isNull);
+      expect(rows[2].intentText, 'Just Like That');
+      expect(rows[2].intentKind, 'no_intent');
+      expect(rows[2].durationSeconds, 0);
+    });
+  });
+
+  group('T18 Your data helpers', () {
+    test('userDataCounts and oldestRecordAt over unlocks + intents', () async {
+      final older = DateTime.utc(2026, 1, 1);
+      final newer = DateTime.utc(2026, 6, 1);
+      await store.insertUnlock(unlockedAt: newer, promptShown: true);
+      await store.insertEvent(_event(clientId: 'e1', declaredAt: older, completedAt: older));
+
+      final counts = await store.userDataCounts();
+      expect(counts.unlockCount, 1);
+      expect(counts.intentCount, 1);
+      expect(counts.totalEvents, 2);
+      expect(await store.oldestRecordAt(), older);
+    });
+
+    test('deleteAllUserData clears logs but keeps presets', () async {
+      await store.insertUnlock(unlockedAt: DateTime.utc(2026, 7, 1), promptShown: true);
+      await store.insertEvent(_event(clientId: 'gone'));
+      final presetsBefore = await store.activePresets();
+      expect(presetsBefore, isNotEmpty);
+
+      await store.deleteAllUserData();
+
+      final counts = await store.userDataCounts();
+      expect(counts.unlockCount, 0);
+      expect(counts.intentCount, 0);
+      expect(await store.oldestRecordAt(), isNull);
+      expect(await store.activePresets(), hasLength(presetsBefore.length));
+    });
+
+    test('pruneOlderThan removes only rows before the cutoff', () async {
+      final old = DateTime.utc(2025, 1, 1);
+      final keep = DateTime.utc(2026, 7, 1);
+      await store.insertUnlock(unlockedAt: old, promptShown: true);
+      await store.insertUnlock(unlockedAt: keep, promptShown: true);
+      await store.insertEvent(_event(clientId: 'old', declaredAt: old, completedAt: old));
+      await store.insertEvent(_event(clientId: 'new', declaredAt: keep, completedAt: keep));
+
+      final deleted = await store.pruneOlderThan(DateTime.utc(2026, 1, 1));
+      expect(deleted, 2);
+
+      final counts = await store.userDataCounts();
+      expect(counts.unlockCount, 1);
+      expect(counts.intentCount, 1);
+      expect(await store.oldestRecordAt(), keep);
     });
   });
 }

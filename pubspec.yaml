@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 0.6.0+8
+version: 0.6.1+9
 
 environment:
   sdk: ^3.11.5
@@ -51,6 +51,11 @@ dependencies:
   # REQUEST_IGNORE_BATTERY_OPTIMIZATIONS manifest permission (added
   # alongside), which Play scrutinizes — see docs/PLAY_SUBMISSION.md.
   permission_handler: ^11.3.1
+  # Settings CSV export (T17): system share sheet. Scoped storage makes a
+  # plain Downloads write non-trivial — share_plus hands the temp file to
+  # the OS share sheet instead (docs/erd/sprint4-app-shell-plan §9,
+  # docs/DATA_MODEL.md §9). No network call by the app itself.
+  share_plus: ^10.1.4
 
 dev_dependencies:
   flutter_test:

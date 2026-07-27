@@ -1,22 +1,21 @@
 import 'dart:async';
 import 'dart:isolate';
 import 'dart:math';
-import 'dart:ui' show IsolateNameServer;
+import 'dart:ui' show IsolateNameServer, PlatformDispatcher;
 
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 
-import 'about_screen.dart';
 import 'app_settings.dart';
-import 'history_screen.dart';
+import 'beacon_theme.dart';
+import 'bubble_overlay_geometry.dart';
+import 'bubble_widget.dart';
+import 'home_screen.dart';
 import 'intent_store.dart';
-import 'manage_presets_screen.dart';
 import 'onboarding_screen.dart';
 import 'prompt_policy.dart';
-import 'settings_screen.dart';
-import 'status_screen.dart';
 
 /// A preset as rendered on the capture screen — just the fields
 /// [IntentCaptureScreen] needs (id + label), not the full `IntentPreset`
@@ -65,11 +64,11 @@ const String noIntentLabel = 'Just Like That';
 /// constant so raising or lowering the limit later is a one-line change.
 const int intentMaxInputLength = 100;
 
-/// Collapsed bubble (pill) size in logical pixels (dp). NOTE: the plugin's
-/// showOverlay() treats width/height as raw *device pixels*, not dp, so these
-/// are multiplied by devicePixelRatio at call time (see _submitIntent).
-const double _bubbleWidthDp = 200;
-const double _bubbleHeightDp = 56;
+/// Bubble window sizes (dp). `showOverlay` wants device px (`dp * dpr`);
+/// `resizeOverlay` wants dp — see docs/ARCHITECTURE.md §5.
+/// Spec: docs/erd/bubble-ux-hybrid-plan-2026-07-24.md §I.5.
+const Duration _bubbleAutoCollapseDelay = Duration(seconds: 2);
+const Duration _bubbleSnoozeDuration = Duration(minutes: 10);
 
 /// Platform channel shared by native → Dart unlock/lock notifications.
 /// The handler is installed by [backgroundMain] (the persistent background
@@ -200,6 +199,13 @@ void _relayDeclaredIntent(IntentEvent event) {
   _sendToBackground({...event.toMessage(), 'type': 'declare'});
 }
 
+/// Tells background the overlay is now a bubble (before close+reopen), so
+/// [onOrientationChanged] does not reopen a full-screen capture mid-declare.
+/// Sent even for manual sessions (which skip the declare DB write).
+void _relayBubbleShowing({required String text, required double dpr}) {
+  _sendToBackground({'type': 'bubbleShowing', 'text': text, 'dpr': dpr});
+}
+
 /// Relayed from `_dismissBubble` at DISMISSAL time — marks the existing
 /// `open` row `done` (via `IntentStore.markIntentDone`). Deliberately a
 /// minimal [IntentDismissal], not a full event — see that class's doc.
@@ -234,8 +240,29 @@ void _relayNoIntent(IntentEvent event) {
 /// just logs and returns: the overlay's own request is what matters for
 /// retry, not this side re-attempting delivery.
 Future<void> _replyActivePresetsToOverlay(IntentStore store) async {
-  final presets = await _withTimeout('IntentStore.activePresets()', store.activePresets());
-  final payload = (presets ?? const [])
+  // Post-reboot first unlock often opens the store mid-unlock while CE
+  // storage is still warming; concurrent insertUnlock + activePresets can
+  // both hit `_withTimeout`. Retry briefly before giving up.
+  List<IntentPreset>? presets;
+  const maxAttempts = 3;
+  const retryDelay = Duration(milliseconds: 500);
+  for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+    presets = await _withTimeout('IntentStore.activePresets()', store.activePresets());
+    if (presets != null) break;
+    if (attempt < maxAttempts) await Future.delayed(retryDelay);
+  }
+  // `_withTimeout` returns null on hang/timeout. Treating that as `[]` and
+  // still sending would permanently poison the overlay's `_presets` cache
+  // with an empty list (observed post-reboot first unlock 2026-07-24: store
+  // had just recovered from ENOKEY, `insertUnlock` and `activePresets` both
+  // timed out, overlay logged "Sent 0" / "_presets now has 0 entries").
+  // A real "user disabled every preset" still returns an empty *list*, not
+  // null — only abort the send on failure so a later retry can land real data.
+  if (presets == null) {
+    debugPrint('⚠️ activePresets unavailable after $maxAttempts attempts — not overwriting overlay presets with []');
+    return;
+  }
+  final payload = presets
       .map((p) => {'id': p.id, 'label': p.label})
       .toList();
   final port = IsolateNameServer.lookupPortByName(_overlayConfigPortName);
@@ -243,8 +270,15 @@ Future<void> _replyActivePresetsToOverlay(IntentStore store) async {
     debugPrint('⚠️ Could not find overlay-config reply port — overlay not ready yet? Presets dropped');
     return;
   }
-  port.send({'presets': payload});
-  debugPrint('📤 Sent ${payload.length} preset(s) to overlay');
+  // `manual` rides along on this same message rather than a separate one —
+  // see [_currentPresentIsManual]'s doc for why a second message on this
+  // port would be actively dangerous (it would be misread as an empty
+  // preset list). Reflects whichever capture presentation is CURRENTLY
+  // showing (or was most recently shown), which is exactly what the overlay
+  // needs to decide whether to relay this session's answer — see
+  // docs/BACKLOG.md's [P1] "manual trigger arms real cooldown" entry.
+  port.send({'presets': payload, 'manual': _currentPresentIsManual});
+  debugPrint('📤 Sent ${payload.length} preset(s) to overlay (manual=$_currentPresentIsManual)');
 }
 
 /// Name for a second same-process port: the overlay isolate signals THIS
@@ -266,8 +300,293 @@ const String _overlayClosedPortName = 'com.whydidiunlock.overlay_closed_port';
 /// (the only place that reads it, in `_showCaptureScreen`); set true
 /// synchronously BEFORE the `showOverlay()` await (not after) to close the
 /// race where a second `onUnlock` could arrive while the first is still
-/// awaiting that call.
+/// awaiting that call. Also cleared by `_presentCaptureOverlay` if
+/// `showOverlay()` itself times out — without that reset the flag stays
+/// stuck `true` forever and every later unlock silently skips as
+/// `overlay_active` (force-stop was the only recovery before this guard).
 bool _overlayIsActive = false;
+
+/// What the live overlay window is showing. Needed so
+/// [onOrientationChanged] can reopen capture vs bubble correctly — the
+/// background isolate cannot read [OverlayRoot]'s `_mode`.
+enum _ActiveOverlayKind { none, capture, bubble }
+
+_ActiveOverlayKind _activeOverlayKind = _ActiveOverlayKind.none;
+
+/// Last bubble text / dpr for orientation reopen (and snooze-adjacent paths).
+String _bubbleOverlayText = '';
+double _bubbleOverlayDpr = 1.0;
+
+/// Guards against overlapping orientation reopens (and vs mid-declare show).
+bool _orientationRepositioning = false;
+
+/// Last true display size from native unlock / [onOrientationChanged].
+/// Used for drag-end snap — overlay [PlatformDispatcher.displays] often stays
+/// on the *portrait* width after rotate, so left dock computed as ~359dp and
+/// the bubble sits mid-landscape (TEST_PLAN 60 / on-device logs 2026-07-24).
+int _lastNativeWidthPx = 0;
+int _lastNativeHeightPx = 0;
+
+/// In-memory snooze session (background isolate). Intent row stays `open`;
+/// no schema write. See docs/erd/bubble-ux-hybrid-plan-2026-07-24.md §II.
+bool _snoozeActive = false;
+_SnoozeSession? _snoozeSession;
+Timer? _snoozeTimer;
+
+class _SnoozeSession {
+  final String clientId;
+  final String text;
+  final String source;
+  final DateTime declaredAt;
+  final int? presetId;
+  final bool isManual;
+  final double dpr;
+
+  const _SnoozeSession({
+    required this.clientId,
+    required this.text,
+    required this.source,
+    required this.declaredAt,
+    required this.presetId,
+    required this.isManual,
+    required this.dpr,
+  });
+}
+
+void _clearSnoozeState() {
+  _snoozeTimer?.cancel();
+  _snoozeTimer = null;
+  _snoozeActive = false;
+  _snoozeSession = null;
+}
+
+void _armSnoozeTimer() {
+  _snoozeTimer?.cancel();
+  _snoozeTimer = Timer(_bubbleSnoozeDuration, () {
+    debugPrint('😴 Snooze timer elapsed — restoring collapsed bubble');
+    unawaited(_restoreSnoozedBubble());
+  });
+}
+
+/// Re-shows the bubble at collapsed size after snooze ends (timer or unlock).
+Future<void> _restoreSnoozedBubble() async {
+  final session = _snoozeSession;
+  if (!_snoozeActive || session == null) return;
+  _snoozeTimer?.cancel();
+  _snoozeTimer = null;
+  _snoozeActive = false;
+  _snoozeSession = null;
+
+  if (_overlayIsActive) {
+    debugPrint('😴 Snooze restore skipped — overlay already active');
+    return;
+  }
+
+  final dpr = session.dpr <= 0 ? 1.0 : session.dpr;
+  final side = (bubbleCollapsedDp * dpr).round();
+  _overlayIsActive = true;
+  final shown = await _withTimeout(
+    'showOverlay(snooze restore)',
+    FlutterOverlayWindow.showOverlay(
+      height: side,
+      width: side,
+      alignment: OverlayAlignment.centerRight,
+      flag: OverlayFlag.defaultFlag,
+      overlayTitle: 'Why Did I Unlock?',
+      overlayContent: session.text,
+      enableDrag: true,
+      // Plugin PositionGravity.auto uses a screen size captured once at
+      // show — stale after rotate, so it "snaps" to mid-landscape. We snap
+      // ourselves via [_snapBubbleToEdge] when the overlay asks.
+      positionGravity: PositionGravity.none,
+    ).then((_) => true),
+  );
+  if (shown == null) {
+    _overlayIsActive = false;
+    _activeOverlayKind = _ActiveOverlayKind.none;
+    debugPrint('⏱️ Snooze restore showOverlay timed out');
+    return;
+  }
+  _activeOverlayKind = _ActiveOverlayKind.bubble;
+  _bubbleOverlayText = session.text;
+  _bubbleOverlayDpr = dpr;
+  debugPrint('😴 Snooze restore: collapsed bubble shown (${side}x$side)');
+}
+
+/// Native [onOrientationChanged] → one close+reopen. Never query display size
+/// from Dart isolates (overlay view ≠ phone; background is headless).
+Future<void> _onOrientationChanged(int widthPx, int heightPx) async {
+  _lastNativeWidthPx = widthPx;
+  _lastNativeHeightPx = heightPx;
+  if (!_overlayIsActive) {
+    debugPrint('📐 Orientation ${widthPx}x$heightPx — no overlay, ignore');
+    return;
+  }
+  if (_orientationRepositioning) {
+    debugPrint('📐 Orientation — already repositioning, ignore');
+    return;
+  }
+  _orientationRepositioning = true;
+  try {
+    switch (_activeOverlayKind) {
+      case _ActiveOverlayKind.capture:
+        await _repositionCaptureForOrientation(widthPx, heightPx);
+      case _ActiveOverlayKind.bubble:
+        await _repositionBubbleForOrientation();
+      case _ActiveOverlayKind.none:
+        debugPrint('📐 Orientation — active flag set but kind=none, ignore');
+    }
+  } finally {
+    _orientationRepositioning = false;
+  }
+}
+
+Future<void> _repositionCaptureForOrientation(int widthPx, int heightPx) async {
+  debugPrint('📐 Orientation: one capture reopen ${widthPx}x$heightPx');
+  await FlutterOverlayWindow.closeOverlay();
+  final shown = await _withTimeout(
+    'showOverlay(orientation capture)',
+    FlutterOverlayWindow.showOverlay(
+      height: heightPx,
+      width: widthPx,
+      alignment: OverlayAlignment.topLeft,
+      flag: OverlayFlag.focusPointer,
+      startPosition: const OverlayPosition(0, 0),
+      overlayTitle: 'Why Did I Unlock?',
+      overlayContent: 'Declare your intent',
+    ).then((_) => true),
+  );
+  if (shown == null) {
+    _overlayIsActive = false;
+    _activeOverlayKind = _ActiveOverlayKind.none;
+    debugPrint('⏱️ Orientation capture showOverlay timed out');
+  }
+}
+
+Future<void> _repositionBubbleForOrientation() async {
+  final dpr = _bubbleOverlayDpr <= 0 ? 1.0 : _bubbleOverlayDpr;
+  final side = (bubbleCollapsedDp * dpr).round();
+  debugPrint(
+    '📐 Orientation: one bubble reopen at right-center '
+    '(${side}x$side, text len=${_bubbleOverlayText.length})',
+  );
+  await FlutterOverlayWindow.closeOverlay();
+  final shown = await _withTimeout(
+    'showOverlay(orientation bubble)',
+    FlutterOverlayWindow.showOverlay(
+      height: side,
+      width: side,
+      alignment: OverlayAlignment.centerRight,
+      flag: OverlayFlag.defaultFlag,
+      overlayTitle: 'Why Did I Unlock?',
+      overlayContent: _bubbleOverlayText,
+      enableDrag: true,
+      positionGravity: PositionGravity.none,
+    ).then((_) => true),
+  );
+  if (shown == null) {
+    _overlayIsActive = false;
+    _activeOverlayKind = _ActiveOverlayKind.none;
+    debugPrint('⏱️ Orientation bubble showOverlay timed out');
+    return;
+  }
+  _notifyOverlayBubbleRepositioned();
+}
+
+void _notifyOverlayBubbleRepositioned() {
+  final port = IsolateNameServer.lookupPortByName(_overlayConfigPortName);
+  if (port == null) return;
+  port.send({'type': 'bubbleRepositioned'});
+}
+
+void _notifyOverlayDockSide({required bool dockLeft}) {
+  final port = IsolateNameServer.lookupPortByName(_overlayConfigPortName);
+  if (port == null) return;
+  port.send({'type': 'bubbleDocked', 'dockLeft': dockLeft});
+}
+
+/// Drag-end edge snap only (not rotation — see [_onOrientationChanged]).
+///
+/// Coordinates assume [OverlayAlignment.centerRight] gravity: `x == 0` is the
+/// right edge; larger `x` shifts left. Left dock = `screenWidthDp - widthDp`.
+///
+/// Prefer [nativeWidthPx]/[nativeHeightPx] (from unlock/orientation) over any
+/// overlay-reported logical size — the overlay engine's display metrics lag
+/// after rotate and produced mid-screen "left" docks at x≈359 on landscape.
+Future<void> _snapBubbleToEdge({
+  required double widthDp,
+  required double heightDp,
+  required double screenWidthDp,
+  required double screenHeightDp,
+  required double dpr,
+  bool? dockLeft,
+  double? detectWidthDp,
+  bool resetY = false,
+}) async {
+  if (widthDp <= 0) return;
+  if (_orientationRepositioning) return;
+
+  var screenW = screenWidthDp;
+  var screenH = screenHeightDp;
+  if (_lastNativeWidthPx > 0 && _lastNativeHeightPx > 0 && dpr > 0) {
+    screenW = _lastNativeWidthPx / dpr;
+    screenH = _lastNativeHeightPx / dpr;
+  }
+  if (screenW <= 0) return;
+
+  try {
+    final pos = await _withTimeout(
+      'getOverlayPosition()',
+      FlutterOverlayWindow.getOverlayPosition(),
+    );
+    if (pos == null) return;
+    final probe = detectWidthDp ?? widthDp;
+    final left = dockLeft ??
+        bubbleDockedLeft(x: pos.x, widthDp: probe, screenWidthDp: screenW);
+    final x = bubbleSnapX(
+      dockLeft: left,
+      widthDp: widthDp,
+      screenWidthDp: screenW,
+    );
+    final y = bubbleClampY(
+      y: pos.y,
+      heightDp: heightDp,
+      screenHeightDp: screenH,
+      resetY: resetY,
+    );
+    final moved = await _withTimeout(
+      'moveOverlay()',
+      FlutterOverlayWindow.moveOverlay(OverlayPosition(x, y)),
+    );
+    if (moved == true) {
+      debugPrint(
+        '📌 Bubble snapped to ${left ? 'left' : 'right'} '
+        '(x=$x y=$y, screen=${screenW.toStringAsFixed(1)}x${screenH.toStringAsFixed(1)})',
+      );
+      _notifyOverlayDockSide(dockLeft: left);
+    }
+  } catch (e) {
+    debugPrint('⚠️ Bubble snap failed: $e');
+  }
+}
+
+/// True while (or most recently while) the CURRENTLY showing capture screen
+/// was reached via the manual Status-screen trigger ([_showCaptureScreenManually])
+/// rather than a real unlock ([_showCaptureScreen]). Set synchronously inside
+/// [_presentCaptureOverlay] — mirrors [_overlayIsActive]'s "before the await,
+/// not after" rule for the same reason: a fresh presentation must see the
+/// correct value the instant its own preset-push message goes out, not
+/// whatever the previous session left behind.
+///
+/// This is how the overlay isolate — which cannot tell a real unlock from a
+/// manual trigger on its own; both take the exact same `showOverlay()` code
+/// path — learns which kind of session it's currently running, so it can
+/// skip persisting an answer that came from a tester tapping "Show me the
+/// prompt now" rather than an actual unlock. See docs/BACKLOG.md's [P1]
+/// "manual trigger arms real cooldown" entry for the bug this fixes, and
+/// [_replyActivePresetsToOverlay] for how this value reaches the overlay
+/// (piggybacked on the same preset-push/reply message, not a second one).
+bool _currentPresentIsManual = false;
 
 /// Called from the overlay isolate right after a REAL `closeOverlay()` (i.e.
 /// dismiss or "Just Like That" — not the close+reopen resize in
@@ -405,6 +724,7 @@ void backgroundMain() {
   IsolateNameServer.registerPortWithName(overlayClosedPort.sendPort, _overlayClosedPortName);
   overlayClosedPort.listen((_) {
     _overlayIsActive = false;
+    _activeOverlayKind = _ActiveOverlayKind.none;
     debugPrint('🔵 Overlay closed signal received');
   });
 
@@ -434,6 +754,8 @@ void backgroundMain() {
       final args = (call.arguments as Map?) ?? const {};
       final width = (args['width'] as num?)?.toInt() ?? 0;
       final height = (args['height'] as num?)?.toInt() ?? 0;
+      _lastNativeWidthPx = width;
+      _lastNativeHeightPx = height;
       await _showCaptureScreen(width, height);
     } else if (call.method == 'onLock') {
       debugPrint('🔒 LOCK EVENT RECEIVED at ${DateTime.now()}');
@@ -444,6 +766,12 @@ void backgroundMain() {
       if (_overlayIsActive) {
         _signalLockToOverlay();
       }
+    } else if (call.method == 'onOrientationChanged') {
+      final args = (call.arguments as Map?) ?? const {};
+      final width = (args['width'] as num?)?.toInt() ?? 0;
+      final height = (args['height'] as num?)?.toInt() ?? 0;
+      debugPrint('📐 ORIENTATION EVENT ${width}x$height at ${DateTime.now()}');
+      await _onOrientationChanged(width, height);
     }
   });
 
@@ -464,6 +792,60 @@ void backgroundMain() {
   intentWritePort.listen((message) async {
     try {
       final map = message as Map;
+      // Snooze is UI-only — must not depend on IntentStore being open
+      // (direct-boot CE storage races would otherwise drop the snooze arm).
+      if (map['type'] == 'snoozeStart') {
+        final dpr = (map['dpr'] as num?)?.toDouble() ?? 1.0;
+        _snoozeSession = _SnoozeSession(
+          clientId: map['clientId'] as String? ?? '',
+          text: map['text'] as String? ?? '',
+          source: map['source'] as String? ?? 'custom',
+          declaredAt: DateTime.fromMillisecondsSinceEpoch(
+            (map['declaredAt'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
+          ),
+          presetId: (map['presetId'] as num?)?.toInt(),
+          isManual: map['manual'] as bool? ?? false,
+          dpr: dpr,
+        );
+        _snoozeActive = true;
+        _overlayIsActive = false;
+        _activeOverlayKind = _ActiveOverlayKind.none;
+        _armSnoozeTimer();
+        debugPrint('😴 Snooze armed for ${_bubbleSnoozeDuration.inMinutes}m');
+        return;
+      }
+      // Bubble visible (declare UI path) — set kind before DB so orientation
+      // mid-declare cannot reopen a capture screen.
+      if (map['type'] == 'bubbleShowing') {
+        _activeOverlayKind = _ActiveOverlayKind.bubble;
+        _bubbleOverlayText = map['text'] as String? ?? _bubbleOverlayText;
+        _bubbleOverlayDpr = (map['dpr'] as num?)?.toDouble() ?? _bubbleOverlayDpr;
+        debugPrint('🫧 Overlay kind=bubble (showing)');
+        return;
+      }
+      // Edge snap — no DB. See [_snapBubbleToEdge].
+      if (map['type'] == 'bubbleSnap') {
+        final widthDp = (map['widthDp'] as num?)?.toDouble() ?? bubbleCollapsedDp;
+        final heightDp =
+            (map['heightDp'] as num?)?.toDouble() ?? bubbleExpandedHeightDp;
+        final screenWidthDp = (map['screenWidthDp'] as num?)?.toDouble() ?? 0;
+        final screenHeightDp = (map['screenHeightDp'] as num?)?.toDouble() ?? 0;
+        final dpr = (map['dpr'] as num?)?.toDouble() ?? 1.0;
+        final detectWidthDp = (map['detectWidthDp'] as num?)?.toDouble();
+        final dockLeft = map['dockLeft'] as bool?;
+        final resetY = map['resetY'] as bool? ?? false;
+        unawaited(_snapBubbleToEdge(
+          widthDp: widthDp,
+          heightDp: heightDp,
+          screenWidthDp: screenWidthDp,
+          screenHeightDp: screenHeightDp,
+          dpr: dpr,
+          dockLeft: dockLeft,
+          detectWidthDp: detectWidthDp,
+          resetY: resetY,
+        ));
+        return;
+      }
       final store = await _ensureIntentStore();
       if (store == null) {
         // Gated per docs/PLAY_SUBMISSION.md §3b.1 — see _sendToBackground's
@@ -473,14 +855,17 @@ void backgroundMain() {
       }
       switch (map['type']) {
         case 'declare':
+          _clearSnoozeState();
           final event = IntentEvent.fromMessage(map);
           await store.insertOpenIntent(event);
           if (kDebugMode) debugPrint('📂 Intent opened: text="${event.text}"');
         case 'dismiss':
+          _clearSnoozeState();
           final dismissal = IntentDismissal.fromMessage(map);
           await store.markIntentDone(clientId: dismissal.clientId, completedAt: dismissal.completedAt);
           debugPrint('✅ Intent marked done: clientId=${dismissal.clientId}');
         case 'noIntent':
+          _clearSnoozeState();
           final event = IntentEvent.fromMessage(map);
           await store.insertEvent(event);
           if (kDebugMode) debugPrint('💾 Stored no-intent event: text="${event.text}"');
@@ -590,10 +975,11 @@ Future<IntentStore>? _intentStoreOpening;
 void overlayMain() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(
-    const MaterialApp(
+    MaterialApp(
       debugShowCheckedModeBanner: false,
       color: Colors.transparent,
-      home: OverlayRoot(),
+      theme: beaconDarkTheme(),
+      home: const OverlayRoot(),
     ),
   );
 }
@@ -669,6 +1055,15 @@ Future<void> _logUnlock({
 /// need the store.
 Future<void> _showCaptureScreen(int screenWidth, int screenHeight) async {
   final unlockedAt = DateTime.now();
+
+  // Unlock ends snooze early — before triage / capture (R5b).
+  if (_snoozeActive) {
+    debugPrint('😴 Unlock ends snooze — restoring bubble');
+    await _restoreSnoozedBubble();
+    await _logUnlock(unlockedAt: unlockedAt, promptShown: false, skipReason: SkipReason.snoozeEnded);
+    return;
+  }
+
   final settings = await _appSettings.loadSnapshot();
 
   // Gate only the prompt — monitoring/logging below still runs either way
@@ -751,34 +1146,14 @@ Future<void> _showCaptureScreen(int screenWidth, int screenHeight) async {
   }
   debugPrint('🎲 Triage: prompting (cooldown clear, probability hit p=${settings.probability})');
 
-  // Size the window from the native-provided true display size (raw device
-  // pixels — exactly what showOverlay() expects; see CLAUDE.md §5). We do NOT
-  // use PlatformDispatcher here because this runs in the headless background
-  // engine, which has no display surface and reports 0x0. We also avoid the
-  // plugin's WindowSize.fullCover, whose native screenHeight() under-covers
-  // the bottom on this device.
-  //
-  // alignment MUST be topLeft, not center. Confirmed via `dumpsys window
-  // windows`: with center gravity, Android fits the window's "parent" frame
-  // to exclude the nav bar (height 2337 = 2400 - 63px nav bar), then CENTERS
-  // our (taller) requested window inside that shrunk region — shifting it up
-  // ~31px (half the nav-bar inset) so the bottom lands 31px short of the true
-  // display bottom. That's the exposed-bottom bug; it's a gravity/fit
-  // artifact, not a size or position value problem (both were already
-  // correct). topLeft anchors to the true origin instead of centering within
-  // an inset-shrunk region.
-  //
-  // startPosition (0,0): pins the window to the true top-left; without it the
-  // plugin's default position shifts the window up by the status-bar height.
-  //
-  // Set BEFORE the await, not after: closes the race where a second
-  // onUnlock could arrive (a fresh async call — Dart doesn't serialize
-  // re-entrant handler invocations) while this call is still awaiting
-  // showOverlay(), and both would otherwise see _overlayIsActive == false.
-  await _presentCaptureOverlay(screenWidth, screenHeight);
+  final shown = await _presentCaptureOverlay(screenWidth, screenHeight, manual: false);
   // Logged AFTER showOverlay(), not before: the prompt reaching the screen is
   // the time-critical part (CLAUDE.md §8's ~500ms target); this write is not
-  // (docs/DATA_MODEL.md §3c).
+  // (docs/DATA_MODEL.md §3c). A timed-out showOverlay must NOT count as shown.
+  if (!shown) {
+    await _logUnlock(unlockedAt: unlockedAt, promptShown: false, skipReason: SkipReason.pluginTimeout);
+    return;
+  }
   await _logUnlock(unlockedAt: unlockedAt, promptShown: true);
 }
 
@@ -790,7 +1165,22 @@ Future<void> _showCaptureScreen(int screenWidth, int screenHeight) async {
 /// constraints, just reached by a different route into this isolate. Split
 /// out specifically so there is exactly one place that can get the window
 /// flags/alignment wrong, not two copies that could drift.
-Future<void> _presentCaptureOverlay(int screenWidth, int screenHeight) async {
+///
+/// [manual] distinguishes the two callers for [_currentPresentIsManual] (see
+/// that variable's doc) — `false` from the real-unlock path, `true` from the
+/// manual Status-screen trigger. Required, not defaulted, so a future third
+/// caller can't accidentally inherit the wrong value by omission.
+///
+/// Returns `true` if `showOverlay()` completed; `false` if it timed out (in
+/// which case [_overlayIsActive] is reset so the next unlock can try again —
+/// without that reset, a hung `showOverlay()` would leave the flag stuck
+/// `true` forever and every later unlock would silently skip as
+/// `overlay_active`).
+Future<bool> _presentCaptureOverlay(int screenWidth, int screenHeight, {required bool manual}) async {
+  // Set BEFORE showOverlay(), same reasoning as _overlayIsActive just below:
+  // the preset/manual push that follows showOverlay() must see the value for
+  // THIS presentation, not a stale one from whatever was shown previously.
+  _currentPresentIsManual = manual;
   // Size the window from the true display size in raw device pixels — exactly
   // what showOverlay() expects; see CLAUDE.md §5. We do NOT use
   // PlatformDispatcher here because this runs in the headless background
@@ -818,16 +1208,59 @@ Future<void> _presentCaptureOverlay(int screenWidth, int screenHeight) async {
   // call is still awaiting showOverlay(), and both would otherwise see
   // _overlayIsActive == false.
   _overlayIsActive = true;
-  await FlutterOverlayWindow.showOverlay(
-    height: screenHeight,
-    width: screenWidth,
-    alignment: OverlayAlignment.topLeft,
-    flag: OverlayFlag.focusPointer,
-    startPosition: const OverlayPosition(0, 0),
-    overlayTitle: 'Why Did I Unlock?',
-    overlayContent: 'Declare your intent',
+  _activeOverlayKind = _ActiveOverlayKind.capture;
+  // showOverlay() was the one plugin call on this path NOT under
+  // `_withTimeout`. Same defect class as isActive()/shareData()
+  // (ARCHITECTURE.md §5 — shared native messenger hijack): if the await
+  // never returns, `_overlayIsActive` stays true and every later unlock
+  // silently skips. Force-stop "fixed" that by resetting process state.
+  // `.then((_) => true)` makes the void Future observable as null-on-timeout.
+  final shown = await _withTimeout(
+    'showOverlay()',
+    FlutterOverlayWindow.showOverlay(
+      height: screenHeight,
+      width: screenWidth,
+      alignment: OverlayAlignment.topLeft,
+      flag: OverlayFlag.focusPointer,
+      startPosition: const OverlayPosition(0, 0),
+      overlayTitle: 'Why Did I Unlock?',
+      overlayContent: 'Declare your intent',
+    ).then((_) => true),
   );
+  if (shown == null) {
+    _overlayIsActive = false;
+    _activeOverlayKind = _ActiveOverlayKind.none;
+    debugPrint('⏱️ showOverlay() timed out — resetting _overlayIsActive');
+    return false;
+  }
   debugPrint('🟣 showOverlay called (${screenWidth}x$screenHeight capture screen)');
+
+  // Push a fresh preset list on EVERY capture present — real unlock or
+  // manual trigger, cold overlay-engine start or a long-cached engine being
+  // reused. Fixes docs/BACKLOG.md's [P0] "overlay presets go stale for an
+  // entire session" bug: the overlay isolate only ever refreshed its
+  // `_presets` in `initState` and after a bubble dismiss, so a session that
+  // went through "Just Like That" answers (no dismiss) or simply never
+  // showed a bubble again after a Manage Options edit kept serving a stale
+  // list — sometimes for the engine's entire remaining lifetime, until a
+  // reboot. See docs/ARCHITECTURE.md §8.1 for the general "cached engine
+  // holding stale state" pattern this fits.
+  //
+  // Fire-and-forget and best-effort, not awaited before returning: this must
+  // not sit on the unlock hot path (CLAUDE.md §8's ~500ms target — the same
+  // reason `_logUnlock` above is also un-awaited-relative-to-the-caller by
+  // running after `showOverlay()`, not before it). On a truly cold overlay
+  // engine start, `_overlayConfigPortName` may not be registered yet (the
+  // overlay's own `initState` hasn't run far enough) — that's fine, because
+  // the overlay's own `_requestPresets()` pull (with its bounded retry,
+  // called from `initState`) is what reliably lands presets in that case.
+  // This push exists specifically for every OTHER present, where the port
+  // is already live from a previous show and there is no reason to wait for
+  // the overlay to notice anything changed.
+  unawaited(_ensureIntentStore().then((store) {
+    if (store != null) _replyActivePresetsToOverlay(store);
+  }));
+  return true;
 }
 
 /// The manual-trigger counterpart to [_showCaptureScreen] — reached via
@@ -859,7 +1292,11 @@ Future<void> _showCaptureScreenManually(int screenWidth, int screenHeight) async
     debugPrint('🧪 Manual prompt trigger: overlay already active, skipping');
     return;
   }
-  await _presentCaptureOverlay(screenWidth, screenHeight);
+  final shown = await _presentCaptureOverlay(screenWidth, screenHeight, manual: true);
+  if (!shown) {
+    debugPrint('🧪 Manual prompt trigger: showOverlay timed out');
+    return;
+  }
   debugPrint('🧪 Manual prompt shown (Status screen trigger)');
 }
 
@@ -868,8 +1305,9 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
-      home: AppLauncher(),
+    return MaterialApp(
+      theme: beaconDarkTheme(),
+      home: const AppLauncher(),
     );
   }
 }
@@ -905,8 +1343,18 @@ class _AppLauncherState extends State<AppLauncher> {
   }
 
   Future<void> _load() async {
-    final completed = await _appSettings.onboardingCompleted();
-    if (mounted) setState(() => _onboardingCompleted = completed);
+    // Same defensive timeout posture as the unlock path's plugin/DB calls:
+    // SharedPreferencesAsync has no timeout of its own, and a hung read here
+    // leaves AppLauncher on the blank black Scaffold forever (null
+    // `_onboardingCompleted`) until force-stop. On timeout, degrade to
+    // "already onboarded" so a returning user reaches Home instead of
+    // re-seeing onboarding or staying stuck — wrong less often than a
+    // permanent blank screen after reboot.
+    final completed = await _withTimeout(
+      'AppSettings.onboardingCompleted()',
+      _appSettings.onboardingCompleted(),
+    );
+    if (mounted) setState(() => _onboardingCompleted = completed ?? true);
   }
 
   @override
@@ -924,100 +1372,9 @@ class _AppLauncherState extends State<AppLauncher> {
   }
 }
 
-class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
-
-  @override
-  State<HomeScreen> createState() => _HomeScreenState();
-}
-
-class _HomeScreenState extends State<HomeScreen> {
-
-  // NOTE: unlock/lock handling deliberately does NOT live here anymore. It runs
-  // in the persistent background engine (see backgroundMain) so it survives the
-  // app being swiped out of Recents. This screen is a launcher: the prompts
-  // on/off toggle plus navigation into the other screens. The overlay
-  // permission is no longer requested cold from here — `OnboardingScreen`'s
-  // permission step (via `AppLauncher`) now explains it before asking, and
-  // `StatusScreen` covers re-requesting it later if it's revoked.
-
-  bool _promptsEnabled = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadPromptsEnabled();
-  }
-
-  Future<void> _loadPromptsEnabled() async {
-    final enabled = await _appSettings.promptsEnabled();
-    if (mounted) setState(() => _promptsEnabled = enabled);
-  }
-
-  Future<void> _togglePrompts(bool value) async {
-    setState(() => _promptsEnabled = value);
-    await _appSettings.setPromptsEnabled(value);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text(
-              'Why Did I Unlock?',
-              style: TextStyle(color: Colors.white, fontSize: 24),
-            ),
-            const SizedBox(height: 32),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text(
-                  'Unlock prompts',
-                  style: TextStyle(color: Colors.white70, fontSize: 16),
-                ),
-                Switch(
-                  value: _promptsEnabled,
-                  onChanged: _togglePrompts,
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            _HomeLink(label: 'Settings', screenBuilder: (_) => const SettingsScreen()),
-            _HomeLink(label: 'View history', screenBuilder: (_) => const HistoryScreen()),
-            _HomeLink(label: 'Manage options', screenBuilder: (_) => const ManagePresetsScreen()),
-            _HomeLink(label: 'Status & troubleshooting', screenBuilder: (_) => const StatusScreen()),
-            _HomeLink(label: 'About', screenBuilder: (_) => const AboutScreen()),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// One `HomeScreen` navigation entry — factored out once a fourth identical
-/// TextButton-that-pushes-a-route was about to be added.
-class _HomeLink extends StatelessWidget {
-  final String label;
-  final WidgetBuilder screenBuilder;
-
-  const _HomeLink({required this.label, required this.screenBuilder});
-
-  @override
-  Widget build(BuildContext context) {
-    return TextButton(
-      onPressed: () {
-        Navigator.of(context).push(MaterialPageRoute(builder: screenBuilder));
-      },
-      child: Text(label, style: const TextStyle(color: Colors.white70, fontSize: 16)),
-    );
-  }
-}
-
 enum _OverlayMode { capture, bubble }
+
+enum _BubbleUiMode { expanded, collapsed }
 
 class OverlayRoot extends StatefulWidget {
   const OverlayRoot({super.key});
@@ -1028,10 +1385,19 @@ class OverlayRoot extends StatefulWidget {
 
 class _OverlayRootState extends State<OverlayRoot> {
   _OverlayMode _mode = _OverlayMode.capture;
+  _BubbleUiMode _bubbleUiMode = _BubbleUiMode.expanded;
   String _intentText = '';
   String _intentSource = '';
   DateTime? _declaredAt;
   String? _intentClientId;
+  int? _intentPresetId;
+  Timer? _autoCollapseTimer;
+  Timer? _snapDebounce;
+
+  /// Which horizontal edge the bubble last occupied (from background dock
+  /// notify after drag snap, or left/right show). Expand uses matching
+  /// [OverlayAlignment] so we never `resizeOverlay` under stale `x`.
+  bool _dockedLeft = false;
 
   /// Presets to render on the capture screen — empty until the first reply
   /// arrives. An empty list is a deliberately valid, already-tested state
@@ -1040,6 +1406,30 @@ class _OverlayRootState extends State<OverlayRoot> {
   /// first reply landing degrades to exactly that same state rather than
   /// needing a separate loading UI — no spinner, no flash of stale data.
   List<CapturePreset> _presets = [];
+
+  /// Whether at least one config reply has arrived from the background
+  /// isolate this engine lifetime. Distinguishes "still waiting" from
+  /// "received an intentionally empty active-preset list" so
+  /// [_requestPresets] can keep retrying when background aborts a reply
+  /// (e.g. `activePresets` timed out and correctly refused to send `[]`).
+  bool _presetsConfigReceived = false;
+
+  /// Completer for the in-flight [_requestPresets] wait — completed by the
+  /// config-port listener when any reply lands so we don't stack concurrent
+  /// `activePresets` queries on a still-warming post-reboot store.
+  Completer<void>? _presetsReplyCompleter;
+
+  /// Whether the capture screen CURRENTLY showing (or most recently shown)
+  /// was reached via the manual Status-screen trigger rather than a real
+  /// unlock — see [_currentPresentIsManual]'s doc in the background isolate
+  /// for the full story. Read at answer time ([_submitIntent]/
+  /// [_submitNoIntent]/[_dismissBubble]) to skip persisting a test tap as if
+  /// it were a real declared/no-intent event (docs/BACKLOG.md's [P1] "manual
+  /// trigger arms real cooldown"). Defaults `false` (real) so a session
+  /// answered before the very first config reply lands — the same
+  /// brief-race window already accepted for [_presets] — errs toward NOT
+  /// silently dropping a real write, rather than toward under-persisting.
+  bool _sessionIsManual = false;
 
   @override
   void initState() {
@@ -1055,14 +1445,42 @@ class _OverlayRootState extends State<OverlayRoot> {
     configPort.listen((message) {
       debugPrint('📥 Overlay: received config reply: $message');
       final map = message as Map;
+      final msgType = map['type'] as String?;
+      if (msgType == 'bubbleRepositioned') {
+        // Background did one orientation close+reopen at right-center.
+        if (mounted) {
+          setState(() {
+            _bubbleUiMode = _BubbleUiMode.collapsed;
+            _dockedLeft = false;
+          });
+          _cancelAutoCollapse();
+        }
+        return;
+      }
+      if (msgType == 'bubbleDocked') {
+        _dockedLeft = map['dockLeft'] as bool? ?? false;
+        return;
+      }
       final rawPresets = (map['presets'] as List?) ?? const [];
+      // `manual` rides the same message as presets — see
+      // _replyActivePresetsToOverlay's doc for why this is one message, not
+      // two (a second, presets-less message on this port would otherwise be
+      // misread as "zero active presets").
+      final rawManual = map['manual'] as bool? ?? false;
       if (mounted) {
         setState(() {
+          _presetsConfigReceived = true;
           _presets = rawPresets
               .map((p) => CapturePreset(id: (p as Map)['id'] as int, label: p['label'] as String))
               .toList();
+          _sessionIsManual = rawManual;
         });
-        debugPrint('📥 Overlay: _presets now has ${_presets.length} entr${_presets.length == 1 ? 'y' : 'ies'}');
+        final pending = _presetsReplyCompleter;
+        if (pending != null && !pending.isCompleted) pending.complete();
+        debugPrint(
+          '📥 Overlay: _presets now has ${_presets.length} entr${_presets.length == 1 ? 'y' : 'ies'}, '
+          'manual=$_sessionIsManual',
+        );
       } else {
         debugPrint('⚠️ Overlay: config reply arrived but widget was unmounted, dropped');
       }
@@ -1079,6 +1497,115 @@ class _OverlayRootState extends State<OverlayRoot> {
     final lockSignalPort = ReceivePort();
     IsolateNameServer.registerPortWithName(lockSignalPort.sendPort, _lockSignalPortName);
     lockSignalPort.listen((_) => _handleLockSignal());
+  }
+
+  @override
+  void dispose() {
+    _autoCollapseTimer?.cancel();
+    _snapDebounce?.cancel();
+    super.dispose();
+  }
+
+  Size? _screenSizeDp() {
+    final displays = PlatformDispatcher.instance.displays;
+    if (displays.isNotEmpty) {
+      final d = displays.first;
+      if (d.size.width > 0 && d.devicePixelRatio > 0) {
+        return Size(
+          d.size.width / d.devicePixelRatio,
+          d.size.height / d.devicePixelRatio,
+        );
+      }
+    }
+    final views = PlatformDispatcher.instance.views;
+    if (views.isEmpty) return null;
+    final view = views.first;
+    final size = view.display.size;
+    if (size.width <= 0 || size.height <= 0 || view.devicePixelRatio <= 0) {
+      return null;
+    }
+    return Size(
+      size.width / view.devicePixelRatio,
+      size.height / view.devicePixelRatio,
+    );
+  }
+
+  double _currentBubbleWidthDp() {
+    return _bubbleUiMode == _BubbleUiMode.expanded
+        ? expandedBubbleWidthDp(_intentText)
+        : bubbleCollapsedDp;
+  }
+
+  /// Drag-end edge snap via background [moveOverlay]. Rotation is native →
+  /// background close+reopen — do not snap from overlay metrics.
+  void _requestBubbleSnap({
+    required double widthDp,
+    bool? dockLeft,
+    bool resetY = false,
+  }) {
+    final screen = _screenSizeDp();
+    final dpr = MediaQuery.of(context).devicePixelRatio;
+    if (dockLeft != null) _dockedLeft = dockLeft;
+    _sendToBackground({
+      'type': 'bubbleSnap',
+      'widthDp': widthDp,
+      'heightDp': bubbleExpandedHeightDp,
+      'screenWidthDp': screen?.width ?? 0,
+      'screenHeightDp': screen?.height ?? 0,
+      'dpr': dpr,
+      'dockLeft': ?dockLeft,
+      'resetY': resetY,
+    });
+  }
+
+  void _scheduleSnapAfterInteraction() {
+    _snapDebounce?.cancel();
+    _snapDebounce = Timer(const Duration(milliseconds: 120), () {
+      if (!mounted || _mode != _OverlayMode.bubble) return;
+      _requestBubbleSnap(widthDp: _currentBubbleWidthDp());
+    });
+  }
+
+  Future<void> _showBubbleWindow({
+    required bool expanded,
+    bool? dockLeft,
+  }) async {
+    final left = dockLeft ?? _dockedLeft;
+    final dpr = MediaQuery.of(context).devicePixelRatio;
+    final widthDp = expanded ? expandedBubbleWidthDp(_intentText) : bubbleCollapsedDp;
+    final heightDp = bubbleExpandedHeightDp;
+    await FlutterOverlayWindow.closeOverlay();
+    await FlutterOverlayWindow.showOverlay(
+      height: (heightDp * dpr).round(),
+      width: (widthDp * dpr).round(),
+      // Always centerRight so drag-snap [moveOverlay] coords stay consistent
+      // (x=0 = right). Left dock is a single post-show move with resetY.
+      alignment: OverlayAlignment.centerRight,
+      flag: OverlayFlag.defaultFlag,
+      overlayTitle: 'Why Did I Unlock?',
+      overlayContent: _intentText,
+      enableDrag: true,
+      positionGravity: PositionGravity.none,
+    );
+    if (left) {
+      _requestBubbleSnap(widthDp: widthDp, dockLeft: true, resetY: true);
+    } else {
+      _dockedLeft = false;
+    }
+  }
+
+  void _cancelAutoCollapse() {
+    _autoCollapseTimer?.cancel();
+    _autoCollapseTimer = null;
+  }
+
+  void _scheduleAutoCollapse() {
+    _cancelAutoCollapse();
+    _autoCollapseTimer = Timer(_bubbleAutoCollapseDelay, () {
+      if (!mounted || _mode != _OverlayMode.bubble) return;
+      if (_bubbleUiMode == _BubbleUiMode.collapsed) return;
+      unawaited(_setBubbleExpanded(false));
+    });
   }
 
   /// Reacts to a lock signal relayed from the background isolate (see
@@ -1128,17 +1655,62 @@ class _OverlayRootState extends State<OverlayRoot> {
   /// engine's lifetime from `initState`, so a lost first attempt meant no
   /// presets for every unlock reusing that same engine afterward — not a
   /// one-off flake, a standing failure until the process itself restarted.
-  /// ~2s total retry window (5 × 400ms) — long enough to ride out a startup
-  /// race, short enough to never be mistaken for a hang.
+  ///
+  /// Also keeps requesting until a config *reply* arrives (or attempts are
+  /// exhausted): a successful *send* alone is not enough — background may
+  /// receive `requestPresets` and then abort without replying when
+  /// `activePresets()` times out (see [_replyActivePresetsToOverlay]). The
+  /// older "return on first successful send" left the overlay stuck with
+  /// `_presets = []` for the rest of that engine's life.
+  ///
+  /// Waits on a Completer between attempts (not a fixed short delay) so we
+  /// don't stack five concurrent `activePresets` queries against a
+  /// still-warming post-reboot DB. ~6s per attempt × 5 covers the
+  /// background-side timeout+retry window without looking like a hang.
   Future<void> _requestPresets() async {
     const maxAttempts = 5;
-    const retryDelay = Duration(milliseconds: 400);
+    const replyWait = Duration(seconds: 6);
+    const portRetryDelay = Duration(milliseconds: 400);
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (_presetsConfigReceived) return;
       debugPrint('📮 Overlay: sending requestPresets (attempt $attempt/$maxAttempts)');
-      if (_sendToBackground({'type': 'requestPresets'})) return;
-      if (attempt < maxAttempts) await Future.delayed(retryDelay);
+      if (!_sendToBackground({'type': 'requestPresets'})) {
+        if (attempt < maxAttempts) await Future.delayed(portRetryDelay);
+        continue;
+      }
+      final completer = Completer<void>();
+      _presetsReplyCompleter = completer;
+      try {
+        await completer.future.timeout(replyWait);
+        return;
+      } on TimeoutException {
+        debugPrint('📮 Overlay: no config reply within ${replyWait.inSeconds}s (attempt $attempt/$maxAttempts)');
+      }
     }
-    debugPrint('⚠️ Overlay: giving up on requestPresets after $maxAttempts attempts — background engine unreachable');
+    if (!_presetsConfigReceived) {
+      debugPrint('⚠️ Overlay: giving up on requestPresets after $maxAttempts attempts — no config reply');
+    }
+  }
+
+  Future<void> _setBubbleExpanded(bool expanded) async {
+    if (_mode != _OverlayMode.bubble) return;
+    final next = expanded ? _BubbleUiMode.expanded : _BubbleUiMode.collapsed;
+    if (_bubbleUiMode == next) return;
+    _snapDebounce?.cancel();
+    final dockLeft = _dockedLeft;
+    if (mounted) setState(() => _bubbleUiMode = next);
+    if (expanded) {
+      _scheduleAutoCollapse();
+    } else {
+      _cancelAutoCollapse();
+    }
+    // Always close+reopen with left/right alignment — never resizeOverlay
+    // alone (keeps WindowManager x fixed under centerRight → off-screen pill).
+    await _showBubbleWindow(expanded: expanded, dockLeft: dockLeft);
+  }
+
+  Future<void> _toggleBubbleExpand() async {
+    await _setBubbleExpanded(_bubbleUiMode != _BubbleUiMode.expanded);
   }
 
   Future<void> _submitIntent(String text, String source, {int? presetId}) async {
@@ -1164,8 +1736,16 @@ class _OverlayRootState extends State<OverlayRoot> {
       _intentSource = source;
       _declaredAt = declaredAt;
       _intentClientId = clientId;
+      _intentPresetId = presetId;
       _mode = _OverlayMode.bubble;
+      _bubbleUiMode = _BubbleUiMode.expanded;
+      _dockedLeft = false;
     });
+
+    // Tell background kind=bubble BEFORE close+reopen so orientation cannot
+    // reopen a capture screen mid-declare (manual sessions skip DB declare).
+    final dpr = MediaQuery.of(context).devicePixelRatio;
+    _relayBubbleShowing(text: trimmed, dpr: dpr);
 
     // Relayed at DECLARATION time, not dismissal — this is what lets the
     // intent survive a process death before the bubble is ever dismissed
@@ -1179,19 +1759,27 @@ class _OverlayRootState extends State<OverlayRoot> {
     // requestPresets reply landed — a null presetId degrades to grouping by
     // the text snapshot alone, exactly the pre-T11 behaviour, never an error
     // (docs/DATA_MODEL.md §4).
-    _relayDeclaredIntent(IntentEvent(
-      clientId: clientId,
-      kind: IntentKind.intent,
-      source: _intentSourceFromString(source),
-      text: trimmed,
-      declaredAt: declaredAt,
-      completedAt: declaredAt,
-      presetId: presetId,
-    ));
-
-    // Read density BEFORE the awaits (avoids using context across an async gap).
-    // showOverlay() sizes the window in raw device pixels, so convert dp -> px.
-    final dpr = MediaQuery.of(context).devicePixelRatio;
+    //
+    // Skipped entirely for a manual (Status-screen "show me the prompt now")
+    // session — see docs/BACKLOG.md's [P1] "manual trigger arms real
+    // cooldown": persisting a test tap's answer poisoned TimeCooldownPolicy's
+    // MAX(completed_at) read for the very next REAL unlock. The bubble/UI
+    // transition below still happens unconditionally — only the DB write is
+    // gated, so a manual session still looks and behaves like a real one to
+    // whoever is testing it.
+    if (!_sessionIsManual) {
+      _relayDeclaredIntent(IntentEvent(
+        clientId: clientId,
+        kind: IntentKind.intent,
+        source: _intentSourceFromString(source),
+        text: trimmed,
+        declaredAt: declaredAt,
+        completedAt: declaredAt,
+        presetId: presetId,
+      ));
+    } else {
+      debugPrint('🧪 Manual session — skipping intent_log declare write');
+    }
 
     // The capture screen's window is created focusable (needed for the text
     // field's keyboard). Flipping to a non-focusable flag in place via
@@ -1200,16 +1788,8 @@ class _OverlayRootState extends State<OverlayRoot> {
     // back-gesture in every other app. Closing and reopening a fresh window
     // at bubble size with defaultFlag (non-focusable from birth) avoids that
     // — the Flutter engine and this widget's state survive the recreation.
-    await FlutterOverlayWindow.closeOverlay();
-    await FlutterOverlayWindow.showOverlay(
-      height: (_bubbleHeightDp * dpr).round(),
-      width: (_bubbleWidthDp * dpr).round(),
-      alignment: OverlayAlignment.center,
-      flag: OverlayFlag.defaultFlag,
-      overlayTitle: 'Why Did I Unlock?',
-      overlayContent: trimmed,
-      enableDrag: true,
-    );
+    await _showBubbleWindow(expanded: true, dockLeft: false);
+    _scheduleAutoCollapse();
   }
 
   /// Honest "no real reason" path — logs the habitual/purposeless unlock
@@ -1226,25 +1806,65 @@ class _OverlayRootState extends State<OverlayRoot> {
     // _intentWritePortName for why this replaced shareData(). Atomic — no
     // separate declare/dismiss step, since there's no bubble to later
     // dismiss (see _relayNoIntent's doc).
-    final event = IntentEvent(
-      clientId: _generateClientId(now),
-      kind: IntentKind.noIntent,
-      source: null,
-      text: noIntentLabel,
-      declaredAt: now,
-      completedAt: now,
-    );
-    _relayNoIntent(event);
+    //
+    // Skipped for a manual session — see the matching comment in
+    // _submitIntent and docs/BACKLOG.md's [P1] entry. This was in fact the
+    // exact repro that surfaced the bug: a manual trigger answered with
+    // "Just Like That" wrote a real completed_at that armed cooldown for the
+    // next real unlock.
+    if (!_sessionIsManual) {
+      final event = IntentEvent(
+        clientId: _generateClientId(now),
+        kind: IntentKind.noIntent,
+        source: null,
+        text: noIntentLabel,
+        declaredAt: now,
+        completedAt: now,
+      );
+      _relayNoIntent(event);
+    } else {
+      debugPrint('🧪 Manual session — skipping intent_log no-intent write');
+    }
 
     await FlutterOverlayWindow.closeOverlay();
     // Tells the background isolate this is a REAL close (not the
     // close+reopen resize in _submitIntent) — see _overlayIsActive.
     _signalOverlayClosed();
+    // Defensive reset for whatever session comes next, in case its own
+    // config reply is somehow delayed past the moment it's answered — see
+    // _sessionIsManual's doc for why `false` (real) is the safer default to
+    // fall back to than leaving this session's `true` lingering.
+    _sessionIsManual = false;
+  }
+
+  Future<void> _snoozeBubble() async {
+    if (_mode != _OverlayMode.bubble) return;
+    _cancelAutoCollapse();
+    final dpr = MediaQuery.of(context).devicePixelRatio;
+    // Leave widget state in bubble+collapsed so a restore showOverlay paints
+    // the chat-head, not a stale expanded pill or capture screen.
+    if (mounted) {
+      setState(() => _bubbleUiMode = _BubbleUiMode.collapsed);
+    }
+    _sendToBackground({
+      'type': 'snoozeStart',
+      'clientId': _intentClientId,
+      'text': _intentText,
+      'source': _intentSource,
+      'declaredAt': _declaredAt?.millisecondsSinceEpoch,
+      'presetId': _intentPresetId,
+      'manual': _sessionIsManual,
+      'dpr': dpr,
+    });
+    await FlutterOverlayWindow.closeOverlay();
+    _signalOverlayClosed();
+    debugPrint('😴 Overlay: snoozed "$_intentText"');
   }
 
   Future<void> _dismissBubble() async {
     final dismissedAt = DateTime.now();
     final activeFor = _declaredAt == null ? null : dismissedAt.difference(_declaredAt!);
+    _cancelAutoCollapse();
     // Gated per docs/PLAY_SUBMISSION.md §3b.1 — see _submitIntent's doc.
     if (kDebugMode) {
       debugPrint(
@@ -1259,7 +1879,18 @@ class _OverlayRootState extends State<OverlayRoot> {
     // IntentDismissal's doc and docs/DATA_MODEL.md §4. _intentClientId is
     // always non-null here: this is only reachable from bubble mode, which
     // _submitIntent only enters after setting it.
-    _relayDismissal(IntentDismissal(clientId: _intentClientId!, completedAt: dismissedAt));
+    //
+    // Skipped for a manual session — see the matching comment in
+    // _submitIntent and docs/BACKLOG.md's [P1] entry. _submitIntent already
+    // skipped the declare write for this same session, so there is no open
+    // row for this clientId to mark done anyway; relaying the dismissal here
+    // would just be a wasted round-trip (or, on `markIntentDone`'s
+    // no-matching-row path, silently do nothing) — either way, skip it.
+    if (!_sessionIsManual) {
+      _relayDismissal(IntentDismissal(clientId: _intentClientId!, completedAt: dismissedAt));
+    } else {
+      debugPrint('🧪 Manual session — skipping intent_log dismiss write');
+    }
 
     await FlutterOverlayWindow.closeOverlay();
     // Tells the background isolate this is a REAL close (not the
@@ -1279,6 +1910,12 @@ class _OverlayRootState extends State<OverlayRoot> {
         _intentSource = '';
         _declaredAt = null;
         _intentClientId = null;
+        _intentPresetId = null;
+        _bubbleUiMode = _BubbleUiMode.expanded;
+        _dockedLeft = false;
+        // Defensive reset, same reasoning as _submitNoIntent's — see
+        // _sessionIsManual's doc.
+        _sessionIsManual = false;
       });
     }
     // Refresh presets for the NEXT capture screen — see _requestPresets's
@@ -1299,7 +1936,18 @@ class _OverlayRootState extends State<OverlayRoot> {
           outstandingIntents: const [],
         );
       case _OverlayMode.bubble:
-        return BubbleWidget(intentText: _intentText, onClose: _dismissBubble);
+        return Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerUp: (_) => _scheduleSnapAfterInteraction(),
+          onPointerCancel: (_) => _scheduleSnapAfterInteraction(),
+          child: BubbleWidget(
+            intentText: _intentText,
+            expanded: _bubbleUiMode == _BubbleUiMode.expanded,
+            onDone: () => unawaited(_dismissBubble()),
+            onSnooze: () => unawaited(_snoozeBubble()),
+            onToggleExpand: () => unawaited(_toggleBubbleExpand()),
+          ),
+        );
     }
   }
 }
@@ -1474,7 +2122,7 @@ class _PresetButton extends StatelessWidget {
       onPressed: onTap,
       style: OutlinedButton.styleFrom(
         foregroundColor: Colors.white,
-        side: const BorderSide(color: Colors.white54),
+        side: const BorderSide(color: BeaconColors.amber, width: 1.25),
         shape: const StadiumBorder(),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       ),
@@ -1510,54 +2158,5 @@ class _NoIntentButton extends StatelessWidget {
   }
 }
 
-class BubbleWidget extends StatelessWidget {
-  final String intentText;
-  final VoidCallback onClose;
 
-  const BubbleWidget({
-    super.key,
-    required this.intentText,
-    required this.onClose,
-  });
 
-  @override
-  Widget build(BuildContext context) {
-    // The bubble fills its (pill-sized) window; a fixed border radius of half
-    // the pill height gives a stadium shape without hardcoding a width that
-    // could sub-pixel-overflow after the dp->px rounding in _submitIntent.
-    return Material(
-      color: Colors.transparent,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.deepPurple,
-          borderRadius: BorderRadius.circular(_bubbleHeightDp / 2),
-        ),
-        padding: const EdgeInsets.only(left: 16, right: 6),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                intentText,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white, fontSize: 14),
-              ),
-            ),
-            GestureDetector(
-              onTap: onClose,
-              child: Container(
-                width: 32,
-                height: 32,
-                decoration: const BoxDecoration(
-                  color: Colors.black26,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.close, size: 16, color: Colors.white),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

@@ -15,7 +15,7 @@ exists to make the "why" durable.
 |---|---|---|---|---|---|
 | **Main UI** | `MainActivity` (`FlutterActivity`) | `main()` → `MyApp` → `HomeScreen` | Ephemeral — dies when the Activity/task is destroyed (incl. swipe-away) | Yes (auto) | Show the settings/permission screen. Request the overlay permission (needs an Activity). Nothing else. |
 | **Background** | `UnlockListenerService` (foreground service) | `backgroundMain()` | **Persistent** — lives as long as the foreground service (survives task removal) | Yes (auto) | The "brain": receive unlock/lock events, run prompt triage, call `showOverlay()`. Also the sole writer of the Sprint 3 `intent_log` DB — opens it once, subscribes `overlayListener`, inserts on every relayed event. |
-| **Overlay** | `OverlayService` (from `flutter_overlay_window`) | `overlayMain()` → `OverlayRoot` | Cached; created lazily on first `showOverlay`, persists for the process | **No** (only the overlay plugin's own channel) | Render the capture screen and the bubble. Runs the capture→bubble state machine. |
+| **Overlay** | `OverlayService` (from `flutter_overlay_window`) | `overlayMain()` → `OverlayRoot` | Cached; created lazily on first `showOverlay`, persists for the process | **No** (only the overlay plugin's own channel) | Render the capture screen and the hybrid bubble (Beacon frosted glass). Runs the capture→expanded→collapsed state machine. Theme: `beaconDarkTheme()` (same tokens as main UI). |
 
 ### Why three, and why this split
 
@@ -51,10 +51,17 @@ exists to make the "why" durable.
   its ongoing notification, creates/caches the **background engine** running
   `backgroundMain` and wires the `com.whydidiunlock/unlock` method channel to it, then
   runtime-registers `UnlockReceiver`. `START_STICKY` (OS restarts it if killed).
+  Also overrides `onConfigurationChanged` (2026-07-24): reads real display size via
+  `ScreenMetrics` and invokes `onOrientationChanged {width,height}` on the same
+  channel so the background engine can reopen the overlay at the correct size after
+  rotate (overlay Dart metrics are the *window*, not the phone — see §5).
+- **`ScreenMetrics`** (added 2026-07-24) — shared Kotlin helper for true display size
+  (`getRealMetrics`). Used by `UnlockReceiver` (unlock) and `UnlockListenerService`
+  (orientation) so both paths share one definition of “screen”.
 - **`UnlockReceiver`** — runtime-registered (NOT in the manifest — `ACTION_USER_PRESENT`
   can only be registered at runtime). Listens for `ACTION_USER_PRESENT` (unlock) and
   `ACTION_SCREEN_OFF` (lock). On unlock it computes the **true display size natively**
-  (`getRealMetrics`) and passes it to Dart, because the headless background engine can't
+  via `ScreenMetrics` and passes it to Dart, because the headless background engine can't
   read display metrics itself.
 - **`BootReceiver`** — manifest-registered, `exported="true"` (safe: `BOOT_COMPLETED` is
   a protected broadcast that can't be spoofed). Restarts the service after reboot. Also
@@ -75,8 +82,9 @@ exists to make the "why" durable.
 ## 3. Channels
 
 - **`com.whydidiunlock/unlock`** (native → background engine):
-  `onUnlock` with `{width, height}` args (native-provided display size), and `onLock`
-  (no args). Handler installed by `backgroundMain`.
+  `onUnlock` with `{width, height}` args (native-provided display size), `onLock`
+  (no args), and `onOrientationChanged` with `{width, height}` (same size source as
+  unlock — `ScreenMetrics`). Handler installed by `backgroundMain`.
 - **`flutter_overlay_window` internal channels** (`x-slayer/*`): `showOverlay`,
   `closeOverlay`, `resizeOverlay`, `updateFlag` — window lifecycle only. The plugin's own
   `shareData`/`overlayListener` bridge is **not used** — see below.
@@ -161,16 +169,23 @@ generates `clientId` ONCE (reused for both widget state and the relay below — 
 the id generator twice would mint two different ids for the same intent) → **relays a
 `declare` message immediately**, before the window resize (this is what makes the
 declaration durable even if the process dies before the bubble is ever dismissed — see
-docs/DATA_MODEL.md §4) → `closeOverlay()` then `showOverlay()` at bubble (pill) size
-with `defaultFlag`. The close+reopen is required because flipping the window flag in
-place doesn't release input focus (would block touches in other apps). Screen/pill
-sizing is in **raw device pixels** (the plugin quirk); the pill dp is × `devicePixelRatio`.
+docs/DATA_MODEL.md §4) → `closeOverlay()` then `showOverlay()` at **expanded** bubble
+size (icon + text + Done + Snooze; `PositionGravity.none`), then auto-collapses ~2s to a
+52dp chat-head via `resizeOverlay` (dp) or close+reopen fallback. Capture→bubble still
+needs close+reopen because flipping the window flag in place doesn't release input focus.
+Spec: `docs/erd/bubble-ux-hybrid-plan-2026-07-24.md`. Screen sizing for `showOverlay` is
+**raw device pixels**; `resizeOverlay` uses **dp**.
 
-**Dismiss bubble:** `OverlayRoot._dismissBubble` → relays a minimal `dismiss` message
+**Done (tick):** `OverlayRoot._dismissBubble` → relays a minimal `dismiss` message
 (just `clientId` + `completedAt` — the declared fields were already persisted by the
 `declare` relay above, see `IntentDismissal`'s doc) → `closeOverlay()` then resets its
 own state back to capture mode (the overlay engine is cached and its widget state
 survives `closeOverlay`, so an explicit reset is required or a stale bubble reappears).
+
+**Snooze:** overlay sends `snoozeStart` (no `intent_log` write), closes the window;
+background arms a 10-min timer. Unlock or timer → collapsed `showOverlay` (unlock logs
+`skip_reason=snooze_ended`). Process death while snoozed → abandoned sweep.
+
 `_submitNoIntent` (the "Just Like That" path) relays a single `noIntent` message (kind,
 source=null, text, matching declared/completed timestamps) before its own
 `closeOverlay()` — atomic, no separate declare/dismiss step, since there's no bubble to
@@ -229,6 +244,16 @@ background engine.
 - `showOverlay()` sizes the window in **raw device pixels, not dp** (`resizeOverlay` DOES
   use dp — inconsistent). We pass native `getRealMetrics` px for the capture screen and
   `dp × devicePixelRatio` for the bubble.
+- **Overlay-engine `View.physicalSize` is the overlay window, not the phone display.**
+  When the bubble is 52dp, metrics report ~136×136 px. Do **not** use that (or overlay
+  `didChangeMetrics`) for rotation. Unlock **and orientation** sizes come from native
+  `ScreenMetrics` → `UnlockListenerService` → `onUnlock` / `onOrientationChanged`
+  `{width,height}` on `com.whydidiunlock/unlock`. Background does **one**
+  `closeOverlay`+`showOverlay` (capture full-screen or bubble right-center).
+- **`PositionGravity.auto` is unsafe after rotation** (plugin caches `szWindow` once).
+  Bubble shows use `PositionGravity.none`. Drag-end edge snap is background
+  `moveOverlay` only; expand/collapse is close+reopen (not `resizeOverlay` alone —
+  under `centerRight`, resize keeps `x` fixed and left-docked expand went off-screen).
 - A **full-cover overlay window consumes ALL touches** regardless of flag; only a *small*
   window passes outside touches through. So the bubble must be a small window; only the
   capture screen is full-screen.
@@ -276,6 +301,24 @@ background engine.
   signal sent from the overlay isolate (`_overlayClosedPortName`, an `IsolateNameServer`
   port, same mechanism as the write relay) right after a real `closeOverlay()`. No
   plugin native call in the hot path at all.
+- **`FlutterOverlayWindow.showOverlay()` must also be under `_withTimeout`, and a
+  timeout must reset `_overlayIsActive`.** Unlike `isActive()` (abandoned entirely),
+  we still have to call `showOverlay()` — but it is the same plugin / shared-messenger
+  defect class. If the await never returns after `_overlayIsActive = true` is set,
+  every later unlock silently skips as `overlay_active` with no error, until
+  force-stop resets the process. Guard: `_presentCaptureOverlay` wraps
+  `showOverlay()` in `_withTimeout`; on timeout it sets `_overlayIsActive = false`
+  and logs `⏱️ showOverlay() timed out — resetting _overlayIsActive` so the next
+  unlock can try again. The unlock is logged as `SkipReason.pluginTimeout`.
+  Full investigation (plus the related “empty presets after first post-reboot unlock”
+  poison path): `docs/debug/rca-post-reboot-overlay-stall-presets-2026-07-24.md`.
+- **Never send a timed-out `activePresets()` as `[]` to the overlay.** `_withTimeout`
+  returns `null` on hang; coercing that to an empty list and `port.send`-ing it
+  permanently poisons the overlay's cached `_presets` (first unlock after CE
+  storage unlocks is the hot path — store just opened, `insertUnlock` and
+  `activePresets` can both time out). `_replyActivePresetsToOverlay` must abort
+  the send on `null` and retry; the overlay must wait for a real config *reply*,
+  not only a successful request *send*. See the same RCA doc.
 - **sqflite's `singleInstance: true` (the default) shares ONE native connection across
   every `open()` call for the same file path, even across different Dart isolates.**
   Sprint 3's History screen (main UI engine) and the background writer both open
@@ -414,3 +457,20 @@ should always start by grepping for 🔓 (did the unlock even reach `backgroundM
 then 🎲 (was it skipped, and why?), then 🟣 (did `showOverlay()` actually get called?)
 — that ordering isolates which of the three layers (native → background → overlay)
 the problem is in before touching any code.
+
+Also useful after 2026-07-24: **📐** = orientation event / one bubble reopen (native
+`onOrientationChanged` path). If rotation “loses” the bubble, look for 📐 first; a
+flood of 📌 snap lines without a single reopen usually means an old overlay-metrics
+path or mid-landscape snap using stale portrait width.
+
+## 9. Beacon visual system (UI tokens)
+
+Accent is **Beacon amber `#FFB300`**, not Material purple. Tokens + `beaconDarkTheme()`
+live in `lib/beacon_theme.dart`; both the main UI and overlay engines apply that theme.
+Bubble chrome (frosted glass, amber border/glow) is in `lib/bubble_widget.dart`.
+
+Durable token/spec (redundant with code on purpose): `docs/erd/beacon-visual-identity-2026-07-24.md`.
+Hybrid bubble UX (states/actions): `docs/erd/bubble-ux-hybrid-plan-2026-07-24.md`.
+
+Do **not** call `sqflite` from the overlay isolate — Beacon is theme-only and does not
+change the three-engine plugin constraints in §1.

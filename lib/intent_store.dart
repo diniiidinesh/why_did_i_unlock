@@ -62,6 +62,10 @@ enum SkipReason {
   invalidScreenSize,
   pluginTimeout,
   quietHours,
+
+  /// Unlock while a bubble was snoozed — restored the bubble instead of a
+  /// capture prompt (`docs/erd/bubble-ux-hybrid-plan-2026-07-24.md` R5b).
+  snoozeEnded,
 }
 
 String _kindToDb(IntentKind kind) => kind == IntentKind.intent ? 'intent' : 'no_intent';
@@ -99,6 +103,7 @@ String _skipReasonToDb(SkipReason reason) => switch (reason) {
       SkipReason.invalidScreenSize => 'invalid_screen_size',
       SkipReason.pluginTimeout => 'plugin_timeout',
       SkipReason.quietHours => 'quiet_hours',
+      SkipReason.snoozeEnded => 'snooze_ended',
     };
 
 SkipReason? _skipReasonFromDb(String? value) => switch (value) {
@@ -110,6 +115,7 @@ SkipReason? _skipReasonFromDb(String? value) => switch (value) {
       'invalid_screen_size' => SkipReason.invalidScreenSize,
       'plugin_timeout' => SkipReason.pluginTimeout,
       'quiet_hours' => SkipReason.quietHours,
+      'snooze_ended' => SkipReason.snoozeEnded,
       _ => null,
     };
 
@@ -783,10 +789,13 @@ class IntentStore {
   }
 
   /// Completion-duration stats (median headline, mean secondary — see
-  /// docs/DATA_MODEL.md §6/§9: "time to complete a task" really means "time
-  /// until the bubble was dismissed") over `status='done'` rows DECLARED
-  /// within [window]. Null on zero matching rows — a real "not enough data
-  /// yet" state, never a fabricated zero duration.
+  /// docs/DATA_MODEL.md §6 and plan §6: Home labels this "Time to mark done"
+  /// because it is time-until-dismissed, not task completion) over
+  /// `kind='intent' AND status='done'`
+  /// rows DECLARED within [window]. `no_intent` ("Just Like That") rows are
+  /// always written with `completed_at == declared_at` (zero duration) and
+  /// must not drag median/mean down. Null on zero matching rows — a real
+  /// "not enough data yet" state, never a fabricated zero duration.
   ///
   /// Median is computed exactly per docs/DATA_MODEL.md §8's decision: COUNT
   /// first, then a single `ORDER BY ... LIMIT 1 OFFSET n ~/ 2` query — one
@@ -805,9 +814,9 @@ class IntentStore {
       '''
       SELECT COUNT(*) AS n, AVG(completed_at - declared_at) AS mean_ms
       FROM intent_log
-      WHERE status = ? AND declared_at >= ?
+      WHERE kind = ? AND status = ? AND declared_at >= ?
       ''',
-      [_statusToDb(IntentStatus.done), since.millisecondsSinceEpoch],
+      [_kindToDb(IntentKind.intent), _statusToDb(IntentStatus.done), since.millisecondsSinceEpoch],
     );
     final n = Sqflite.firstIntValue(countRows) ?? 0;
     if (n == 0) return null;
@@ -817,11 +826,11 @@ class IntentStore {
       '''
       SELECT (completed_at - declared_at) AS duration_ms
       FROM intent_log
-      WHERE status = ? AND declared_at >= ?
+      WHERE kind = ? AND status = ? AND declared_at >= ?
       ORDER BY duration_ms
       LIMIT 1 OFFSET ?
       ''',
-      [_statusToDb(IntentStatus.done), since.millisecondsSinceEpoch, n ~/ 2],
+      [_kindToDb(IntentKind.intent), _statusToDb(IntentStatus.done), since.millisecondsSinceEpoch, n ~/ 2],
     );
     final medianMs = (medianRows.first['duration_ms'] as num).toDouble();
 
@@ -1001,4 +1010,190 @@ class IntentStore {
     }
     await batch.commit(noResult: true);
   }
+
+  // ---------------------------------------------------------------------
+  // Export (T17) — lossless CSV source rows. See docs/DATA_MODEL.md §9.
+  // ---------------------------------------------------------------------
+
+  /// Every unlock (LEFT JOIN intent + preset for outcome columns), then any
+  /// orphan intents (`unlock_id IS NULL`) with unlock columns blank — nothing
+  /// is silently dropped. Order: unlocks by `unlocked_at` ascending, then
+  /// orphans by `declared_at` ascending. Soft-deleted presets still resolve
+  /// by `preset_id` for `preset_label` (docs/DATA_MODEL.md §4).
+  Future<List<ExportRow>> exportRows() async {
+    final unlockRows = await _db.rawQuery('''
+      SELECT
+        u.unlocked_at AS unlocked_at,
+        u.prompt_shown AS prompt_shown,
+        u.skip_reason AS skip_reason,
+        i.text AS intent_text,
+        i.kind AS intent_kind,
+        i.source AS intent_source,
+        p.label AS preset_label,
+        i.preset_id AS preset_id,
+        i.declared_at AS declared_at,
+        i.completed_at AS completed_at,
+        i.status AS status
+      FROM unlock_log u
+      LEFT JOIN intent_log i ON i.unlock_id = u.id
+      LEFT JOIN intent_preset p ON p.id = i.preset_id
+      ORDER BY u.unlocked_at ASC, u.id ASC
+    ''');
+
+    final orphanRows = await _db.rawQuery('''
+      SELECT
+        NULL AS unlocked_at,
+        NULL AS prompt_shown,
+        NULL AS skip_reason,
+        i.text AS intent_text,
+        i.kind AS intent_kind,
+        i.source AS intent_source,
+        p.label AS preset_label,
+        i.preset_id AS preset_id,
+        i.declared_at AS declared_at,
+        i.completed_at AS completed_at,
+        i.status AS status
+      FROM intent_log i
+      LEFT JOIN intent_preset p ON p.id = i.preset_id
+      WHERE i.unlock_id IS NULL
+      ORDER BY i.declared_at ASC, i.id ASC
+    ''');
+
+    return [...unlockRows, ...orphanRows].map(_exportRowFromQuery).toList();
+  }
+
+  static ExportRow _exportRowFromQuery(Map<String, Object?> row) {
+    final unlockedMs = row['unlocked_at'] as int?;
+    final declaredMs = row['declared_at'] as int?;
+    final completedMs = row['completed_at'] as int?;
+    final promptShownRaw = row['prompt_shown'] as int?;
+
+    int? durationSeconds;
+    if (declaredMs != null && completedMs != null) {
+      durationSeconds = ((completedMs - declaredMs) / 1000).round();
+    }
+
+    return ExportRow(
+      unlockedAt: unlockedMs == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(unlockedMs, isUtc: true),
+      promptShown: promptShownRaw == null ? null : promptShownRaw == 1,
+      skipReason: row['skip_reason'] as String?,
+      intentText: row['intent_text'] as String?,
+      intentKind: row['intent_kind'] as String?,
+      intentSource: row['intent_source'] as String?,
+      presetLabel: row['preset_label'] as String?,
+      presetId: row['preset_id'] as int?,
+      declaredAt: declaredMs == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(declaredMs, isUtc: true),
+      completedAt: completedMs == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(completedMs, isUtc: true),
+      durationSeconds: durationSeconds,
+      status: row['status'] as String?,
+    );
+  }
+
+  // ---------------------------------------------------------------------
+  // Your data (T18) — counts, oldest record, delete/prune. Presets are
+  // configuration, not event history: wipe/prune never touch intent_preset
+  // (docs/DATA_MODEL.md §8).
+  // ---------------------------------------------------------------------
+
+  /// All-time unlock + intent row counts for the Settings "Your data" card.
+  /// Deliberately unwindowed — retention disclosure needs the full store
+  /// size, not today's slice.
+  Future<UserDataCounts> userDataCounts() async {
+    final unlockRows = await _db.rawQuery('SELECT COUNT(*) AS n FROM unlock_log');
+    final intentRows = await _db.rawQuery('SELECT COUNT(*) AS n FROM intent_log');
+    return UserDataCounts(
+      unlockCount: Sqflite.firstIntValue(unlockRows) ?? 0,
+      intentCount: Sqflite.firstIntValue(intentRows) ?? 0,
+    );
+  }
+
+  /// Earliest timestamp across unlocks (`unlocked_at`) and intents
+  /// (`declared_at`), or null when both tables are empty.
+  Future<DateTime?> oldestRecordAt() async {
+    final rows = await _db.rawQuery('''
+      SELECT MIN(ts) AS oldest FROM (
+        SELECT unlocked_at AS ts FROM unlock_log
+        UNION ALL
+        SELECT declared_at AS ts FROM intent_log
+      )
+    ''');
+    final ms = Sqflite.firstIntValue(rows);
+    if (ms == null) return null;
+    return DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
+  }
+
+  /// Deletes every unlock and intent row. Keeps `intent_preset` (labels the
+  /// user curated). No `VACUUM` — free pages are reused (docs/DATA_MODEL.md §8).
+  Future<void> deleteAllUserData() async {
+    final batch = _db.batch();
+    batch.delete('intent_log');
+    batch.delete('unlock_log');
+    await batch.commit(noResult: true);
+  }
+
+  /// One-shot prune: removes unlocks with `unlocked_at` before [cutoff] and
+  /// intents with `declared_at` before [cutoff]. Returns how many rows were
+  /// deleted across both tables. Does not touch presets; no `VACUUM`.
+  Future<int> pruneOlderThan(DateTime cutoff) async {
+    final ms = cutoff.toUtc().millisecondsSinceEpoch;
+    final intentDeleted = await _db.delete(
+      'intent_log',
+      where: 'declared_at < ?',
+      whereArgs: [ms],
+    );
+    final unlockDeleted = await _db.delete(
+      'unlock_log',
+      where: 'unlocked_at < ?',
+      whereArgs: [ms],
+    );
+    return intentDeleted + unlockDeleted;
+  }
+}
+
+/// All-time event counts for the Settings "Your data" card (T18).
+class UserDataCounts {
+  final int unlockCount;
+  final int intentCount;
+
+  const UserDataCounts({required this.unlockCount, required this.intentCount});
+
+  int get totalEvents => unlockCount + intentCount;
+}
+
+/// One lossless CSV export row (docs/DATA_MODEL.md §9). Timestamps are UTC
+/// instants; [formatExportCsv] converts them to ISO-8601 local for the file.
+class ExportRow {
+  final DateTime? unlockedAt;
+  final bool? promptShown;
+  final String? skipReason;
+  final String? intentText;
+  final String? intentKind;
+  final String? intentSource;
+  final String? presetLabel;
+  final int? presetId;
+  final DateTime? declaredAt;
+  final DateTime? completedAt;
+  final int? durationSeconds;
+  final String? status;
+
+  const ExportRow({
+    this.unlockedAt,
+    this.promptShown,
+    this.skipReason,
+    this.intentText,
+    this.intentKind,
+    this.intentSource,
+    this.presetLabel,
+    this.presetId,
+    this.declaredAt,
+    this.completedAt,
+    this.durationSeconds,
+    this.status,
+  });
 }
