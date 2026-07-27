@@ -41,20 +41,26 @@ void main() {
     return store;
   }
 
-  Future<void> pumpHome(WidgetTester tester, IntentStore store) async {
+  Future<void> pumpHome(
+    WidgetTester tester,
+    IntentStore store, {
+    Future<bool> Function()? checkBatteryExemption,
+  }) async {
     await tester.pumpWidget(MaterialApp(
       home: HomeScreen(
         openStore: () async => store,
         checkPermission: () async => true,
+        checkBatteryExemption: checkBatteryExemption ?? () async => true,
       ),
     ));
     // Real-isolate sqflite work inside HomeScreen._load — see history_screen_test.
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 150)));
     await tester.pump();
     for (var i = 0; i < 30; i++) {
-      final hasStatus = find.textContaining('Overlay permission').evaluate().isNotEmpty;
-      final hasEmpty = find.textContaining('No unlocks logged yet').evaluate().isNotEmpty;
-      final hasCounts = find.textContaining('prompts shown').evaluate().isNotEmpty;
+      final hasStatus = find.textContaining('Overlay permission').evaluate().isNotEmpty ||
+          find.textContaining('overlay permission').evaluate().isNotEmpty;
+      final hasEmpty = find.textContaining('No unlocks yet').evaluate().isNotEmpty;
+      final hasCounts = find.textContaining('prompts').evaluate().isNotEmpty;
       if (hasStatus && (hasEmpty || hasCounts)) break;
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
       await tester.pump();
@@ -65,13 +71,13 @@ void main() {
     final store = await openStore(tester);
     await pumpHome(tester, store);
 
-    expect(find.text('Why Did I Unlock?'), findsOneWidget);
-    expect(find.textContaining('No unlocks logged yet'), findsOneWidget);
+    expect(find.text('Beacon'), findsOneWidget);
+    expect(find.textContaining('No unlocks yet'), findsOneWidget);
     expect(find.text('Settings'), findsWidgets);
     await tester.scrollUntilVisible(find.text('About'), 200);
     expect(find.text('View history'), findsOneWidget);
     expect(find.text('Manage options'), findsOneWidget);
-    expect(find.text('Status & troubleshooting'), findsWidgets);
+    expect(find.text('Status & troubleshooting'), findsOneWidget);
     expect(find.text('About'), findsOneWidget);
     expect(find.byType(OutcomeDonut), findsNothing);
 
@@ -102,13 +108,14 @@ void main() {
 
     await pumpHome(tester, store);
 
-    expect(find.textContaining('2 unlocks · 1 prompts shown'), findsOneWidget);
+    expect(find.textContaining('2 unlocks · 1 prompts'), findsOneWidget);
     expect(find.byType(OutcomeDonut), findsOneWidget);
     expect(find.textContaining('Done'), findsWidgets);
     expect(find.textContaining('Abandoned'), findsWidgets);
     expect(find.textContaining('No intent'), findsWidgets);
     await tester.scrollUntilVisible(find.textContaining('Median'), 200);
     expect(find.textContaining('Median'), findsOneWidget);
+    expect(find.textContaining('Mean'), findsOneWidget);
     expect(find.textContaining('Not enough data yet'), findsNothing);
 
     await tester.runAsync(() => store.close());
@@ -134,7 +141,7 @@ void main() {
     final store = await openStore(tester);
     await pumpHome(tester, store);
 
-    expect(find.textContaining('No unlocks logged yet'), findsOneWidget);
+    expect(find.textContaining('No unlocks yet'), findsOneWidget);
 
     final now = DateTime.now();
     await tester.runAsync(() async {
@@ -148,13 +155,36 @@ void main() {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 150)));
     await tester.pump();
     for (var i = 0; i < 30; i++) {
-      if (find.textContaining('prompts shown').evaluate().isNotEmpty) break;
+      if (find.textContaining('prompts').evaluate().isNotEmpty) break;
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
       await tester.pump();
     }
 
-    expect(find.textContaining('1 unlocks · 1 prompts shown'), findsOneWidget);
+    expect(find.textContaining('1 unlocks · 1 prompts'), findsOneWidget);
     expect(find.byType(OutcomeDonut), findsOneWidget);
+
+    await tester.runAsync(() => store.close());
+  });
+
+  testWidgets('shows OEM nudge when battery not exempt; dismiss hides it', (tester) async {
+    final store = await openStore(tester);
+    await pumpHome(tester, store, checkBatteryExemption: () async => false);
+
+    expect(find.text('Keep monitoring alive'), findsOneWidget);
+    await tester.tap(find.text('Dismiss'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Keep monitoring alive'), findsNothing);
+
+    await tester.runAsync(() => store.close());
+  });
+
+  testWidgets('hides OEM nudge when battery already exempt', (tester) async {
+    final store = await openStore(tester);
+    await pumpHome(tester, store, checkBatteryExemption: () async => true);
+
+    expect(find.text('Keep monitoring alive'), findsNothing);
 
     await tester.runAsync(() => store.close());
   });

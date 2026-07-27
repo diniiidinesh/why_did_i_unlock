@@ -3,39 +3,23 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-/// The user-visible app name shown on this screen.
-///
-/// TODO: update when the store brand (`CLAUDE.md` §12) is decided — naming is
-/// still `UNRESOLVED`. This is one of several places the current working name
-/// lives in code; see the "Cursor note" appended under `CLAUDE.md` §12 for the
-/// full list (added alongside this screen, Sprint 4 T5) so nobody has to
-/// re-grep the repo the day this is finally settled.
-const String appDisplayName = 'Why Did I Unlock';
+import 'brand.dart';
+import 'problem_report.dart';
+
+export 'brand.dart'
+    show
+        appDisplayName,
+        brandMarkAsset,
+        feedbackEmail,
+        privacyPolicyUrl,
+        playListingUrl;
 
 /// Kept as its own constant rather than read from `pubspec.yaml` at build
 /// time (no `package_info_plus` dependency yet — this repo keeps the
 /// dependency count low, `CLAUDE.md` §7) — must be bumped by hand alongside
 /// `pubspec.yaml`'s `version:` when that changes. [AboutScreen.version]
 /// exists specifically so tests don't depend on this staying in sync.
-const String appVersion = '0.6.0+8';
-
-/// Real contact address is still an open `[P1]` in `docs/BACKLOG.md`
-/// ("dedicated contact email, not plus-addressing"). Deliberately an
-/// obviously-fake, grep-able placeholder — `TODO_CONTACT_EMAIL_UNRESOLVED`
-/// — rather than a real-looking address, so it can never be mistaken for a
-/// working inbox and is trivial to find (`grep -r TODO_CONTACT_EMAIL`) the
-/// day a real one is chosen.
-const String feedbackEmail = 'TODO_CONTACT_EMAIL_UNRESOLVED@placeholder.invalid';
-
-/// No privacy-policy website exists yet — `docs/PRIVACY_POLICY.md` itself is
-/// `[APP NAME]` / `[DATE OF PUBLICATION]` placeholders pending a public repo
-/// to host it on (`docs/BACKLOG.md` `[P1]`). Same grep-able-placeholder
-/// convention as [feedbackEmail].
-const String privacyPolicyUrl = 'https://TODO_PRIVACY_POLICY_URL_UNRESOLVED.placeholder.invalid';
-
-/// No Play listing exists yet (`CLAUDE.md` §5 — sideload-only distribution
-/// for now; store brand itself is unresolved, §12). Same convention.
-const String playListingUrl = 'https://TODO_PLAY_LISTING_URL_UNRESOLVED.placeholder.invalid';
+const String appVersion = '0.6.1+9';
 
 /// Injected in place of a real `url_launcher` call so widget tests never
 /// touch a platform channel — same pattern `HistoryScreen.openStore` uses
@@ -52,8 +36,15 @@ class AboutScreen extends StatelessWidget {
   final UrlLauncher launch;
   final String version;
 
-  const AboutScreen({super.key, UrlLauncher? launch, String? version})
-      : launch = launch ?? _defaultLaunch,
+  /// Optional override for tests — defaults to [ProblemReportLog.snapshotForEmail].
+  final Future<String> Function()? problemLogSnapshot;
+
+  const AboutScreen({
+    super.key,
+    UrlLauncher? launch,
+    String? version,
+    this.problemLogSnapshot,
+  })  : launch = launch ?? _defaultLaunch,
         version = version ?? appVersion;
 
   Future<void> _open(BuildContext context, Uri uri, {required String failureMessage}) async {
@@ -86,8 +77,28 @@ class AboutScreen extends StatelessWidget {
     _open(context, uri, failureMessage: 'No email app found to send feedback.');
   }
 
+  Future<void> _openProblemReport(BuildContext context) async {
+    final snapshot = await (problemLogSnapshot ?? ProblemReportLog.snapshotForEmail)();
+    if (!context.mounted) return;
+    final body = 'App version: $version\n'
+        'OS: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}\n\n'
+        'What happened?\n'
+        '(Describe what you were doing when it failed.)\n\n\n'
+        'Recent in-app errors (auto-filled; may be empty):\n'
+        '$snapshot\n';
+    final uri = Uri(
+      scheme: 'mailto',
+      path: feedbackEmail,
+      queryParameters: {
+        'subject': '$appDisplayName problem report ($version)',
+        'body': body,
+      },
+    );
+    await _open(context, uri, failureMessage: 'No email app found to send a report.');
+  }
+
   void _openPrivacyPolicy(BuildContext context) {
-    _open(context, Uri.parse(privacyPolicyUrl), failureMessage: 'Privacy policy isn\'t published yet.');
+    _open(context, Uri.parse(privacyPolicyUrl), failureMessage: 'Couldn\'t open the privacy policy.');
   }
 
   void _openPlayListing(BuildContext context, {required String failureMessage}) {
@@ -106,7 +117,14 @@ class AboutScreen extends StatelessWidget {
       body: ListView(
         children: [
           const SizedBox(height: 16),
-          const Icon(Icons.lock_clock_outlined, color: Colors.white70, size: 48),
+          Center(
+            child: Image.asset(
+              brandMarkAsset,
+              width: 72,
+              height: 72,
+              filterQuality: FilterQuality.high,
+            ),
+          ),
           const SizedBox(height: 8),
           const Center(
             child: Text(appDisplayName, style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w600)),
@@ -123,6 +141,17 @@ class AboutScreen extends StatelessWidget {
             title: const Text('Send feedback'),
             subtitle: const Text('Email the developer', style: TextStyle(color: Colors.white38)),
             onTap: () => _openFeedback(context),
+          ),
+          ListTile(
+            iconColor: Colors.white70,
+            textColor: Colors.white,
+            leading: const Icon(Icons.bug_report_outlined),
+            title: const Text('Report a problem'),
+            subtitle: const Text(
+              'Email a crash/bug report (includes recent in-app errors if any)',
+              style: TextStyle(color: Colors.white38),
+            ),
+            onTap: () => _openProblemReport(context),
           ),
           ListTile(
             iconColor: Colors.white70,

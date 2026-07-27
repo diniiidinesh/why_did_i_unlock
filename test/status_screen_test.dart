@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:why_did_i_unlock/oem_autostart_copy.dart';
 import 'package:why_did_i_unlock/status_screen.dart';
 
 void main() {
@@ -73,6 +74,7 @@ void main() {
         onShowPromptNow: ({required screenWidth, required screenHeight}) {},
         checkBatteryExemption: () async => true,
         requestBatteryExemption: () async {},
+        readManufacturer: () async => null,
       ),
     ));
     await tester.pump();
@@ -87,6 +89,29 @@ void main() {
     expect(find.textContaining('Vivo'), findsOneWidget);
     expect(find.textContaining('Samsung'), findsOneWidget);
     expect(find.text('My phone isn\'t listed'), findsOneWidget);
+  });
+
+  testWidgets('matched manufacturer is first, highlighted, and find-hint is shown', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: StatusScreen(
+        checkPermission: () async => false,
+        requestPermission: () async => true,
+        onShowPromptNow: ({required screenWidth, required screenHeight}) {},
+        checkBatteryExemption: () async => true,
+        requestBatteryExemption: () async {},
+        readManufacturer: () async => 'vivo',
+      ),
+    ));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.textContaining(overlayPermissionFindHint), findsOneWidget);
+    expect(find.text('Looks like your phone'), findsOneWidget);
+    expect(find.textContaining('Vivo'), findsOneWidget);
+    // Matched tile is initially expanded — Vivo leave-smart-control step visible.
+    expect(find.textContaining('Background power control'), findsOneWidget);
+    expect(find.textContaining('Allow background power usage'), findsOneWidget);
+    expect(find.textContaining('smart control'), findsOneWidget);
   });
 
   testWidgets('"Show me the prompt now" invokes the trigger with true device pixel dimensions', (tester) async {

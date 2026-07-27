@@ -1,7 +1,9 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'about_screen.dart';
 import 'app_settings.dart';
@@ -31,17 +33,23 @@ class HomeScreen extends StatefulWidget {
   final Future<IntentStore> Function()? openStore;
   final AppSettings settings;
   final Future<bool> Function() checkPermission;
+  final Future<bool> Function() checkBatteryExemption;
 
   const HomeScreen({
     super.key,
     this.openStore,
     this.settings = const AppSettings(),
     Future<bool> Function()? checkPermission,
-  }) : checkPermission = checkPermission ?? FlutterOverlayWindow.isPermissionGranted;
+    Future<bool> Function()? checkBatteryExemption,
+  })  : checkPermission = checkPermission ?? FlutterOverlayWindow.isPermissionGranted,
+        checkBatteryExemption = checkBatteryExemption ?? _defaultCheckBatteryExemption;
+
+  static Future<bool> _defaultCheckBatteryExemption() => Permission.ignoreBatteryOptimizations.isGranted;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
+
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   IntentStore? _store;
@@ -58,6 +66,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _durationLoaded = false;
   AppSettingsSnapshot? _settingsSnapshot;
   bool _loadFailed = false;
+  bool? _batteryExempt;
+  bool _oemNudgeDismissed = false;
 
   @override
   void initState() {
@@ -72,28 +82,45 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // mounted. Resume is the signal that fresh insight rows may exist —
     // same reason OnboardingScreen re-checks permission on resume.
     if (state == AppLifecycleState.resumed) {
-      _refreshVisible();
+      _onPullRefresh();
     }
   }
 
   /// Re-reads permission, settings snapshot, and insight queries without
-  /// reopening the store. Used by pull-to-refresh, app resume, and return
-  /// from a pushed route.
+  /// reopening the store. Used by app resume and return from a pushed route.
+  /// Pull-to-refresh uses [_onPullRefresh], which can re-run a full [_load]
+  /// when the store never opened (otherwise retry would silently no-op).
   Future<void> _refreshVisible() async {
     if (!mounted || _store == null) return;
     try {
       final results = await (
         widget.checkPermission(),
         widget.settings.loadSnapshot(),
+        widget.checkBatteryExemption(),
+        widget.settings.oemAutostartNudgeDismissed(),
       ).wait;
       if (!mounted) return;
       setState(() {
         _permissionGranted = results.$1;
         _settingsSnapshot = results.$2;
+        _batteryExempt = results.$3;
+        _oemNudgeDismissed = results.$4;
       });
       await _loadInsights();
-    } catch (_) {
+    } catch (e, st) {
+      if (kDebugMode) debugPrint('🏠 Home._refreshVisible failed: $e\n$st');
       if (mounted) setState(() => _loadFailed = true);
+    }
+  }
+
+  /// Pull-to-refresh entry point. A failed cold [_load] leaves [_store] null;
+  /// [_refreshVisible] used to return immediately in that state, so the error
+  /// card's "Pull to retry" never actually retried.
+  Future<void> _onPullRefresh() async {
+    if (_store == null) {
+      await _load();
+    } else {
+      await _refreshVisible();
     }
   }
 
@@ -102,7 +129,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Settings / Status / History / Manage can change prefs, permission, or
     // (via delete-all) the underlying logs — refresh when we become visible
     // again even if the process never left `resumed`.
-    if (mounted) await _refreshVisible();
+    if (mounted) await _onPullRefresh();
   }
 
   Future<void> _load() async {
@@ -120,6 +147,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // guarded on the unlock path (`_withTimeout` in main.dart). Without
       // these, Home stays on CircularProgressIndicator forever until
       // force-stop (observed after reboot with a wedged process).
+      //
+      // Timed-out permission / settings must NOT abandon an already-opened
+      // store: that left `_store == null` and made pull-to-refresh a no-op.
       final granted = await _awaitWithTimeout(
         'Home.checkPermission()',
         widget.checkPermission(),
@@ -128,11 +158,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         'AppSettings.loadSnapshot()',
         widget.settings.loadSnapshot(),
       );
-      if (granted == null || snapshot == null) {
-        if (_ownsStore) await store.close();
-        if (mounted) setState(() => _loadFailed = true);
-        return;
-      }
+      final batteryExempt = await _awaitWithTimeout(
+        'Home.checkBatteryExemption()',
+        widget.checkBatteryExemption(),
+      );
+      final nudgeDismissed = await _awaitWithTimeout(
+        'AppSettings.oemAutostartNudgeDismissed()',
+        widget.settings.oemAutostartNudgeDismissed(),
+      );
 
       if (!mounted) {
         if (_ownsStore) await store.close();
@@ -143,10 +176,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _store = store;
         _permissionGranted = granted;
         _settingsSnapshot = snapshot;
+        _batteryExempt = batteryExempt;
+        _oemNudgeDismissed = nudgeDismissed ?? false;
         _loadFailed = false;
       });
       await _loadInsights();
-    } catch (_) {
+    } catch (e, st) {
+      if (kDebugMode) debugPrint('🏠 Home._load failed: $e\n$st');
       if (mounted) setState(() => _loadFailed = true);
     }
   }
@@ -184,7 +220,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _allTimeUnlockCount = results.$5.unlockCount;
         _loadFailed = false;
       });
-    } catch (_) {
+    } catch (e, st) {
+      if (kDebugMode) debugPrint('🏠 Home._loadInsights failed: $e\n$st');
       if (mounted) setState(() => _loadFailed = true);
     }
   }
@@ -252,11 +289,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   String _settingsSummary(AppSettingsSnapshot snap) {
+    if (!snap.promptsEnabled) return 'Prompts are off';
     final cooldown = snap.cooldown.inMinutes;
     final pct = (snap.probability * 100).round();
-    final quiet = snap.quietHoursEnabled ? 'quiet hours on' : 'quiet hours off';
-    final prompts = snap.promptsEnabled ? 'prompts on' : 'prompts off';
-    return '$prompts · ${cooldown}m cooldown · $pct% · $quiet';
+    final quiet = snap.quietHoursEnabled ? 'Quiet hours on' : null;
+    final parts = <String>[
+      '$pct% of unlocks',
+      if (cooldown > 0) '${cooldown}m cooldown' else 'No cooldown',
+      ?quiet,
+    ];
+    return parts.join(' · ');
   }
 
   @override
@@ -268,13 +310,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       backgroundColor: Colors.black,
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: _refreshVisible,
+          onRefresh: _onPullRefresh,
           child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
             children: [
               const Text(
-                'Why Did I Unlock?',
+                appDisplayName,
                 style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 20),
@@ -295,12 +337,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   permissionGranted: _permissionGranted,
                   onOpenStatus: () => _openRoute((_) => const StatusScreen()),
                 ),
+                if (_batteryExempt == false && !_oemNudgeDismissed) ...[
+                  const SizedBox(height: 12),
+                  _OemAutostartNudgeCard(
+                    onOpenStatus: () => _openRoute((_) => const StatusScreen()),
+                    onDismiss: () async {
+                      await widget.settings.setOemAutostartNudgeDismissed(true);
+                      if (mounted) setState(() => _oemNudgeDismissed = true);
+                    },
+                  ),
+                ],
                 const SizedBox(height: 12),
                 if (isEmpty)
                   const _HomeCard(
                     child: Text(
-                      'No unlocks logged yet. Once the overlay is watching, '
-                      'today\'s counts and breakdown will show up here.',
+                      'No unlocks yet. Lock and unlock your phone to start.',
                       style: TextStyle(color: Colors.white70, height: 1.35),
                     ),
                   )
@@ -345,13 +396,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           ))
                         else ...[
                           Text(
-                            '$_unlockCount unlocks · $_promptShownCount prompts shown',
+                            '$_unlockCount unlocks · $_promptShownCount prompts',
                             style: const TextStyle(color: Colors.white70, fontSize: 15),
-                          ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'Unlock count is what this app observed — a floor if the service was offline.',
-                            style: TextStyle(color: Colors.white38, fontSize: 12),
                           ),
                         ],
                       ],
@@ -404,13 +450,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Mean ${_formatDuration(_durationStats!.meanSeconds)} · ${_durationStats!.sampleCount} sessions',
+                            'Mean ${_formatDuration(_durationStats!.meanSeconds)} · ${_durationStats!.sampleCount} completed',
                             style: const TextStyle(color: Colors.white70, fontSize: 13),
-                          ),
-                          const SizedBox(height: 6),
-                          const Text(
-                            'Includes time while the screen was off — lock gaps aren\'t excluded yet.',
-                            style: TextStyle(color: Colors.white38, fontSize: 12),
                           ),
                         ],
                       ],
@@ -445,14 +486,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ],
               const SizedBox(height: 20),
-              const Text(
-                'More',
-                style: TextStyle(color: Colors.white54, fontSize: 13, fontWeight: FontWeight.w600),
-              ),
-              _HomeLink(label: 'Settings', onPressed: () => _openRoute((_) => const SettingsScreen())),
               _HomeLink(label: 'View history', onPressed: () => _openRoute((_) => const HistoryScreen())),
               _HomeLink(label: 'Manage options', onPressed: () => _openRoute((_) => const ManagePresetsScreen())),
-              _HomeLink(label: 'Status & troubleshooting', onPressed: () => _openRoute((_) => const StatusScreen())),
               _HomeLink(label: 'About', onPressed: () => _openRoute((_) => const AboutScreen())),
             ],
           ),
@@ -474,13 +509,13 @@ class _StatusCard extends StatelessWidget {
     final String statusText;
     final Color statusColor;
     if (granted == null) {
-      statusText = 'Checking overlay permission…';
+      statusText = 'Checking…';
       statusColor = Colors.white54;
     } else if (granted) {
-      statusText = 'Overlay permission granted — monitoring can run.';
+      statusText = 'Ready — overlay permission granted';
       statusColor = const Color(0xFF81C784);
     } else {
-      statusText = 'Overlay permission needed before unlock prompts can appear.';
+      statusText = 'Needs overlay permission';
       statusColor = const Color(0xFFFFB74D);
     }
 
@@ -500,6 +535,41 @@ class _StatusCard extends StatelessWidget {
               onPressed: onOpenStatus,
               child: const Text('Status & troubleshooting'),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OemAutostartNudgeCard extends StatelessWidget {
+  final VoidCallback onOpenStatus;
+  final VoidCallback onDismiss;
+
+  const _OemAutostartNudgeCard({required this.onOpenStatus, required this.onDismiss});
+
+  @override
+  Widget build(BuildContext context) {
+    return _HomeCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Keep monitoring alive',
+            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Phone makers sometimes stop background monitoring — even when '
+            '"allow background" is already on. Check Battery & autostart and '
+            'turn off smart / auto optimize for this app.',
+            style: TextStyle(color: Colors.white70, height: 1.35),
+          ),
+          Row(
+            children: [
+              TextButton(onPressed: onOpenStatus, child: const Text('Open Status')),
+              TextButton(onPressed: onDismiss, child: const Text('Dismiss')),
+            ],
           ),
         ],
       ),

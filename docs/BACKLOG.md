@@ -3,23 +3,22 @@
 > Deferred engineering/feature work and ideas not yet built. Git-tracked on purpose
 > (survives machine switches).
 >
-> ### TOP OF NEXT THREAD (2026-07-24)
+> ### TOP OF NEXT THREAD (2026-07-25)
 >
-> Branch `cursor/sprint4-stage-b` @ `0.6.1+9`. Code for Stage B + bubble hybrid +
-> Beacon + orientation is landed; wrap-up is **on-device verify**, not more design.
+> Branch `cursor/beacon-play-listing` @ `0.6.1+9`. Branding, privacy, Report a
+> problem, prompt 100%, verb presets, Home load fix, **OEM autostart UX +
+> overlay find-hint** are code-complete. Next: **on-device QA +
+> Play Console closed test** (`docs/PLAY_SUBMISSION.md` §3–§4).
 >
-> 1. **Beacon visual QA** — Settings toggles amber On; Manage “+” FAB amber; Home
->    donut “Done” + window chips amber; unlock preset outlines amber; frosted bubble
->    over a busy app (`docs/TEST_PLAN.md` 61–65; tokens in
->    `docs/erd/beacon-visual-identity-2026-07-24.md`).
-> 2. **Bubble hybrid matrix** — cases 54–56, 58 (declare→collapse, Done, Snooze,
->    Just Like That). Rotation/snap 57/59/60 partially exercised — reconfirm after
->    theme change.
-> 3. **P0 post-reboot overlay stall** — reboot with bubble open; expect presets +
->    prompts without force-stop (`docs/debug/rca-post-reboot-overlay-stall-presets-2026-07-24.md`).
-> 4. **P0 OEM autostart** — still the India-market reliability cliff (Vivo field report).
-> 5. **Timer / countdown** — next product differentiator after Stage B verify
->    (`CLAUDE.md` §10).
+> 1. **On-device matrix** — bubble 54–60, Beacon visual 61–65, verb presets 66–71,
+>    Home retry 72, OEM/overlay onboarding 73–76 (`docs/TEST_PLAN.md`).
+> 2. **Friend Vivo/Xiaomi soak** — Autostart + No restrictions; leave app closed
+>    30–60 min; unlock should still prompt (closes field half of OEM P0).
+> 3. **Play gates** — FGS notification on Android 13+; real screenshots; AAB;
+>    Data Safety; 12 testers / 14 days if Personal.
+> 4. **P0 post-reboot overlay stall** — fix landed; needs verify.
+> 5. **After listing exists** — wire `playListingUrl`; privacy effective date.
+> 6. **Timer / countdown** — product differentiator; not a listing blocker.
 >
 > **Sprint 3 shipped (v0.5.0+7, merged to `main` 2026-07-22).** Local intent-history
 > storage (`sqflite`, `intent_log`), prompt-frequency triage (1-min cooldown + 50% prob),
@@ -54,7 +53,20 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 
 - **[DONE 2026-07-22] `android:allowBackup="false"`** — SHIPPED alongside Sprint 3 storage (was unset/defaulting to `true`). Prevents Android auto-backup from sweeping up intent history.
 - **[DONE 2026-07-24] T8 — pin `minSdk`/`targetSdk`** — `android/app/build.gradle.kts` previously inherited both from `flutter.*` (resolving to minSdk 24, below the documented API 29 baseline in CLAUDE.md §8 — sideloading hid this). Pinned to `minSdk = 29` / `targetSdk = 36` (sign-off 2026-07-24), full rationale in `docs/PLAY_SUBMISSION.md` §3b.3. **Needs a real on-device pass** confirming the overlay/foreground-service stack is fine at the newly-enforced 29 floor — not yet verified, since this only just started being enforced rather than just documented.
-- **[P0] OEM autostart onboarding** — upgraded from P1 2026-07-23 after a real field report: a friend testing on a **Vivo** phone (a pre-Sprint-3 build — prompts toggle, thumb-zone layout, "Just Like That") found prompts silently stopped appearing during normal use, resuming only after manually reopening the app. This is the exact, previously-theoretical OEM background-kill failure mode (aggressive OEMs — Xiaomi/Oppo/Vivo, key India market — block boot auto-restart AND kill the foreground service during normal use unless the user manually grants "Autostart" / disables battery optimization), now confirmed happening to a real user with no error, no crash, and no indication anything was wrong — the worst kind of failure for a wellbeing app, since the user has no reason to suspect it and just silently stops being served. **Immediate workaround to tell testers:** on Vivo (iQOO/FuntouchOS/OriginOS), go to Settings → Battery → Background power consumption management (or App Autostart Manager) → find the app → enable Autostart and set battery usage to "No restrictions." Reopening the app after this should restore normal prompting. **Not fixable in code** — needs a guided in-app onboarding screen walking the user through the OEM-specific setting (T4's onboarding already has an OEM step with vendor-specific copy per the Sprint 4 plan; confirm it explicitly covers this Vivo path and is prominent, not just a generic aside). Also worth surfacing in the Status screen (T6) as a live check, not just a one-time onboarding mention, since a user could grant it once and have it revoked later by the OS. Fixes both the reboot gap on this class of OEM and this general process-kill reliability gap. (Was "Option C" in the reboot discussion.)
+- **[DONE 2026-07-25] OEM autostart onboarding UX** — Was P0 after a Vivo field
+  report (prompts silently stop until app reopen). **Not fixable by flipping
+  Autostart in code** (no public OEM API). Shipped: manufacturer match
+  (`matchOemGuidance` + `device_info_plus`) so Status auto-expands the matching
+  tile + “Looks like your phone”; onboarding OEM step shows **full matched
+  steps** (or generic fallback); Home dismissible nudge when battery not exempt
+  (`AppSettings.oemAutostartNudgeDismissed`); overlay find-hint naming Beacon
+  (no auto-advance after grant — user taps Continue). Updated 2026-07-25 for
+  field feedback: steps now stress **leave smart/auto optimize**. Vivo path
+  confirmed from screenshots (2026-07-25): App info → Battery usage →
+  Background power control → **Allow background power usage** (not
+  Background power smart control). OnePlus: Battery usage → Optimize battery
+  use → Don’t optimize. Battery exemption one-tap was already live. **Still
+  needs friend soak verify** (TEST_PLAN 76–77).
 - **[DONE 2026-07-21] `LOCKED_BOOT_COMPLETED` (direct boot)** — SHIPPED. `BootReceiver` + `UnlockListenerService` are now `directBootAware` and handle `LOCKED_BOOT_COMPLETED`, so monitoring starts before the first post-reboot unlock. Verified across 2 real reboots (prompt appeared ~2s after boot, zero manual app-open). The device-encrypted-storage concern turned out moot: our logic only runs on `ACTION_USER_PRESENT`, which fires after unlock when normal storage is already available.
 - **[P2] Graceful degradation when overlay permission is denied/revoked** — currently a silent no-op (confirmed). CLAUDE.md §8 calls for a notification-based fallback instead. Not built.
 - **[DONE 2026-07-24] HomeScreen was never wired to the screens Cursor already built** — `about_screen.dart`, `status_screen.dart`, `manage_presets_screen.dart` existed as unreachable files (no task in the Sprint 4 plan explicitly owned "link Home to them"); `onboarding_screen.dart` existed but `MyApp` went straight to `HomeScreen`, so nobody ever saw onboarding and the cold permission-request in `HomeScreen.initState` was still live. Fixed: `MyApp` now routes through a new `AppLauncher` (checks `AppSettings.onboardingCompleted()`, shows `OnboardingScreen` or `HomeScreen`); `HomeScreen`'s cold `_requestOverlayPermission()` call removed (onboarding's own permission step replaces it); `HomeScreen` now links to Manage presets/Status/About alongside History. `flutter test` and `flutter analyze` clean.
@@ -123,8 +135,8 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
   Not fixed here — flagging with full repro + root cause so it doesn't need re-diagnosing.
 - **[DONE 2026-07-22] Minimal history view** — `lib/history_screen.dart` reads from the DB, renders events newest-first, styles no-intent rows distinctly. Verified against real multi-event data on-device.
 - ~~**[P2] Triage customization UI**~~ — done via T13 (`lib/settings_screen.dart`): cooldown/probability are curated preset chips + a validated Custom entry, not the originally-imagined sliders (see that screen's doc comments for why). Instance-based triage strategy (e.g. "skip every Nth unlock") is still not built — see the `[explore]` item below.
-  - **Probability options:** Everytime (100%), 75%, 50% (current default), 25%, Never (0%) — or custom percentage input.
-  - **Cooldown options:** No cooldown (0 min), 1 min (current default), 2 min, 5 min, 10 min — or custom duration input.
+  - **Probability options:** Everytime (100%, **current default as of 2026-07-25**), 75%, 50%, 25%, Never (0%) — or custom percentage input. (Old Sprint 3 default was 50%; changed after friend confusion.)
+  - **Cooldown options:** No cooldown (0 min), 1 min (current default — kept; explained in onboarding/Settings), 2 min, 5 min, 10 min — or custom duration input.
 - **[explore] Instance-based triage strategy** (e.g. "skip every Nth unlock") — a third `PromptPolicy` implementation alongside cooldown/probability; same architecture, not yet built.
 - **[P2] `status` (completed-vs-abandoned) on `intent_log`** — deferred until the UI actually supports more than one dismiss gesture (still just the × badge).
 
@@ -153,6 +165,13 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 - **[DONE 2026-07-21] "Just Like That" option** — SHIPPED (logs a purposeless unlock, closes without a bubble). Styling follow-up is item #2 at top of file.
 - **[DONE 2026-07-21] Prompt on/off master toggle** — SHIPPED (HomeScreen switch, `shared_preferences`, `_shouldPrompt()` gate). Scheduling to plug into that same gate is a future item; see `CLAUDE.md` §3-adjacent notes.
 - **[DONE 2026-07-21] Meaningful presets** — Payments/Calls/Messages/Food Order/Commute replaced the vague originals.
+- **[DONE 2026-07-25] Verb-based defaults for job-goer TG** — Enabled five: Check mail / Message someone / Book a cab / Order food / **Pay someone** (Watch reels moved to suggestion catalog). Seed v3 migrates untouched legacy + untouched v2 verb installs; **customized lists are left alone** (observed: install with custom “Testing” correctly skipped auto-migrate — Restore defaults / clear data is the escape hatch). Spec: `docs/erd/verb-presets-job-goers-2026-07-25.md`. **Needs on-device** TEST_PLAN 66–71.
+- **[DONE 2026-07-25] Prompt default probability → 100%** — Friend testing read 50% skips as “broken.” Default is now ask every unlock once the 1-min cooldown clears; Settings still tunable; onboarding + Settings subtitles explain. (`AppSettings`, `OnboardingScreen`, `SettingsScreen`, Home summary always shows `$pct%`.)
+- **[DONE 2026-07-25] Home insight Mean row restored + orphan “More” heading removed** — Mean under Median again; History/Manage/About links no longer under a bare “More” label.
+- **[DONE 2026-07-25] Home “Couldn't load local data” / pull-to-retry** — Cold load no longer closes an opened store after a permission/settings timeout; pull-to-refresh re-runs full `_load()` when `_store == null` (was a no-op). Failures `debugPrint` as `🏠 Home._load failed: …`. **Needs on-device** TEST_PLAN 72.
+- **[explore] Onboarding preset picker (“pick ~5–8”)** — Parked 2026-07-25. Cold users can’t predict unlock mix; onboarding is already permission-heavy. Revisit after closed-test usage patterns, as “confirm suggestions” not “design from scratch.”
+- **[explore] Suggestion catalog (inactive / Add from list) in Manage Options** — Parked 2026-07-25. Candidates: Call someone, Set alarm, Reply to someone, Watch reels, Get directions, Check social media. Seed as soft suggestions without crowding the capture screen. Enable/disable already exists; this is curated inventory + UX.
+- **[explore] Second no-bubble escape (“in a rush” / urgent skip)** — Parked 2026-07-25 / rejected for now. Same motor outcome as Just Like That, pollutes `no_intent`, trains skip-when-busy. Prefer verb coverage + later voice.
 - **[DONE 2026-07-21] Capture-screen keyboard handling revamp** — The interim v0.4.0 fix just shifted the whole column up, pushing presets off-screen. Now uses thumb-zone layout: title/presets/"Just Like That" bottom-anchor within scrollable space (LayoutBuilder + ConstrainedBox + IntrinsicHeight + mainAxisAlignment.end), text field pinned as footer just above keyboard. In PR #6, pending merge.
 - **[DONE 2026-07-21] "Just Like That" pill styling** — Was a bare italic `TextButton`; now a real outlined pill (muted relative to topic presets so it still reads as the distinct "no real reason" option). In PR #6, pending merge.
 - **[explore] Randomize preset pill order** — Presets appear in fixed order every unlock; muscle-memory tapping ("I always hit the second pill because it's Calls") is low-deliberation behavior. Prompt-timing randomization (shipped via probability gate) fights habituation by making timing unpredictable, which the research shows is neurologically effective and harmless. Position-randomization fights muscle memory but risks backfire: if pills are hard to locate, users might skip thinking and just hit "Just Like That" from friction rather than honesty — fixing one habituation by inducing another. Only builds if position-randomness is bounded (shuffle within session? vary per boot?) not truly random per-unlock. Needs UX evaluation first.
@@ -177,11 +196,13 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
   Also: Settings switches, Manage FAB, Home donut “Done” / window chips, unlock
   preset outlines. Spec: `docs/erd/beacon-visual-identity-2026-07-24.md`. Automated:
   `test/beacon_theme_test.dart`. **Needs on-device visual pass** (TEST_PLAN 61–65).
-  Store brand name still open (`CLAUDE.md` §12) — Beacon ≠ Play rename.
+  Store brand **decided** (`Beacon: Mindful Phone Use` / on-device `Beacon`) —
+  see `CLAUDE.md` §12 and `docs/PLAY_SUBMISSION.md` §0.
 
 ## Settings / configurability
 
 - **[DONE 2026-07-24] T13 — Settings screen** — `lib/settings_screen.dart` (Cursor), merged into `sprint4-app-shell` and wired into `HomeScreen`'s nav (Cursor's commit left it self-contained/unwired; Claude Code added the link). Prompts on/off, cooldown/probability as curated preset chips + validated Custom entry (clamped, with a SnackBar on out-of-range input — defense in depth on top of `AppSettings`'s own clamping), quiet-hours toggle + time pickers, links to Manage options and the privacy policy. Supersedes the item below.
+- **[decision 2026-07-25] Delay-before-unlock — no Settings “Coming soon” row.** Idea remains open/unscoped (`CLAUDE.md` §12). A dead Settings control creates expectation debt and looks broken in closed test; ship a real toggle only after bypass list + schedule + prompt interaction are designed.
 - ~~**[P2] Configurable durations via a Settings screen**~~ — done via T13 above. Timer duration isn't configurable yet since the timer feature itself doesn't exist (`CLAUDE.md` §3/§10) — revisit when it ships.
 - **[decision] Bubble customization (color/size/opacity)** — deferred correctly: needs (a) a preferences-persistence layer (likely `shared_preferences`, distinct from the `sqflite` intent log) and (b) monetization clarity, since this was a candidate Pro-gated feature and free-vs-Pro is undecided (CLAUDE.md §11). Don't build gating before the model is chosen.
 
@@ -224,7 +245,34 @@ doing nothing) as one cause, not several.
 - **[DONE 2026-07-23] `README.md` doc-map audit** — real gaps found and fixed: `docs/DATA_MODEL.md` had **no row at all** despite being one of the most-referenced docs; `docs/PRIVACY_POLICY.md` and `docs/debug/` were also missing. The `docs/erd/` row's description was stale too (said "not updated after sign-off," contradicting the update-log policy actually adopted). All fixed in one pass.
 - **[DONE 2026-07-23] `DATA_MODEL.md` §11/§12 numbering** — checked, sequential 1–12, stayed correct since the earlier fix.
 
-## Exploratory (bigger bets — need scoping before they enter any sprint)
+## Store listing / About follow-ups (Play)
+
+- **[P1] Privacy policy effective date** — `docs/PRIVACY_POLICY.md` still has
+  `[DATE OF PUBLICATION]`. Set a real date when the Play listing / closed test
+  goes live, and sync the hosted HTML at `dineshkaliki.com/beacon/privacy/`.
+
+- **[P1] Wire About "Rate on Play" + "Share" to the real listing** — today both
+  open `playListingUrl` which is still a `TODO_*` placeholder
+  (`lib/brand.dart`). After the Play listing exists: set
+  `https://play.google.com/store/apps/details?id=com.whydidiunlock.why_did_i_unlock`,
+  confirm Rate opens the store, and make Share use the system share sheet
+  (`share_plus` already in the tree for CSV) with that URL + short pitch.
+  Until then the buttons correctly SnackBar "not on Play yet."
+
+- **[DONE 2026-07-25] FGS notification small icon → Beacon** —
+  `drawable/ic_stat_beacon.xml` (white silhouette) +
+  `UnlockListenerService` `.setSmallIcon(R.drawable.ic_stat_beacon)`; channel
+  renamed/id bumped to `beacon_monitoring` / display name "Beacon".
+
+- **[DONE 2026-07-25] "Report a problem" mailto + local error buffer** — About
+  → Report a problem emails `hi@…` with version/OS, a "what happened" prompt,
+  and any recent Flutter/async errors captured by `ProblemReportLog`
+  (`lib/problem_report.dart`, hooks on ui/background/overlay engines, stored
+  in SharedPreferences). Still no network crash SDK. Hard native crashes
+  remain uncaptured — email copy explains that.
+- **[decision] Full crash reporting / Crashlytics** — still deferred. See prior
+  note: opt-in network reporting only when N outgrows 1:1 support; flips Data
+  Safety in the same release.
 
 - **[explore] Suggest which app to open** — from the declared intent, surface/deep-link the relevant app (e.g. a payment intent → payments app).
 - **[explore] Detect task completion & nudge** — detect whether the user actually opened the relevant app and whether the task seems done, then nudge. **⚠️ Requires `UsageStatsManager` or `AccessibilityService`** — the exact policy-fragile surface CLAUDE.md §9 flags as the single biggest existential risk (prefer UsageStats over Accessibility). Scope the policy risk first.

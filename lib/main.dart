@@ -10,11 +10,13 @@ import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 
 import 'app_settings.dart';
 import 'beacon_theme.dart';
+import 'brand.dart';
 import 'bubble_overlay_geometry.dart';
 import 'bubble_widget.dart';
 import 'home_screen.dart';
 import 'intent_store.dart';
 import 'onboarding_screen.dart';
+import 'problem_report.dart';
 import 'prompt_policy.dart';
 
 /// A preset as rendered on the capture screen — just the fields
@@ -102,6 +104,8 @@ IntentSource _intentSourceFromString(String source) {
 }
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  ProblemReportLog.installHooks('ui');
   runApp(const MyApp());
 }
 
@@ -392,7 +396,7 @@ Future<void> _restoreSnoozedBubble() async {
       width: side,
       alignment: OverlayAlignment.centerRight,
       flag: OverlayFlag.defaultFlag,
-      overlayTitle: 'Why Did I Unlock?',
+      overlayTitle: appDisplayName,
       overlayContent: session.text,
       enableDrag: true,
       // Plugin PositionGravity.auto uses a screen size captured once at
@@ -452,7 +456,7 @@ Future<void> _repositionCaptureForOrientation(int widthPx, int heightPx) async {
       alignment: OverlayAlignment.topLeft,
       flag: OverlayFlag.focusPointer,
       startPosition: const OverlayPosition(0, 0),
-      overlayTitle: 'Why Did I Unlock?',
+      overlayTitle: appDisplayName,
       overlayContent: 'Declare your intent',
     ).then((_) => true),
   );
@@ -478,7 +482,7 @@ Future<void> _repositionBubbleForOrientation() async {
       width: side,
       alignment: OverlayAlignment.centerRight,
       flag: OverlayFlag.defaultFlag,
-      overlayTitle: 'Why Did I Unlock?',
+      overlayTitle: appDisplayName,
       overlayContent: _bubbleOverlayText,
       enableDrag: true,
       positionGravity: PositionGravity.none,
@@ -705,6 +709,7 @@ bool triggerCapturePromptManually({required int screenWidth, required int screen
 @pragma("vm:entry-point")
 void backgroundMain() {
   WidgetsFlutterBinding.ensureInitialized();
+  ProblemReportLog.installHooks('background');
 
   // Registered synchronously, before any async work, so the overlay isolate
   // can always find this port once backgroundMain has started running.
@@ -974,6 +979,7 @@ Future<IntentStore>? _intentStoreOpening;
 @pragma("vm:entry-point")
 void overlayMain() {
   WidgetsFlutterBinding.ensureInitialized();
+  ProblemReportLog.installHooks('overlay');
   runApp(
     MaterialApp(
       debugShowCheckedModeBanner: false,
@@ -1223,7 +1229,7 @@ Future<bool> _presentCaptureOverlay(int screenWidth, int screenHeight, {required
       alignment: OverlayAlignment.topLeft,
       flag: OverlayFlag.focusPointer,
       startPosition: const OverlayPosition(0, 0),
-      overlayTitle: 'Why Did I Unlock?',
+      overlayTitle: appDisplayName,
       overlayContent: 'Declare your intent',
     ).then((_) => true),
   );
@@ -1582,7 +1588,7 @@ class _OverlayRootState extends State<OverlayRoot> {
       // (x=0 = right). Left dock is a single post-show move with resetY.
       alignment: OverlayAlignment.centerRight,
       flag: OverlayFlag.defaultFlag,
-      overlayTitle: 'Why Did I Unlock?',
+      overlayTitle: appDisplayName,
       overlayContent: _intentText,
       enableDrag: true,
       positionGravity: PositionGravity.none,

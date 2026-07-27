@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:why_did_i_unlock/oem_autostart_copy.dart';
 import 'package:why_did_i_unlock/onboarding_screen.dart';
 
 void main() {
@@ -9,6 +10,7 @@ void main() {
     Future<bool?> Function()? requestPermission,
     Future<bool> Function()? checkBatteryExemption,
     Future<void> Function()? requestBatteryExemption,
+    Future<String?> Function()? readManufacturer,
     Future<void> Function()? completeOnboarding,
     VoidCallback? onFinished,
   }) {
@@ -18,6 +20,7 @@ void main() {
         requestPermission: requestPermission ?? () async => true,
         checkBatteryExemption: checkBatteryExemption ?? () async => false,
         requestBatteryExemption: requestBatteryExemption ?? () async {},
+        readManufacturer: readManufacturer ?? () async => null,
         completeOnboarding: completeOnboarding ?? () async {},
         onFinished: onFinished,
       ),
@@ -63,7 +66,7 @@ void main() {
     expect(find.text('Some phones need one more step'), findsOneWidget);
   });
 
-  testWidgets('permission step shows live status from checkPermission', (tester) async {
+  testWidgets('permission step shows Beacon find-hint and live status from checkPermission', (tester) async {
     await pumpOnboarding(tester, checkPermission: () async => true);
     await tester.pump();
 
@@ -73,6 +76,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('One permission is needed'), findsOneWidget);
+    expect(find.textContaining(overlayPermissionFindHint), findsOneWidget);
     expect(find.textContaining('Granted'), findsOneWidget);
     expect(find.text('Grant permission'), findsNothing);
   });
@@ -102,14 +106,12 @@ void main() {
 
     expect(requestCalls, 1);
     expect(find.textContaining('Granted'), findsOneWidget);
+    // Stay on the permission step — auto-advance after grant was confusing.
+    expect(find.text('One permission is needed'), findsOneWidget);
+    expect(find.text('Some phones need one more step'), findsNothing);
   });
 
   testWidgets('resuming the app on the permission step re-checks permission status', (tester) async {
-    // The real-device gap this guards against: requestPermission() opens
-    // Android's settings screen and its Future resolves immediately, well
-    // before the user has actually granted anything there. The permission
-    // status must update when the app RESUMES (the user returning from
-    // Settings), not just when requestPermission()'s Future completes.
     var granted = false;
     await pumpOnboarding(tester, checkPermission: () async => granted);
     await tester.pump();
@@ -121,14 +123,14 @@ void main() {
     expect(find.text('One permission is needed'), findsOneWidget);
     expect(find.textContaining('Not granted'), findsOneWidget);
 
-    // Simulate: user left for system Settings, granted it there, and came
-    // back — no page change, no button tap, just an app resume.
     granted = true;
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pump();
     await tester.pump();
 
     expect(find.textContaining('Granted'), findsOneWidget);
+    expect(find.text('One permission is needed'), findsOneWidget);
+    expect(find.text('Some phones need one more step'), findsNothing);
   });
 
   testWidgets('resuming the app on a DIFFERENT step does not trigger a permission re-check', (tester) async {
@@ -140,9 +142,6 @@ void main() {
     await tester.pump();
     final callsAfterInitialLoad = checkCalls;
 
-    // Still on step 0 (value prop) — a resume here is a no-op for the
-    // permission check, scoped deliberately to avoid a stray plugin call
-    // on every step of the flow, not just step 2.
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pump();
 
@@ -150,8 +149,6 @@ void main() {
   });
 
   testWidgets('continuing without granting permission is not blocked', (tester) async {
-    // CLAUDE.md §9: onboarding must not demand permissions upfront or block
-    // progress on them.
     await pumpOnboarding(tester, checkPermission: () async => false);
     await tester.pump();
     await tester.tap(find.text('Continue'));
@@ -166,8 +163,8 @@ void main() {
     expect(find.text('Some phones need one more step'), findsOneWidget);
   });
 
-  testWidgets('OEM step lists guidance vendors and the "not listed" fallback copy', (tester) async {
-    await pumpOnboarding(tester);
+  testWidgets('OEM step shows matched Vivo steps when manufacturer is vivo', (tester) async {
+    await pumpOnboarding(tester, readManufacturer: () async => 'vivo');
     await tester.pump();
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
@@ -177,8 +174,25 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Some phones need one more step'), findsOneWidget);
-    expect(find.textContaining('Xiaomi'), findsOneWidget);
-    expect(find.text('My phone isn\'t listed?'), findsOneWidget);
+    expect(find.textContaining('Looks like your phone'), findsOneWidget);
+    expect(find.textContaining('Vivo'), findsOneWidget);
+    expect(find.textContaining('Background power control'), findsOneWidget);
+    expect(find.textContaining('Allow background power usage'), findsOneWidget);
+    expect(find.text('My phone isn\'t listed?'), findsNothing);
+  });
+
+  testWidgets('OEM step shows generic fallback when manufacturer is unknown', (tester) async {
+    await pumpOnboarding(tester, readManufacturer: () async => 'Nothing');
+    await tester.pump();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Battery optimization'), findsOneWidget);
+    expect(find.textContaining('Status & troubleshooting'), findsWidgets);
   });
 
   testWidgets('"Get started" on the last step marks onboarding complete and calls onFinished', (tester) async {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'device_manufacturer.dart';
 import 'main.dart' show triggerCapturePromptManually;
 import 'oem_autostart_copy.dart';
 
@@ -47,6 +48,10 @@ class StatusScreen extends StatefulWidget {
   final Future<bool> Function() checkBatteryExemption;
   final Future<void> Function() requestBatteryExemption;
 
+  /// Manufacturer / brand string for OEM tile highlight. Defaults to
+  /// [readDeviceManufacturer]; inject in tests (e.g. `() async => 'vivo'`).
+  final Future<String?> Function() readManufacturer;
+
   const StatusScreen({
     super.key,
     Future<bool> Function()? checkPermission,
@@ -54,11 +59,13 @@ class StatusScreen extends StatefulWidget {
     ManualPromptTrigger? onShowPromptNow,
     Future<bool> Function()? checkBatteryExemption,
     Future<void> Function()? requestBatteryExemption,
+    Future<String?> Function()? readManufacturer,
   })  : checkPermission = checkPermission ?? FlutterOverlayWindow.isPermissionGranted,
         requestPermission = requestPermission ?? FlutterOverlayWindow.requestPermission,
         onShowPromptNow = onShowPromptNow ?? triggerCapturePromptManually,
         checkBatteryExemption = checkBatteryExemption ?? _defaultCheckBatteryExemption,
-        requestBatteryExemption = requestBatteryExemption ?? _defaultRequestBatteryExemption;
+        requestBatteryExemption = requestBatteryExemption ?? _defaultRequestBatteryExemption,
+        readManufacturer = readManufacturer ?? readDeviceManufacturer;
 
   @override
   State<StatusScreen> createState() => _StatusScreenState();
@@ -73,11 +80,20 @@ class _StatusScreenState extends State<StatusScreen> {
   /// Same null-while-checking convention as [_permissionGranted].
   bool? _batteryExempt;
 
+  OemGuidance? _matchedOem;
+
   @override
   void initState() {
     super.initState();
     _refreshPermission();
     _refreshBatteryExemption();
+    _loadManufacturer();
+  }
+
+  Future<void> _loadManufacturer() async {
+    final raw = await widget.readManufacturer();
+    if (!mounted) return;
+    setState(() => _matchedOem = matchOemGuidance(raw));
   }
 
   Future<void> _refreshPermission() async {
@@ -123,6 +139,7 @@ class _StatusScreenState extends State<StatusScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final oemList = oemGuidanceListPreferring(_matchedOem);
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -141,11 +158,9 @@ class _StatusScreenState extends State<StatusScreen> {
           const SizedBox(height: 24),
           const _SectionHeader('Battery & autostart'),
           const SizedBox(height: 8),
-          const Text(
-            'Some phone makers aggressively kill background apps unless you '
-            'allow this one to keep running. If prompts stop appearing after '
-            'a while, check your phone\'s setting below.',
-            style: TextStyle(color: Colors.white70, fontSize: 13),
+          Text(
+            oemGuidanceIntro,
+            style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.35),
           ),
           const SizedBox(height: 12),
           _BatteryExemptionCard(
@@ -153,8 +168,19 @@ class _StatusScreenState extends State<StatusScreen> {
             onRequest: _requestBatteryExemption,
             onRefresh: _refreshBatteryExemption,
           ),
+          const SizedBox(height: 8),
+          const Text(
+            'Then follow your phone maker\'s steps below — especially "Don\'t optimize" / '
+            '"No restrictions" / "Not optimized".',
+            style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.35),
+          ),
           const SizedBox(height: 12),
-          ...oemAutostartGuidance.map((g) => _OemTile(guidance: g)),
+          ...oemList.map(
+            (g) => _OemTile(
+              guidance: g,
+              highlighted: _matchedOem != null && g.vendor == _matchedOem!.vendor,
+            ),
+          ),
           const _GenericOemFallbackTile(),
           const SizedBox(height: 24),
           const _SectionHeader('Notifications'),
@@ -233,6 +259,8 @@ class _PermissionCard extends StatelessWidget {
           const Text('Overlay permission', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
           const SizedBox(height: 4),
           Text(statusText, style: TextStyle(color: statusColor, fontSize: 14)),
+          const SizedBox(height: 8),
+          Text(overlayPermissionFindHint, style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.35)),
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
@@ -303,14 +331,21 @@ class _BatteryExemptionCard extends StatelessWidget {
 
 class _OemTile extends StatelessWidget {
   final OemGuidance guidance;
-  const _OemTile({required this.guidance});
+  final bool highlighted;
+
+  const _OemTile({required this.guidance, this.highlighted = false});
 
   @override
   Widget build(BuildContext context) {
     return ExpansionTile(
+      key: ValueKey('oem-${guidance.vendor}-$highlighted'),
+      initiallyExpanded: highlighted,
       iconColor: Colors.white70,
       collapsedIconColor: Colors.white70,
       title: Text(guidance.vendor, style: const TextStyle(color: Colors.white, fontSize: 14)),
+      subtitle: highlighted
+          ? const Text('Looks like your phone', style: TextStyle(color: Colors.white54, fontSize: 12))
+          : null,
       children: guidance.steps
           .map((step) => Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),

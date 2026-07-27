@@ -43,6 +43,7 @@ class AppSettings {
   /// (`docs/erd/sprint4-app-shell-plan-2026-07-23.md` §5), so this matches
   /// rather than inventing a new name.
   static const String _onboardingCompletedKey = 'onboarding_completed';
+  static const String _oemAutostartNudgeDismissedKey = 'oem_autostart_nudge_dismissed';
 
   // ---------------------------------------------------------------------
   // Bounds — see docs/DATA_MODEL.md §5 (Settings) for the product rationale.
@@ -56,7 +57,11 @@ class AppSettings {
   /// `promptProbability`) so behaviour is unchanged for anyone who never opens
   /// Settings.
   static const int defaultCooldownMinutes = 1;
-  static const double defaultProbability = 0.5;
+  /// 100% — ask on every unlock once cooldown clears. The old 50% default
+  /// felt broken ("sometimes nothing happens") more often than it helped
+  /// resist habituation; power users can still dial probability down in
+  /// Settings.
+  static const double defaultProbability = 1.0;
   static const bool defaultPromptsEnabled = true;
   static const bool defaultQuietHoursEnabled = false;
   static const int defaultQuietHoursStartMinutes = 22 * 60; // 22:00
@@ -92,6 +97,19 @@ class AppSettings {
 
   Future<void> setOnboardingCompleted(bool value) async {
     await SharedPreferencesAsync().setBool(_onboardingCompletedKey, value);
+  }
+
+  // ---------------------------------------------------------------------
+  // Home "Battery & autostart" nudge — dismissed once so it isn't naggy.
+  // Default false (show nudge when battery exemption is missing).
+  // ---------------------------------------------------------------------
+  Future<bool> oemAutostartNudgeDismissed() async {
+    final prefs = SharedPreferencesAsync();
+    return await prefs.getBool(_oemAutostartNudgeDismissedKey) ?? false;
+  }
+
+  Future<void> setOemAutostartNudgeDismissed(bool value) async {
+    await SharedPreferencesAsync().setBool(_oemAutostartNudgeDismissedKey, value);
   }
 
   // ---------------------------------------------------------------------

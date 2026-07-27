@@ -44,13 +44,13 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    expect(find.text('Why Did I Unlock?'), findsOneWidget);
+    expect(find.text('Beacon'), findsOneWidget);
     expect(find.byType(Switch), findsNothing);
     expect(find.text('Settings'), findsWidgets);
     await tester.scrollUntilVisible(find.text('About'), 200);
     expect(find.text('View history'), findsOneWidget);
     expect(find.text('Manage options'), findsOneWidget);
-    expect(find.text('Status & troubleshooting'), findsWidgets);
+    expect(find.text('Status & troubleshooting'), findsOneWidget);
     expect(find.text('About'), findsOneWidget);
 
     await tester.runAsync(() => store.close());
@@ -65,7 +65,7 @@ void main() {
 
     // OnboardingScreen's first step (value prop) — HomeScreen must NOT be
     // reachable yet.
-    expect(find.text('Why Did I Unlock?'), findsNothing);
+    expect(find.text('Beacon'), findsNothing);
     expect(find.text('Settings'), findsNothing);
   });
 

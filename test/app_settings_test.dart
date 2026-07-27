@@ -23,8 +23,8 @@ void main() {
       expect(await settings.cooldownMinutes(), 1);
     });
 
-    test('promptProbability defaults to 0.5 (matches main.dart promptProbability)', () async {
-      expect(await settings.promptProbability(), 0.5);
+    test('promptProbability defaults to 1.0 (ask every unlock once cooldown clears)', () async {
+      expect(await settings.promptProbability(), 1.0);
     });
 
     test('quietHoursEnabled defaults false', () async {
@@ -37,6 +37,12 @@ void main() {
 
     test('onboardingCompleted defaults false — a fresh install shows onboarding', () async {
       expect(await settings.onboardingCompleted(), isFalse);
+    });
+
+    test('oemAutostartNudgeDismissed defaults false and round-trips', () async {
+      expect(await settings.oemAutostartNudgeDismissed(), isFalse);
+      await settings.setOemAutostartNudgeDismissed(true);
+      expect(await settings.oemAutostartNudgeDismissed(), isTrue);
     });
   });
 
@@ -161,7 +167,7 @@ void main() {
       final snap = await settings.loadSnapshot();
       expect(snap.promptsEnabled, isTrue);
       expect(snap.cooldown, const Duration(minutes: 1));
-      expect(snap.probability, 0.5);
+      expect(snap.probability, 1.0);
       expect(snap.quietHoursEnabled, isFalse);
     });
 

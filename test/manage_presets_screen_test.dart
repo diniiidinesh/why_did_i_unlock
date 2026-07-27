@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:why_did_i_unlock/intent_store.dart';
 import 'package:why_did_i_unlock/manage_presets_screen.dart';
@@ -14,7 +16,10 @@ void main() {
   // Isolate, which the default test zone can deadlock on inside setState(),
   // so real I/O is wrapped in tester.runAsync() (see history_screen_test.dart
   // for the fuller explanation).
-  Future<IntentStore> openTestStore() => IntentStore.open(path: inMemoryDatabasePath);
+  Future<IntentStore> openTestStore() async {
+    SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
+    return IntentStore.open(path: inMemoryDatabasePath);
+  }
 
   Future<void> pumpScreen(WidgetTester tester, IntentStore store) async {
     await tester.pumpWidget(MaterialApp(
@@ -30,7 +35,7 @@ void main() {
 
     await pumpScreen(tester, store);
 
-    for (final label in const ['Payments', 'Calls', 'Messages', 'Food Order', 'Commute']) {
+    for (final label in defaultPresetLabels) {
       expect(find.text(label), findsOneWidget);
     }
 
@@ -43,11 +48,9 @@ void main() {
 
     await pumpScreen(tester, store);
 
-    // Payments starts first. Drag its handle down past Calls' row so it
-    // lands second — enough distance to cross one full tile, not just
-    // nudge within it.
+    // Check mail starts first. Drag its handle down past Message someone's row.
     final handle = find.descendant(
-      of: find.widgetWithText(ListTile, 'Payments'),
+      of: find.widgetWithText(ListTile, 'Check mail'),
       matching: find.byIcon(Icons.drag_handle),
     );
     await tester.drag(handle, const Offset(0, 120));
@@ -59,9 +62,7 @@ void main() {
     await tester.runAsync(() async {
       final all = await store.allPresets();
       final byLabel = {for (final p in all) p.label: p.sortOrder};
-      // The exact new position matters less than the invariant: Payments no
-      // longer holds the lowest sort_order in the visible set.
-      expect(byLabel['Payments']!, greaterThan(byLabel['Calls']!));
+      expect(byLabel['Check mail']!, greaterThan(byLabel['Message someone']!));
     });
 
     await tester.runAsync(() => store.close());
@@ -72,21 +73,18 @@ void main() {
     await tester.runAsync(() async {
       store = await openTestStore();
       final all = await store.allPresets();
-      final payments = all.firstWhere((p) => p.label == 'Payments');
-      await store.deletePreset(payments.id);
+      final mail = all.firstWhere((p) => p.label == 'Check mail');
+      await store.deletePreset(mail.id);
     });
 
     await pumpScreen(tester, store);
 
-    expect(find.text('Payments'), findsNothing);
-    expect(find.text('Calls'), findsOneWidget);
+    expect(find.text('Check mail'), findsNothing);
+    expect(find.text('Message someone'), findsOneWidget);
 
-    // Still resolvable via preset_id for historical rows — this screen's
-    // filtering must not be the store's only defence against orphaning it
-    // (docs/DATA_MODEL.md §4: soft delete exists exactly so this stays true).
     await tester.runAsync(() async {
       final all = await store.allPresets();
-      expect(all.any((p) => p.label == 'Payments' && p.isDeleted), isTrue);
+      expect(all.any((p) => p.label == 'Check mail' && p.isDeleted), isTrue);
     });
 
     await tester.runAsync(() => store.close());
@@ -119,7 +117,7 @@ void main() {
     await pumpScreen(tester, store);
 
     await tester.tap(find.descendant(
-      of: find.widgetWithText(ListTile, 'Payments'),
+      of: find.widgetWithText(ListTile, 'Check mail'),
       matching: find.byType(Switch),
     ));
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
@@ -127,7 +125,7 @@ void main() {
 
     await tester.runAsync(() async {
       final all = await store.allPresets();
-      expect(all.firstWhere((p) => p.label == 'Payments').enabled, isFalse);
+      expect(all.firstWhere((p) => p.label == 'Check mail').enabled, isFalse);
     });
 
     await tester.runAsync(() => store.close());
@@ -180,10 +178,10 @@ void main() {
     await tester.runAsync(() async => store = await openTestStore());
 
     await pumpScreen(tester, store);
-    expect(find.text('Commute'), findsOneWidget);
+    expect(find.text('Pay someone'), findsOneWidget);
 
     await tester.tap(find.descendant(
-      of: find.widgetWithText(ListTile, 'Commute'),
+      of: find.widgetWithText(ListTile, 'Pay someone'),
       matching: find.byIcon(Icons.delete_outline),
     ));
     await tester.pump();
@@ -193,7 +191,7 @@ void main() {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
     await tester.pump();
 
-    expect(find.text('Commute'), findsNothing);
+    expect(find.text('Pay someone'), findsNothing);
 
     await tester.runAsync(() => store.close());
   });
@@ -204,16 +202,16 @@ void main() {
     // entry pointing at them via preset_id. Soft-delete (used here) must
     // never remove the underlying row.
     late IntentStore store;
-    late int paymentsId;
+    late int mailId;
     await tester.runAsync(() async {
       store = await openTestStore();
-      paymentsId = (await store.allPresets()).firstWhere((p) => p.label == 'Payments').id;
+      mailId = (await store.allPresets()).firstWhere((p) => p.label == 'Check mail').id;
       await store.insertEvent(IntentEvent(
         clientId: 'hist-1',
         kind: IntentKind.intent,
         source: IntentSource.preset,
-        text: 'Payments',
-        presetId: paymentsId,
+        text: 'Check mail',
+        presetId: mailId,
         declaredAt: DateTime.utc(2026, 1, 1),
         completedAt: DateTime.utc(2026, 1, 1),
       ));
@@ -221,7 +219,7 @@ void main() {
 
     await pumpScreen(tester, store);
     await tester.tap(find.descendant(
-      of: find.widgetWithText(ListTile, 'Payments'),
+      of: find.widgetWithText(ListTile, 'Check mail'),
       matching: find.byIcon(Icons.delete_outline),
     ));
     await tester.pump();
@@ -232,14 +230,14 @@ void main() {
     await tester.runAsync(() async {
       final events = await store.recentEvents();
       final row = events.firstWhere((e) => e.clientId == 'hist-1');
-      expect(row.presetId, paymentsId);
-      expect(row.text, 'Payments');
+      expect(row.presetId, mailId);
+      expect(row.text, 'Check mail');
     });
 
     await tester.runAsync(() => store.close());
   });
 
-  testWidgets('restoring defaults re-seeds the original five without hard-deleting old rows', (tester) async {
+  testWidgets('restoring defaults re-seeds the verb five without hard-deleting old rows', (tester) async {
     late IntentStore store;
     await tester.runAsync(() async {
       store = await openTestStore();
@@ -258,7 +256,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Renamed Preset'), findsNothing);
-    for (final label in const ['Payments', 'Calls', 'Messages', 'Food Order', 'Commute']) {
+    for (final label in defaultPresetLabels) {
       expect(find.text(label), findsOneWidget);
     }
 

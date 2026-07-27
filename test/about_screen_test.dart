@@ -10,8 +10,10 @@ void main() {
     await tester.pump();
 
     expect(find.text(appDisplayName), findsOneWidget);
+    expect(find.byType(Image), findsOneWidget);
     expect(find.text('Version $appVersion'), findsOneWidget);
     expect(find.text('Send feedback'), findsOneWidget);
+    expect(find.text('Report a problem'), findsOneWidget);
     expect(find.text('Privacy policy'), findsOneWidget);
     expect(find.text('Rate on Play'), findsOneWidget);
     expect(find.text('Share'), findsOneWidget);
@@ -27,7 +29,7 @@ void main() {
     expect(find.text('Version 9.9.9+9'), findsOneWidget);
   });
 
-  testWidgets('tapping "Send feedback" launches a mailto: URI to the placeholder address', (tester) async {
+  testWidgets('tapping "Send feedback" launches a mailto: URI to the support address', (tester) async {
     Uri? launched;
     await tester.pumpWidget(MaterialApp(
       home: AboutScreen(launch: (uri) async {
@@ -48,7 +50,31 @@ void main() {
     expect(find.byType(SnackBar), findsNothing);
   });
 
-  testWidgets('tapping "Privacy policy" launches the placeholder URL', (tester) async {
+  testWidgets('tapping "Report a problem" launches a mailto with auto-filled log', (tester) async {
+    Uri? launched;
+    await tester.pumpWidget(MaterialApp(
+      home: AboutScreen(
+        launch: (uri) async {
+          launched = uri;
+          return true;
+        },
+        problemLogSnapshot: () async => 'FAKE_STACK_LINE',
+      ),
+    ));
+    await tester.pump();
+
+    await tester.tap(find.text('Report a problem'));
+    await tester.pumpAndSettle();
+
+    expect(launched, isNotNull);
+    expect(launched!.scheme, 'mailto');
+    expect(launched!.path, feedbackEmail);
+    expect(launched!.queryParameters['subject'], contains('problem report'));
+    expect(launched!.queryParameters['body'], contains('FAKE_STACK_LINE'));
+    expect(launched!.queryParameters['body'], contains('What happened?'));
+  });
+
+  testWidgets('tapping "Privacy policy" launches the published policy URL', (tester) async {
     Uri? launched;
     await tester.pumpWidget(MaterialApp(
       home: AboutScreen(launch: (uri) async {
@@ -96,7 +122,11 @@ void main() {
     ));
     await tester.pump();
 
-    expect(find.textContaining('support'), findsWidgets);
+    await tester.scrollUntilVisible(find.text('Support'), 300);
+    await tester.pump();
+
+    expect(find.text('Support'), findsOneWidget);
+    expect(find.textContaining('support development'), findsOneWidget);
     expect(find.byType(TextButton), findsNothing);
     expect(find.byIcon(Icons.attach_money), findsNothing);
   });

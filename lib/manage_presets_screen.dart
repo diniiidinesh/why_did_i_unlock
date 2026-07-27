@@ -165,9 +165,8 @@ class _ManagePresetsScreenState extends State<ManagePresetsScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Restore default presets?'),
         content: const Text(
-          'This replaces your current preset list with the original five. Your existing '
-          'presets stay resolvable in history — they\'re just hidden from the capture screen '
-          'and this list from now on.',
+          'This replaces your current list with the default five verb presets. '
+          'Your existing presets stay in history — they\'re just hidden here.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),

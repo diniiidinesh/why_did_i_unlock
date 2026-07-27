@@ -14,6 +14,10 @@ Bubble hybrid UX (states/actions): `docs/erd/bubble-ux-hybrid-plan-2026-07-24.md
 - **2026-07-24 (doc):** this file archived so the directive survives chat
   summarization; store brand name remains open (`CLAUDE.md` §12) — Beacon
   here is the *visual system*, not a Play Store rename.
+- **2026-07-24 (rename):** store brand decided — Play title
+  `Beacon: Mindful Phone Use`, on-device `Beacon`
+  (`docs/erd/beacon-store-rename-2026-07-24.md`). This file remains the
+  *token* spec; naming lives in `lib/brand.dart`.
 -->
 
 # Beacon visual identity

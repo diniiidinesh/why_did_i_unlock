@@ -209,7 +209,7 @@ void main() {
     await tester.runAsync(() => store.close());
   });
 
-  testWidgets('tapping "Privacy policy" launches the placeholder URL', (tester) async {
+  testWidgets('tapping "Privacy policy" launches the published policy URL', (tester) async {
     Uri? launched;
     final store = await openStore(tester);
     await pumpScreen(tester, store: store, launch: (uri) async {
