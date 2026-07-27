@@ -2,7 +2,7 @@
 
 **Beacon**
 
-**Effective date:** [DATE OF PUBLICATION]
+**Effective date:** 25 July 2026
 
 ---
 
@@ -91,8 +91,9 @@ Questions about this policy: **hi@dineshkaliki.com**
 <!--
 MAINTENANCE NOTES — not part of the published policy; strip these before hosting.
 
-1. Placeholders left: [DATE OF PUBLICATION] only. App name + contact filled
-   2026-07-24. HTML mirror for GitHub Pages: `docs/site/privacy.html`.
+1. No placeholders left. App name + contact filled 2026-07-24; effective date
+   filled 2026-07-27 to match the live page. HTML mirror for GitHub Pages:
+   `docs/site/privacy.html`.
 
 2. Accuracy basis (verify before each release — one added dependency can
    invalidate this whole document):
