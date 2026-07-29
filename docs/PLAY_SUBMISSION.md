@@ -86,6 +86,29 @@ weaker case and reviewers may focus there.
 > and can dismiss at any time; no standard foreground service type covers
 > "rendering a user-requested overlay."
 
+### 1a. Foreground service TYPE declaration — separate from the above, and needs videos
+
+**Confirmed via web search 2026-07-29** — distinct from the special-use written
+justification in §1 (that text goes wherever Console asks for it, likely the same
+form). This is Google's newer, structured per-type declaration, required because
+`targetSdk=36` (Android 14+) and the app declares FGS types. It appears as a
+**prompt in Play Console under Policy → App content** — usually *after* a build
+targeting Android 14+ is uploaded, and can take a little time to surface (don't
+assume its absence in the first few minutes means it isn't coming).
+
+For **each** declared type (so once for `UnlockListenerService`'s
+`monitorPhoneUnlocks`, once for the plugin's `OverlayService`'s
+`showOverlayOnUnlock`) Console asks for:
+- A description of the functionality using that foreground service type (reuse
+  the justification text in §1 above, trimmed to fit).
+- **A link to a video demonstrating the feature** — an unlisted YouTube upload is
+  the standard route. Record two short screen captures ahead of the Closed
+  testing upload, not after: (1) unlocking the phone and the intent-capture
+  prompt appearing, (2) declaring an intent and the bubble persisting/dragging.
+  Doing this before upload avoids losing days on the 14-day closed-test clock
+  scrambling for footage if the prompt blocks the release.
+- The specific use case selected from Google's list for that type.
+
 ### Draft: `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` (Play policy questionnaire)
 
 Paste when Console asks why this permission is declared (manifest comment in
@@ -187,6 +210,16 @@ by the Flutter engine, **not** `QUERY_ALL_PACKAGES`.
 - **[ ] Store listing must explain the overlay.** Draft copy + screenshot brief
   in §3c. Phone screenshots must be **real device captures** (see §3c — AI
   mockups alone are a policy risk).
+- **[DONE 2026-07-29] Exclude tablet/Chromebook/Wear from compatible devices.**
+  Manifest now declares `<uses-feature android:name="android.hardware.touchscreen"
+  android:required="true"/>` (AndroidManifest.xml) — Beacon's overlay-on-unlock
+  mechanic is phone-only. **Still needed at Console time (not a code task):**
+  Play Console → Grow → Store presence → Main store listing → (or App content →
+  Advanced settings) → **Device catalog** → **Excluded devices** → exclude all
+  Tablet devices (and Chromebook/Wear OS if listed). This is what removes the
+  mandatory tablet-screenshot requirement from the publish checklist — the
+  manifest change alone doesn't retroactively clear an already-surfaced Console
+  prompt.
 - **[ ] Verify the foreground-service notification is actually visible on
   Android 13+.** `POST_NOTIFICATIONS` is not in the manifest. Play policy expects
   a foreground service to be user-visible; if the ongoing notification is

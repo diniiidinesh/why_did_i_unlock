@@ -99,7 +99,7 @@ Code & assets:
 - `android/app/src/main/AndroidManifest.xml` — permissions + service/receiver declarations.
 - `android/app/keystore/upload-keystore.jks`, `android/key.properties` — release signing (gitignored, see §5).
 - `assets/icon/icon.png` — Beacon launcher icon source (amber mark; used by `flutter_launcher_icons`).
-- `pubspec.yaml` — Dart/Flutter dependencies (`version` currently `0.6.1+9` on `main`).
+- `pubspec.yaml` — Dart/Flutter dependencies (`version` currently `0.6.2+10`, pending merge to `main`).
 
 Docs: for **what each doc is**, see the doc map in `README.md`; for **when to update each**, see `docs/DOC_UPKEEP.md`. Not re-listed here, to keep a single owner per fact. One operational reminder that belongs next to the code: **read `docs/ARCHITECTURE.md` before touching the native layer or overlay flow.**
 
