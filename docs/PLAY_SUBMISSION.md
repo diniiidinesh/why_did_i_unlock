@@ -174,9 +174,8 @@ by the Flutter engine, **not** `QUERY_ALL_PACKAGES`.
 
 ## 3. Adjacent submission gates
 
-- **[DONE 2026-07-24/25] Store brand name.** **Beacon** (see §0 / §3c). In-app
-  strings, launcher/splash, and FGS `ic_stat_beacon` shipped on
-  `cursor/beacon-play-listing`.
+- **[DONE 2026-07-24/25, merged to `main` 2026-07-27] Store brand name.** **Beacon**
+  (see §0 / §3c). In-app strings, launcher/splash, and FGS `ic_stat_beacon` shipped.
 - **[DONE 2026-07-25] Privacy policy URL.** Hosted at
   `https://dineshkaliki.com/beacon/privacy/` (`beacon-site` + Cloudflare DNS).
   Wired in `lib/brand.dart`.

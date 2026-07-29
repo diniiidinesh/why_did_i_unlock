@@ -28,6 +28,20 @@ descriptions live in README's doc map (the front door); the table above owns onl
 the *update trigger* ("Update when") — don't grow it back into a second copy of
 README's descriptions. CLAUDE.md §6 points here rather than re-listing the docs.
 
+## Before editing docs: sync to latest `main` first
+
+**Always `git fetch origin main && git merge origin/main` (or rebase) onto your
+working branch before touching `CLAUDE.md`, `README.md`, `docs/BACKLOG.md`, or
+`docs/PLAY_SUBMISSION.md`.** These files get edited by whichever session/tool
+happens to be active — Claude Code sessions, Cursor sessions, sometimes in
+parallel — and a checkout that predates someone else's doc fix will silently
+*revert* that fix the moment it commits its own version of the same file,
+even with no merge conflict (git sees it as a legitimate edit, not damage).
+This actually happened 2026-07-29 (see `BACKLOG.md`'s doc-drift note): a PR
+built from a stale branch reverted 4 files' worth of corrections made three
+days earlier. A 10-second sync at the start of a doc-editing session is cheap
+insurance against re-litigating "wait, didn't we already fix this?" later.
+
 ## Token-cheap update procedure
 
 1. **Don't re-read a whole file to change one line.** Use `Grep` for the exact
