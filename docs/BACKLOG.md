@@ -3,14 +3,12 @@
 > Deferred engineering/feature work and ideas not yet built. Git-tracked on purpose
 > (survives machine switches).
 >
-> ### TOP OF NEXT THREAD (2026-07-27)
+> ### TOP OF NEXT THREAD (2026-07-25)
 >
-> Merged to `main` (PR #9 Stage B, then PR #8 Beacon rebrand), `0.6.1+9`. Branding,
-> privacy, Report a problem, prompt 100%, verb presets, Home load fix, **OEM
-> autostart UX + overlay find-hint** are code-complete on `main`. Next: **on-device
-> QA + Play Console closed test** (`docs/PLAY_SUBMISSION.md` §3–§4). Laptop is
-> temporarily down for repair — on-device items are blocked until it's back; Play
-> Console listing/Data-Safety/tester setup itself is not (mobile-friendly).
+> Branch `cursor/beacon-play-listing` @ `0.6.1+9`. Branding, privacy, Report a
+> problem, prompt 100%, verb presets, Home load fix, **OEM autostart UX +
+> overlay find-hint** are code-complete. Next: **on-device QA +
+> Play Console closed test** (`docs/PLAY_SUBMISSION.md` §3–§4).
 >
 > 1. **On-device matrix** — bubble 54–60, Beacon visual 61–65, verb presets 66–71,
 >    Home retry 72, OEM/overlay onboarding 73–76 (`docs/TEST_PLAN.md`).
