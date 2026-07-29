@@ -3,12 +3,23 @@
 > Deferred engineering/feature work and ideas not yet built. Git-tracked on purpose
 > (survives machine switches).
 >
-> ### TOP OF NEXT THREAD (2026-07-25)
+> ### TOP OF NEXT THREAD (2026-07-29)
 >
-> Branch `cursor/beacon-play-listing` @ `0.6.1+9`. Branding, privacy, Report a
-> problem, prompt 100%, verb presets, Home load fix, **OEM autostart UX +
-> overlay find-hint** are code-complete. Next: **on-device QA +
-> Play Console closed test** (`docs/PLAY_SUBMISSION.md` §3–§4).
+> Merged to `main` (PR #9 Stage B, then PR #8 Beacon rebrand), `0.6.1+9`. Branding,
+> privacy, Report a problem, prompt 100%, verb presets, Home load fix, **OEM
+> autostart UX + overlay find-hint** are code-complete on `main`. Laptop is back —
+> next: **on-device QA + Play Console closed test** (`docs/PLAY_SUBMISSION.md`
+> §3–§4).
+>
+> **Doc-drift note (2026-07-29):** PR #12 ("OEM battery guidance UX") shipped zero
+> code — that feature was already merged via PR #8 on 2026-07-25. Its only real
+> effect was reverting the "TOP OF NEXT THREAD" block and 3 other doc files back to
+> pre-PR-#10 stale phrasing, because it was built from a `cursor/beacon-play-listing`
+> checkout that predated PR #10/#11's doc fixes. Reverted here. **Lesson: before any
+> session edits CLAUDE.md/README/BACKLOG/PLAY_SUBMISSION, sync the branch to latest
+> `main` first** (`git fetch origin main && git merge origin/main` or rebase) —
+> otherwise a stale checkout silently undoes doc fixes made after it branched. Added
+> to `docs/DOC_UPKEEP.md`.
 >
 > 1. **On-device matrix** — bubble 54–60, Beacon visual 61–65, verb presets 66–71,
 >    Home retry 72, OEM/overlay onboarding 73–76 (`docs/TEST_PLAN.md`).
