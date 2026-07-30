@@ -398,15 +398,17 @@ Help](https://support.google.com/googleplay/android-developer/answer/14151465)):
 
 ### Closed test track
 
-- [ ] Build: `flutter build appbundle --release` (you run this).
-- [ ] Upload AAB to **Closed testing** (not Internal-only — internal does **not**
-      satisfy the production-access gate).
-- [ ] Add testers by email list or Google Group.
-- [ ] Recruit **at least 12**, better **15–20** (buffer for dropouts).
+- [DONE 2026-07-30] Build: `flutter build appbundle --release`, `0.6.2 (10)`.
+- [DONE 2026-07-30] Uploaded AAB to **Closed testing - Alpha** track.
+- [DONE 2026-07-30] Added testers via two email lists: **Friends (21)** +
+      **Testers List (8)** = 29 total invited.
+- [DONE 2026-07-30] Recruited 29, well above the 12 minimum.
 - [ ] Each tester must: open the opt-in link → Become a tester → install from
       Play (not a sideloaded APK).
-- [ ] Confirm Console shows ≥12 opted-in before counting days.
-- [ ] Keep ≥12 opted-in **continuously for 14 days**. If the count dips below 12,
+- [DONE 2026-07-30] Console shows ≥12 opted-in — Dashboard's production-access
+      checklist confirms this box checked.
+- [IN PROGRESS, started ~2026-07-30] Keep ≥12 opted-in **continuously for
+      14 days** → target completion **~2026-08-13**. If the count dips below 12,
       the window is at risk — recruit replacements immediately.
 - [ ] After 14 continuous days: Dashboard → apply for production access → answer
       Google's testing questionnaire honestly.
@@ -417,6 +419,30 @@ Help](https://support.google.com/googleplay/android-developer/answer/14151465)):
 - Opt-out / wrong Google account / never installing can silently break the count.
 - Uninstall alone usually does **not** clear opt-in; opt-out does.
 - Over-recruit; send a mid-window "please stay opted in" reminder.
+
+### Troubleshooting notes (2026-07-30)
+
+- **The opt-in link is the normal Play Store URL**, not a distinct-looking
+  link. Console's "How testers join your test" gives two variants — **Join on
+  Android** (`play.google.com/apps/testing/<package>`, opens the Play Store
+  app directly) and **Join on the web** (browser opt-in, tester still installs
+  from Play separately after). Both are legitimate; use the Android one for
+  testers you expect to open the email on their phone.
+- **Testing the link yourself as the developer account will NOT show the
+  "Become a tester" prompt** — Google gives the app owner implicit access, so
+  it just opens the normal listing. This is expected, not a bug; it means a
+  developer self-test can't verify the tester flow. Test with a genuinely
+  separate Google account (incognito + an account actually on the tester
+  list) if verification is needed.
+- **Statistics (Console → Statistics) lags 24–48h** and is not the place to
+  check opt-in progress same-day.
+- **The Testers tab (Closed testing → Alpha → Testers) only shows tester-list
+  *configuration*** (which lists are attached, how many emails each has) —
+  it does **not** show a live opted-in count.
+- **The actual live opted-in status is the Dashboard's production-access
+  checklist** (Play Console → Dashboard → Production → "Apply for access to
+  production"): a checked/struck-through "Have at least 12 testers opted-in"
+  line is the reliable signal, confirmed working 2026-07-30.
 
 ### If you later create an Organisation account
 
