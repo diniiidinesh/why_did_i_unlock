@@ -1864,7 +1864,11 @@ class _OverlayRootState extends State<OverlayRoot> {
     });
     await FlutterOverlayWindow.closeOverlay();
     _signalOverlayClosed();
-    debugPrint('😴 Overlay: snoozed "$_intentText"');
+    // Gated per docs/PLAY_SUBMISSION.md §3b.1 — _intentText is the user's own
+    // declared-intent text; debugPrint is not stripped from release builds.
+    if (kDebugMode) {
+      debugPrint('😴 Overlay: snoozed "$_intentText"');
+    }
   }
 
   Future<void> _dismissBubble() async {
