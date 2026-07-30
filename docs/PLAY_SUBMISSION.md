@@ -86,6 +86,29 @@ weaker case and reviewers may focus there.
 > and can dismiss at any time; no standard foreground service type covers
 > "rendering a user-requested overlay."
 
+### 1a. Foreground service TYPE declaration — separate from the above, and needs videos
+
+**Confirmed via web search 2026-07-29** — distinct from the special-use written
+justification in §1 (that text goes wherever Console asks for it, likely the same
+form). This is Google's newer, structured per-type declaration, required because
+`targetSdk=36` (Android 14+) and the app declares FGS types. It appears as a
+**prompt in Play Console under Policy → App content** — usually *after* a build
+targeting Android 14+ is uploaded, and can take a little time to surface (don't
+assume its absence in the first few minutes means it isn't coming).
+
+For **each** declared type (so once for `UnlockListenerService`'s
+`monitorPhoneUnlocks`, once for the plugin's `OverlayService`'s
+`showOverlayOnUnlock`) Console asks for:
+- A description of the functionality using that foreground service type (reuse
+  the justification text in §1 above, trimmed to fit).
+- **A link to a video demonstrating the feature** — an unlisted YouTube upload is
+  the standard route. Record two short screen captures ahead of the Closed
+  testing upload, not after: (1) unlocking the phone and the intent-capture
+  prompt appearing, (2) declaring an intent and the bubble persisting/dragging.
+  Doing this before upload avoids losing days on the 14-day closed-test clock
+  scrambling for footage if the prompt blocks the release.
+- The specific use case selected from Google's list for that type.
+
 ### Draft: `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` (Play policy questionnaire)
 
 Paste when Console asks why this permission is declared (manifest comment in
@@ -187,6 +210,16 @@ by the Flutter engine, **not** `QUERY_ALL_PACKAGES`.
 - **[ ] Store listing must explain the overlay.** Draft copy + screenshot brief
   in §3c. Phone screenshots must be **real device captures** (see §3c — AI
   mockups alone are a policy risk).
+- **[DONE 2026-07-29] Exclude tablet/Chromebook/Wear from compatible devices.**
+  Manifest now declares `<uses-feature android:name="android.hardware.touchscreen"
+  android:required="true"/>` (AndroidManifest.xml) — Beacon's overlay-on-unlock
+  mechanic is phone-only. **Still needed at Console time (not a code task):**
+  Play Console → Grow → Store presence → Main store listing → (or App content →
+  Advanced settings) → **Device catalog** → **Excluded devices** → exclude all
+  Tablet devices (and Chromebook/Wear OS if listed). This is what removes the
+  mandatory tablet-screenshot requirement from the publish checklist — the
+  manifest change alone doesn't retroactively clear an already-surfaced Console
+  prompt.
 - **[ ] Verify the foreground-service notification is actually visible on
   Android 13+.** `POST_NOTIFICATIONS` is not in the manifest. Play policy expects
   a foreground service to be user-visible; if the ongoing notification is
@@ -365,15 +398,17 @@ Help](https://support.google.com/googleplay/android-developer/answer/14151465)):
 
 ### Closed test track
 
-- [ ] Build: `flutter build appbundle --release` (you run this).
-- [ ] Upload AAB to **Closed testing** (not Internal-only — internal does **not**
-      satisfy the production-access gate).
-- [ ] Add testers by email list or Google Group.
-- [ ] Recruit **at least 12**, better **15–20** (buffer for dropouts).
+- [DONE 2026-07-30] Build: `flutter build appbundle --release`, `0.6.2 (10)`.
+- [DONE 2026-07-30] Uploaded AAB to **Closed testing - Alpha** track.
+- [DONE 2026-07-30] Added testers via two email lists: **Friends (21)** +
+      **Testers List (8)** = 29 total invited.
+- [DONE 2026-07-30] Recruited 29, well above the 12 minimum.
 - [ ] Each tester must: open the opt-in link → Become a tester → install from
       Play (not a sideloaded APK).
-- [ ] Confirm Console shows ≥12 opted-in before counting days.
-- [ ] Keep ≥12 opted-in **continuously for 14 days**. If the count dips below 12,
+- [DONE 2026-07-30] Console shows ≥12 opted-in — Dashboard's production-access
+      checklist confirms this box checked.
+- [IN PROGRESS, started ~2026-07-30] Keep ≥12 opted-in **continuously for
+      14 days** → target completion **~2026-08-13**. If the count dips below 12,
       the window is at risk — recruit replacements immediately.
 - [ ] After 14 continuous days: Dashboard → apply for production access → answer
       Google's testing questionnaire honestly.
@@ -384,6 +419,30 @@ Help](https://support.google.com/googleplay/android-developer/answer/14151465)):
 - Opt-out / wrong Google account / never installing can silently break the count.
 - Uninstall alone usually does **not** clear opt-in; opt-out does.
 - Over-recruit; send a mid-window "please stay opted in" reminder.
+
+### Troubleshooting notes (2026-07-30)
+
+- **The opt-in link is the normal Play Store URL**, not a distinct-looking
+  link. Console's "How testers join your test" gives two variants — **Join on
+  Android** (`play.google.com/apps/testing/<package>`, opens the Play Store
+  app directly) and **Join on the web** (browser opt-in, tester still installs
+  from Play separately after). Both are legitimate; use the Android one for
+  testers you expect to open the email on their phone.
+- **Testing the link yourself as the developer account will NOT show the
+  "Become a tester" prompt** — Google gives the app owner implicit access, so
+  it just opens the normal listing. This is expected, not a bug; it means a
+  developer self-test can't verify the tester flow. Test with a genuinely
+  separate Google account (incognito + an account actually on the tester
+  list) if verification is needed.
+- **Statistics (Console → Statistics) lags 24–48h** and is not the place to
+  check opt-in progress same-day.
+- **The Testers tab (Closed testing → Alpha → Testers) only shows tester-list
+  *configuration*** (which lists are attached, how many emails each has) —
+  it does **not** show a live opted-in count.
+- **The actual live opted-in status is the Dashboard's production-access
+  checklist** (Play Console → Dashboard → Production → "Apply for access to
+  production"): a checked/struck-through "Have at least 12 testers opted-in"
+  line is the reliable signal, confirmed working 2026-07-30.
 
 ### If you later create an Organisation account
 

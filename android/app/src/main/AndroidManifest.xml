@@ -1,4 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Beacon's core mechanic (overlay bubble on unlock) is phone-specific;
+         declaring touchscreen as required tells Play this app isn't
+         tablet/TV/Wear-compatible, so those form factors are excluded from
+         compatible devices (in addition to excluding them in Play Console's
+         Device catalog — see docs/PLAY_SUBMISSION.md). -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="true"/>
+    <uses-feature android:name="android.hardware.faketouch" android:required="false"/>
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
