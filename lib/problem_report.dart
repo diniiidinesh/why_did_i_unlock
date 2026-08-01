@@ -6,9 +6,29 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Local-only buffer of recent Flutter/async errors for closed-test
 /// "Report a problem" emails — no network, no Crashlytics.
 ///
-/// Survives soft failures and process restarts via [SharedPreferences].
+/// Survives soft failures and process restarts via [SharedPreferencesAsync].
 /// Does **not** capture hard native crashes (OOM, SIGSEGV); those leave no
 /// Dart stack — the email body explains that to the reporter.
+///
+/// Deliberately uses [SharedPreferencesAsync], never `SharedPreferences.getInstance()`
+/// — same reasoning as `AppSettings` (see that class's doc comment).
+/// `installHooks()` runs in three separate isolates (`ui`/`background`/`overlay`,
+/// see `lib/main.dart`), and `getInstance()`'s cached per-isolate singleton
+/// previously caused two real bugs here: the About screen (UI isolate) could
+/// read a stale cached copy that never saw errors recorded later by the
+/// background isolate in the same session, and — because `record()` does a
+/// read-modify-write — an isolate with a stale cached read could clobber
+/// every entry another isolate had written since. `SharedPreferencesAsync`
+/// reads the platform directly on every call, closing both gaps for the UI
+/// and background isolates.
+///
+/// The overlay isolate is a separate, unresolved problem: it has no plugins
+/// registered at all (see `lib/main.dart`'s note on `backgroundMain`), so
+/// **no** `shared_preferences` call — sync or async — works there; `record()`
+/// silently no-ops via the catch below whenever called from that isolate.
+/// Capturing overlay-isolate errors needs a relay through the background
+/// isolate's `IsolateNameServer` ports (the same pattern `_intentWritePortName`
+/// uses), not a plugin swap — tracked in `docs/BACKLOG.md`, not yet built.
 class ProblemReportLog {
   static const prefsKey = 'problem_report_log_v1';
 
@@ -18,15 +38,16 @@ class ProblemReportLog {
   /// Cap what we put in a mailto: body (many mail apps truncate long URIs).
   static const maxEmailChars = 1600;
 
-  /// Append one error. Safe to call from any isolate that has prefs.
+  /// Append one error. Safe to call from any isolate with plugin access
+  /// (UI/background — NOT the overlay isolate, see the class doc comment).
   static Future<void> record(String engine, Object error, [StackTrace? stack]) async {
     final stamp = DateTime.now().toUtc().toIso8601String();
     final entry = '[$stamp|$engine]\n'
         '${_clip(error.toString(), 400)}\n'
         '${_clip(stack?.toString() ?? '', 800)}\n---\n';
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final prev = prefs.getString(prefsKey) ?? '';
+      final prefs = SharedPreferencesAsync();
+      final prev = await prefs.getString(prefsKey) ?? '';
       var next = '$prev$entry';
       if (next.length > maxStoredChars) {
         next = next.substring(next.length - maxStoredChars);
@@ -40,8 +61,8 @@ class ProblemReportLog {
   /// Text block for a problem-report email body.
   static Future<String> snapshotForEmail() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(prefsKey) ?? '';
+      final prefs = SharedPreferencesAsync();
+      final raw = await prefs.getString(prefsKey) ?? '';
       if (raw.trim().isEmpty) {
         return '(No recent in-app errors were captured. If the app closed '
             'abruptly with no dialog, describe what you were doing above — '
@@ -77,7 +98,6 @@ class ProblemReportLog {
   /// Test helper.
   @visibleForTesting
   static Future<void> clearForTest() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(prefsKey);
+    await SharedPreferencesAsync().remove(prefsKey);
   }
 }

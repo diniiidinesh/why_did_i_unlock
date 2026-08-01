@@ -281,6 +281,47 @@ doing nothing) as one cause, not several.
   (`lib/problem_report.dart`, hooks on ui/background/overlay engines, stored
   in SharedPreferences). Still no network crash SDK. Hard native crashes
   remain uncaptured — email copy explains that.
+- **[P1] "Report a problem" was effectively non-functional — partially fixed
+  2026-08-01, one piece still open.** Root-caused after a tester (Dinesh)
+  reported empty logs on every attempt. Five causes found, two fixed on
+  `claude/bug-report-crash-logging-kc419n` (untested on-device — no Flutter
+  toolchain/device available in that session; needs `flutter analyze` +
+  `flutter test` + a real on-device error-then-report cycle before merge):
+  - **Fixed:** `ProblemReportLog` used `SharedPreferences.getInstance()`,
+    the exact per-isolate-singleton-caching bug `AppSettings` was written to
+    avoid (CLAUDE.md §3). Across the ui/background isolates this meant (a)
+    the About screen could read a stale cached copy that never saw errors
+    the background isolate recorded later in the same session, and (b)
+    because `record()` does read-modify-write, a stale read could clobber
+    every entry another isolate had written since. Swapped to
+    `SharedPreferencesAsync` (reads platform fresh every call), matching
+    `AppSettings`'s own pattern.
+  - **Fixed:** the mailto URIs (`Send feedback` + `Report a problem`) were
+    built via `Uri(queryParameters: ...)`, which form-encodes spaces as
+    literal `+` — several mail apps (Gmail included) don't decode that back
+    on a `mailto:` link, so subject/body arrived full of stray `+`
+    characters. Switched to hand-built percent-encoding
+    (`Uri.encodeComponent`, RFC 6068).
+  - **Still open — overlay isolate cannot record anything, at all.** The
+    overlay engine has zero plugins registered (see `lib/main.dart`'s note
+    on why — same reason `flutter_overlay_window`'s old `shareData()` bridge
+    was replaced by `IsolateNameServer` ports), so `SharedPreferencesAsync`
+    throws `MissingPluginException` there and `record()`'s catch swallows it
+    silently. This is exactly where the bubble and capture screen live, i.e.
+    the isolate most likely to actually throw. Fix needs a relay through the
+    background isolate's ports (same pattern as `_intentWritePortName`) —
+    deliberately NOT built blind in the no-device session above, since
+    landing new isolate/port wiring untested is exactly the failure mode
+    CLAUDE.md §3's four "real bugs found" gotchas all trace back to.
+  - **Also noted, not yet acted on:** the buffer only catches *uncaught*
+    Dart exceptions and can lose the write if the process dies before an
+    `unawaited(record(...))` lands — most of the actual failure modes in
+    CLAUDE.md §3 (hangs, locally-caught errors) never reach these hooks at
+    all. A background-isolate breadcrumb trail (lifecycle events, not just
+    exceptions) would likely surface more than exception logging ever will.
+    Play Console → Android vitals already has fatal/ANR data for the closed
+    test with zero code changes — check there first.
+
 - **[decision] Full crash reporting / Crashlytics** — still deferred. See prior
   note: opt-in network reporting only when N outgrows 1:1 support; flips Data
   Safety in the same release.

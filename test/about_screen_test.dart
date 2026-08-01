@@ -46,6 +46,10 @@ void main() {
     expect(launched!.scheme, 'mailto');
     expect(launched!.path, feedbackEmail);
     expect(launched!.queryParameters['subject'], contains(appVersion));
+    // Percent-encoded (RFC 6068), not form-encoded — a literal '+' in the
+    // mailto: string is what several mail apps (Gmail included) fail to
+    // decode back into a space.
+    expect(launched.toString(), isNot(contains('+')));
     // No SnackBar — the injected launcher reported success.
     expect(find.byType(SnackBar), findsNothing);
   });
