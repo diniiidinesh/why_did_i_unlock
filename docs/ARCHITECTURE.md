@@ -390,6 +390,18 @@ background engine.
   **app update** killing the process — that's handled by `UpdateReceiver`, above.)
 - **Memory:** up to 3 engines while the app is open (UI + background + overlay), dropping
   to ~2 (background + overlay) when closed. Battery soak vs. the <2%/day target is untested.
+- **`flutter_overlay_window`'s own background service (`OverlayService`) crashes with a
+  `NullPointerException` when Android restarts it after a low-memory kill.** Found via
+  Play Console Android vitals 2026-08-02, affecting 3 closed testers (Nothing Phone,
+  Pixel, Samsung). `Service.onStartCommand()` is documented to receive a `null` `Intent`
+  on a `START_STICKY` restart (same restart mechanism our own `UnlockListenerService`
+  uses without issue); the plugin's `onStartCommand` dereferences `intent` immediately
+  with no null check. Purely native/Java, outside our code — not something
+  `ProblemReportLog` can ever see. `0.5.0` (our pinned version) is also the latest
+  published version, so there's no upgrade path; fix requires a forked, patched copy of
+  the plugin via a git dependency, prepared but not yet applied (blocked on GitHub write
+  access to the plugin's repo + an on-device build to verify). Plain-language RCA + exact
+  patch + fork/pubspec/test steps: `docs/debug/rca-overlay-service-null-intent-crash-2026-08-02.md`.
 
 ## 7. Testing gotchas (Sprint 3 — sqflite + widget tests)
 

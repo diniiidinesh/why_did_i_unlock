@@ -322,6 +322,25 @@ doing nothing) as one cause, not several.
     Play Console → Android vitals already has fatal/ANR data for the closed
     test with zero code changes — check there first.
 
+- **[P1] `flutter_overlay_window` crashes on service restart (`NullPointerException`
+  in `OverlayService.onStartCommand`) — found via Play Console Android vitals
+  2026-08-02, fix prepared not yet applied.** Affected 3 closed testers (Nothing
+  Phone, a Pixel, a Samsung) — Android killed the bubble's background service under
+  memory pressure and restarted it per normal `START_STICKY` behavior, which delivers
+  a `null` `Intent`; the plugin dereferences it immediately with no null check, at
+  `intent.getIntExtra(...)`. Confirmed still present on the plugin's current `main`
+  branch — `0.5.0` (our pinned/latest version) did NOT fix this specific case despite
+  its changelog claiming an `OverlayService` NPE fix (that was a different one).
+  Entirely native — `ProblemReportLog` can never see it (CLAUDE.md §3's "native
+  crashes leave no Flutter log" caveat, confirmed for real here). No newer plugin
+  version exists to upgrade to, so the plan is a one-line null-guard patch via a
+  forked git dependency + an upstream bug report. Full plain-language RCA + exact
+  patch + step-by-step fork/pubspec/test instructions:
+  `docs/debug/rca-overlay-service-null-intent-crash-2026-08-02.md`. Blocked on: GitHub
+  write access to fork/push `X-SLAYER/flutter_overlay_window` and a laptop/device to
+  build + verify the restart path no longer crashes — this session's GitHub access is
+  scoped to `diniiidinesh/why_did_i_unlock` only.
+
 - **[decision] Full crash reporting / Crashlytics** — still deferred. See prior
   note: opt-in network reporting only when N outgrows 1:1 support; flips Data
   Safety in the same release.
