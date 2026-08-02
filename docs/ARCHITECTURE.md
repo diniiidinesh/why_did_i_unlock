@@ -349,6 +349,28 @@ background engine.
   from before boot finished. A concurrent-open guard (a shared in-flight `Future`)
   prevents two simultaneous callers from both calling `open()` when the store is still
   null.
+- **`SharedPreferences.getInstance()` caches a per-isolate singleton — never use it from
+  code that runs in more than one of this app's isolates.** `AppSettings` was built
+  against `SharedPreferencesAsync` from the start specifically to avoid this (its own doc
+  comment explains why: settings are written from the UI engine's Settings screen and read
+  from the background engine). `lib/problem_report.dart`'s `ProblemReportLog` did NOT
+  follow that pattern originally — it used `getInstance()` even though `installHooks()`
+  runs in all three isolates (ui/background/overlay). Found 2026-08-01 investigating a
+  "Report a problem never shows any logs" report: two real bugs from the one root cause.
+  (1) A UI-isolate `getInstance()` call could return a cached copy that never saw entries
+  the background isolate wrote later in the same process lifetime, so About → Report a
+  problem could show stale/empty logs even though errors WERE being recorded elsewhere.
+  (2) Worse, because `record()` is read-modify-write, an isolate holding a stale cached
+  read could overwrite every entry another isolate had appended since — silent data loss,
+  not just staleness. Fixed by switching to `SharedPreferencesAsync` (reads the platform
+  fresh on every call, same as `AppSettings`). **Still unresolved: the overlay isolate has
+  no plugins registered at all** (the same reason `shareData()` was replaced by
+  `IsolateNameServer` ports, above), so no `shared_preferences` call — sync or async —
+  works there; `ProblemReportLog.record()` silently no-ops via its catch block whenever
+  called from the overlay isolate, which is exactly where the bubble and capture screen
+  run. Capturing overlay-isolate errors needs a relay through the background isolate's
+  ports, the same pattern as `_intentWritePortName` — tracked in `docs/BACKLOG.md`, not
+  yet built (needs on-device iteration, not a blind port-wiring change).
 
 ## 6. Known limitations / reliability gaps (not defects introduced here)
 

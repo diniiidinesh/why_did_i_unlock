@@ -273,3 +273,15 @@ Check mail · Message someone · Book a cab · Order food · Pay someone.
 | 75 | Home OEM nudge | ❌ | With battery not exempt: “Keep monitoring alive” → Open Status / Dismiss; dismiss stays gone after reopen |
 | 76 | Friend Vivo/Xiaomi Autostart soak | ❌ | Vivo: App info → Battery usage → Background power control → **Allow background power usage** (not smart control); leave app closed 30–60 min; unlock still prompts. |
 | 77 | OnePlus/Oppo Power consumption controls | ❌ | App info → Battery usage → Allow background ON + Optimize battery use → Don’t optimize (not Always ask) |
+
+### "Report a problem" cross-isolate fix (branch `claude/bug-report-crash-logging-kc419n`, 2026-08-01)
+
+Root cause + code: `docs/ARCHITECTURE.md` §5, `docs/BACKLOG.md`. Unverified — pushed from a
+session with no Flutter toolchain/device.
+
+| # | Case | Status | Notes / expected |
+|---|---|---|---|
+| 78 | Trigger a caught error in the **background** isolate (e.g. temporarily throw in a triage check), then open About → Report a problem without reopening the app | ❌ | The email body's "Recent in-app errors" includes the `[background]`-tagged entry — confirms the UI isolate's `SharedPreferencesAsync` read is no longer stale relative to a same-session background write. |
+| 79 | Trigger errors from two different isolates in one session, then check the log | ❌ | Both entries present, neither missing — confirms the old read-modify-write clobber (stale cached read overwriting the other isolate's entries) is gone. |
+| 80 | Tap "Send feedback" and "Report a problem", inspect the resulting draft email body/subject in the mail app | ❌ | No literal `+` characters where spaces should be (was the Gmail-decoding bug). |
+| 81 | Trigger an error while the **bubble/capture screen (overlay isolate)** is showing, then check the log | ❌ | Known-still-broken: expect the log to NOT include it (overlay isolate has no plugins — `record()` no-ops there). Confirms the documented remaining gap rather than a regression. |
