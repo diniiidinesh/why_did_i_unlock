@@ -64,61 +64,78 @@ copy of the plugin ("fork" it) and point `pubspec.yaml` at that copy instead of 
 official one, while also filing the bug against the original so it can ideally be fixed
 upstream and the fork retired later.
 
-**Status as of 2026-08-02: prepared, not yet applied.** GitHub write access in this
-Claude Code session is scoped only to `diniiidinesh/why_did_i_unlock`, so the actual
-fork/push/issue-filing against `X-SLAYER/flutter_overlay_window` has to happen from a
-session (or by hand) that has access to that repo. Everything needed to do it in a few
-minutes is below.
+**Status as of 2026-08-02: steps 1–4 done (from a Claude Code session with GitHub write
+access to the fork, once Dinesh forked it manually — cross-owner GitHub access can't be
+added to an existing session, so this needed the fork to exist under `diniiidinesh`
+first). Remaining: file the upstream issue by hand, then verify on-device.**
 
-### Step-by-step, once you're back
-
-1. **Fork** `https://github.com/X-SLAYER/flutter_overlay_window` to your own GitHub
-   account (`diniiidinesh`) — via the GitHub website "Fork" button, or a Claude Code
-   session started with that repo as a source.
-2. **Edit** `android/src/main/java/flutter/overlay/window/flutter_overlay_window/OverlayService.java`
-   in your fork. Find `onStartCommand` (starts around line 101) and add a null guard as
-   the very first lines of the method body:
+1. ✅ **Forked** to `https://github.com/diniiidinesh/flutter_overlay_window`.
+2. ✅ **Patched** `android/src/main/java/flutter/overlay/window/flutter_overlay_window/OverlayService.java`
+   — added the null guard as the first lines of `onStartCommand`:
 
    ```java
-   @Override
    public int onStartCommand(Intent intent, int flags, int startId) {
        if (intent == null) {
-           // Android restarts a killed START_STICKY service with a null Intent —
-           // documented behavior, not an error. Nothing to do until the app
-           // calls showOverlay() again with real arguments.
+           // Android redelivers a null Intent when it restarts a killed
+           // START_STICKY service (documented Service.onStartCommand behavior) —
+           // there is nothing to act on until the app calls showOverlay() again
+           // with real arguments, so just stay alive.
            return START_STICKY;
        }
+       mResources = getApplicationContext().getResources();
        int startX = intent.getIntExtra("startX", OverlayConstants.DEFAULT_XY);
        // ...rest of the existing method body, unchanged...
    ```
 
-   (Keep everything else in the method exactly as-is — this only adds the guard clause
-   before the first line that dereferences `intent`.)
-3. **Commit and push** that change to your fork (any branch name is fine, e.g. `main`).
-4. **File the upstream issue** on `X-SLAYER/flutter_overlay_window` (use the crash
-   details in this doc — stack trace, devices, root cause, and mention the one-line
-   fix). Worth linking your fork/commit so the maintainer can cherry-pick it directly.
-5. **Point `pubspec.yaml` at your fork.** Replace:
-
-   ```yaml
-   flutter_overlay_window: ^0.5.0
-   ```
-
-   with:
+3. ✅ **Committed and pushed** to branch `fix/overlay-service-null-intent` on the fork
+   (commit `614e5cb`).
+4. ✅ **`pubspec.yaml` in `why_did_i_unlock` now points at the fork's fix branch:**
 
    ```yaml
    flutter_overlay_window:
      git:
        url: https://github.com/diniiidinesh/flutter_overlay_window.git
-       ref: main   # or whatever branch/commit you pushed the fix to
+       ref: fix/overlay-service-null-intent
    ```
 
-6. **On your laptop:** `flutter clean`, `flutter pub get`, `flutter run --release`, then
-   deliberately reproduce the restart path (open the app, force-stop it or let it idle
-   under memory pressure so Android kills the service, then trigger a restart — e.g.
-   `adb shell am kill <package>` or use "Force stop" from App info, then unlock the
-   phone again) and confirm no crash and the bubble still works normally.
-7. Once confirmed, this becomes a normal merge like any other fix. Keep the fork around
+### What's still manual — do these when you're back
+
+5. **File the upstream issue** on `https://github.com/X-SLAYER/flutter_overlay_window/issues/new`
+   (this needs your own GitHub login — it's a different repo owner, which Claude Code
+   sessions can't cross into once a session already has repos from another owner).
+   Suggested title/body, ready to paste:
+
+   > **Title:** `OverlayService.onStartCommand crashes with NullPointerException on
+   > service restart (null Intent)`
+   >
+   > **Body:**
+   > `OverlayService.onStartCommand` calls `intent.getIntExtra(...)` without checking
+   > whether `intent` is null. Android delivers a null `Intent` when it restarts a
+   > killed `START_STICKY` service (documented `Service.onStartCommand()` behavior) —
+   > this happens on ordinary low-memory kills, not just edge cases. Confirmed via
+   > Android vitals across 3 real devices (Nothing Phone, a Pixel, a Samsung device).
+   >
+   > Stack trace:
+   > ```
+   > Caused by java.lang.NullPointerException: Attempt to invoke virtual method
+   > 'int android.content.Intent.getIntExtra(java.lang.String, int)' on a null
+   > object reference
+   >   at flutter.overlay.window.flutter_overlay_window.OverlayService.onStartCommand
+   > ```
+   >
+   > I've pushed a one-line fix (early-return `START_STICKY` when `intent == null`)
+   > here: https://github.com/diniiidinesh/flutter_overlay_window/tree/fix/overlay-service-null-intent
+   > — happy to open a PR against `main` if useful.
+
+   Optionally, open the PR itself (`Compare & pull request` from that branch) so the
+   maintainer can merge with one click.
+6. **On your laptop:** `flutter clean`, `flutter pub get` (this will rewrite
+   `pubspec.lock`'s `flutter_overlay_window` entry to the git dependency — expected,
+   commit it), `flutter run --release`, then deliberately reproduce the restart path
+   (open the app, then `adb shell am force-stop com.whydidiunlock.why_did_i_unlock` to
+   simulate a kill, then unlock the phone again to trigger the service restart) and
+   confirm no crash and the bubble still works normally.
+7. Once confirmed, this is a normal merge like any other fix. Keep the fork around
    until the upstream fix (if any) ships and you've verified you can drop back to the
    official version cleanly.
 

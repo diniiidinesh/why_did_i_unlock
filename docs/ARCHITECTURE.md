@@ -398,10 +398,14 @@ background engine.
   uses without issue); the plugin's `onStartCommand` dereferences `intent` immediately
   with no null check. Purely native/Java, outside our code — not something
   `ProblemReportLog` can ever see. `0.5.0` (our pinned version) is also the latest
-  published version, so there's no upgrade path; fix requires a forked, patched copy of
-  the plugin via a git dependency, prepared but not yet applied (blocked on GitHub write
-  access to the plugin's repo + an on-device build to verify). Plain-language RCA + exact
-  patch + fork/pubspec/test steps: `docs/debug/rca-overlay-service-null-intent-crash-2026-08-02.md`.
+  published version, so there's no upgrade path. **Applied 2026-08-02:** forked to
+  `diniiidinesh/flutter_overlay_window`, patched (early-return `START_STICKY` when
+  `intent == null`), pushed to `fix/overlay-service-null-intent`; `why_did_i_unlock`'s
+  `pubspec.yaml` now depends on that branch via a git dependency instead of the
+  published `0.5.0`. Still needs: an upstream issue filed by hand (cross-owner GitHub
+  access can't be added mid-session) and an on-device restart-path check (`flutter pub
+  get`, force-stop the app, unlock again) before this is considered verified. Full RCA:
+  `docs/debug/rca-overlay-service-null-intent-crash-2026-08-02.md`.
 
 ## 7. Testing gotchas (Sprint 3 — sqflite + widget tests)
 

@@ -324,22 +324,23 @@ doing nothing) as one cause, not several.
 
 - **[P1] `flutter_overlay_window` crashes on service restart (`NullPointerException`
   in `OverlayService.onStartCommand`) — found via Play Console Android vitals
-  2026-08-02, fix prepared not yet applied.** Affected 3 closed testers (Nothing
-  Phone, a Pixel, a Samsung) — Android killed the bubble's background service under
-  memory pressure and restarted it per normal `START_STICKY` behavior, which delivers
-  a `null` `Intent`; the plugin dereferences it immediately with no null check, at
-  `intent.getIntExtra(...)`. Confirmed still present on the plugin's current `main`
-  branch — `0.5.0` (our pinned/latest version) did NOT fix this specific case despite
-  its changelog claiming an `OverlayService` NPE fix (that was a different one).
-  Entirely native — `ProblemReportLog` can never see it (CLAUDE.md §3's "native
+  2026-08-02, patch applied to a fork, on-device verify still pending.** Affected 3
+  closed testers (Nothing Phone, a Pixel, a Samsung) — Android killed the bubble's
+  background service under memory pressure and restarted it per normal `START_STICKY`
+  behavior, which delivers a `null` `Intent`; the plugin dereferenced it immediately
+  with no null check, at `intent.getIntExtra(...)`. Confirmed present on the plugin's
+  current `main` branch — `0.5.0` (our pinned/latest version) did NOT fix this specific
+  case despite its changelog claiming an `OverlayService` NPE fix (that was a different
+  one). Entirely native — `ProblemReportLog` can never see it (CLAUDE.md §3's "native
   crashes leave no Flutter log" caveat, confirmed for real here). No newer plugin
-  version exists to upgrade to, so the plan is a one-line null-guard patch via a
-  forked git dependency + an upstream bug report. Full plain-language RCA + exact
-  patch + step-by-step fork/pubspec/test instructions:
-  `docs/debug/rca-overlay-service-null-intent-crash-2026-08-02.md`. Blocked on: GitHub
-  write access to fork/push `X-SLAYER/flutter_overlay_window` and a laptop/device to
-  build + verify the restart path no longer crashes — this session's GitHub access is
-  scoped to `diniiidinesh/why_did_i_unlock` only.
+  version exists to upgrade to. **Done:** forked to `diniiidinesh/flutter_overlay_window`,
+  one-line null guard pushed to `fix/overlay-service-null-intent`, `why_did_i_unlock`'s
+  `pubspec.yaml` now points at that branch as a git dependency. **Still open:** file the
+  upstream bug report by hand (different repo owner — can't be done from a session
+  already scoped to `diniiidinesh/why_did_i_unlock`); `flutter pub get` + on-device
+  restart-path verification (`adb shell am force-stop` then unlock) before this can be
+  called done. Full plain-language RCA + exact remaining steps:
+  `docs/debug/rca-overlay-service-null-intent-crash-2026-08-02.md`.
 
 - **[decision] Full crash reporting / Crashlytics** — still deferred. See prior
   note: opt-in network reporting only when N outgrows 1:1 support; flips Data
