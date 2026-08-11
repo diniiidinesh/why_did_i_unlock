@@ -34,7 +34,17 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
-  flutter_overlay_window: ^0.5.0
+  # Forked from X-SLAYER/flutter_overlay_window (upstream ^0.5.0 — no newer
+  # official release exists) to patch a real native crash: OverlayService.
+  # onStartCommand dereferenced a null Intent, which Android delivers on every
+  # restart of a low-memory-killed START_STICKY service — hit 3 closed testers
+  # (Android vitals, 2026-08-02). Fix + upstream issue status, and the plan for
+  # dropping this fork if/when upstream merges a fix:
+  # docs/debug/rca-overlay-service-null-intent-crash-2026-08-02.md
+  flutter_overlay_window:
+    git:
+      url: https://github.com/diniiidinesh/flutter_overlay_window.git
+      ref: fix/overlay-service-null-intent
   shared_preferences: ^2.3.2
   sqflite: ^2.4.3
   path: ^1.9.1

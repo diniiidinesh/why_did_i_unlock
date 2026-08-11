@@ -38,6 +38,7 @@ void main() {
       home: HomeScreen(
         openStore: () async => store,
         checkPermission: () async => true,
+        checkBatteryExemption: () async => true,
       ),
     ));
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));

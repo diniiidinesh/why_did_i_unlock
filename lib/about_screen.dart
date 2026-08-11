@@ -66,15 +66,24 @@ class AboutScreen extends StatelessWidget {
     // Pre-filled with app + OS info so a tester doesn't have to type it —
     // this is the closed-test-scale "just ask them" feedback channel the
     // sprint plan chose over building analytics (docs/BACKLOG.md).
-    final uri = Uri(
-      scheme: 'mailto',
-      path: feedbackEmail,
-      queryParameters: {
-        'subject': '$appDisplayName feedback ($version)',
-        'body': 'App version: $version\nOS: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}\n\n',
-      },
+    final uri = _mailtoUri(
+      subject: '$appDisplayName feedback ($version)',
+      body: 'App version: $version\nOS: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}\n\n',
     );
     _open(context, uri, failureMessage: 'No email app found to send feedback.');
+  }
+
+  /// `Uri(queryParameters: ...)` form-encodes spaces as `+`, which most mail
+  /// apps (Gmail included) don't decode back on a `mailto:` link — the
+  /// subject/body arrive literally full of `+` characters. `mailto:` query
+  /// values need percent-encoding (RFC 6068), not form encoding, so this
+  /// builds the query string by hand with [Uri.encodeComponent].
+  Uri _mailtoUri({required String subject, required String body}) {
+    return Uri.parse(
+      'mailto:$feedbackEmail'
+      '?subject=${Uri.encodeComponent(subject)}'
+      '&body=${Uri.encodeComponent(body)}',
+    );
   }
 
   Future<void> _openProblemReport(BuildContext context) async {
@@ -86,14 +95,7 @@ class AboutScreen extends StatelessWidget {
         '(Describe what you were doing when it failed.)\n\n\n'
         'Recent in-app errors (auto-filled; may be empty):\n'
         '$snapshot\n';
-    final uri = Uri(
-      scheme: 'mailto',
-      path: feedbackEmail,
-      queryParameters: {
-        'subject': '$appDisplayName problem report ($version)',
-        'body': body,
-      },
-    );
+    final uri = _mailtoUri(subject: '$appDisplayName problem report ($version)', body: body);
     await _open(context, uri, failureMessage: 'No email app found to send a report.');
   }
 

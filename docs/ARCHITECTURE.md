@@ -349,6 +349,28 @@ background engine.
   from before boot finished. A concurrent-open guard (a shared in-flight `Future`)
   prevents two simultaneous callers from both calling `open()` when the store is still
   null.
+- **`SharedPreferences.getInstance()` caches a per-isolate singleton — never use it from
+  code that runs in more than one of this app's isolates.** `AppSettings` was built
+  against `SharedPreferencesAsync` from the start specifically to avoid this (its own doc
+  comment explains why: settings are written from the UI engine's Settings screen and read
+  from the background engine). `lib/problem_report.dart`'s `ProblemReportLog` did NOT
+  follow that pattern originally — it used `getInstance()` even though `installHooks()`
+  runs in all three isolates (ui/background/overlay). Found 2026-08-01 investigating a
+  "Report a problem never shows any logs" report: two real bugs from the one root cause.
+  (1) A UI-isolate `getInstance()` call could return a cached copy that never saw entries
+  the background isolate wrote later in the same process lifetime, so About → Report a
+  problem could show stale/empty logs even though errors WERE being recorded elsewhere.
+  (2) Worse, because `record()` is read-modify-write, an isolate holding a stale cached
+  read could overwrite every entry another isolate had appended since — silent data loss,
+  not just staleness. Fixed by switching to `SharedPreferencesAsync` (reads the platform
+  fresh on every call, same as `AppSettings`). **Still unresolved: the overlay isolate has
+  no plugins registered at all** (the same reason `shareData()` was replaced by
+  `IsolateNameServer` ports, above), so no `shared_preferences` call — sync or async —
+  works there; `ProblemReportLog.record()` silently no-ops via its catch block whenever
+  called from the overlay isolate, which is exactly where the bubble and capture screen
+  run. Capturing overlay-isolate errors needs a relay through the background isolate's
+  ports, the same pattern as `_intentWritePortName` — tracked in `docs/BACKLOG.md`, not
+  yet built (needs on-device iteration, not a blind port-wiring change).
 
 ## 6. Known limitations / reliability gaps (not defects introduced here)
 
@@ -368,6 +390,22 @@ background engine.
   **app update** killing the process — that's handled by `UpdateReceiver`, above.)
 - **Memory:** up to 3 engines while the app is open (UI + background + overlay), dropping
   to ~2 (background + overlay) when closed. Battery soak vs. the <2%/day target is untested.
+- **`flutter_overlay_window`'s own background service (`OverlayService`) crashes with a
+  `NullPointerException` when Android restarts it after a low-memory kill.** Found via
+  Play Console Android vitals 2026-08-02, affecting 3 closed testers (Nothing Phone,
+  Pixel, Samsung). `Service.onStartCommand()` is documented to receive a `null` `Intent`
+  on a `START_STICKY` restart (same restart mechanism our own `UnlockListenerService`
+  uses without issue); the plugin's `onStartCommand` dereferences `intent` immediately
+  with no null check. Purely native/Java, outside our code — not something
+  `ProblemReportLog` can ever see. `0.5.0` (our pinned version) is also the latest
+  published version, so there's no upgrade path. **Applied 2026-08-02:** forked to
+  `diniiidinesh/flutter_overlay_window`, patched (early-return `START_STICKY` when
+  `intent == null`), pushed to `fix/overlay-service-null-intent`; `why_did_i_unlock`'s
+  `pubspec.yaml` now depends on that branch via a git dependency instead of the
+  published `0.5.0`. Still needs: an upstream issue filed by hand (cross-owner GitHub
+  access can't be added mid-session) and an on-device restart-path check (`flutter pub
+  get`, force-stop the app, unlock again) before this is considered verified. Full RCA:
+  `docs/debug/rca-overlay-service-null-intent-crash-2026-08-02.md`.
 
 ## 7. Testing gotchas (Sprint 3 — sqflite + widget tests)
 

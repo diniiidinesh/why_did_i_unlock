@@ -281,6 +281,70 @@ doing nothing) as one cause, not several.
   (`lib/problem_report.dart`, hooks on ui/background/overlay engines, stored
   in SharedPreferences). Still no network crash SDK. Hard native crashes
   remain uncaptured — email copy explains that.
+- **[P1] "Report a problem" was effectively non-functional — partially fixed
+  2026-08-01, one piece still open.** Root-caused after a tester (Dinesh)
+  reported empty logs on every attempt. Five causes found, two fixed on
+  `claude/bug-report-crash-logging-kc419n` (untested on-device — no Flutter
+  toolchain/device available in that session; needs `flutter analyze` +
+  `flutter test` + a real on-device error-then-report cycle before merge):
+  - **Fixed:** `ProblemReportLog` used `SharedPreferences.getInstance()`,
+    the exact per-isolate-singleton-caching bug `AppSettings` was written to
+    avoid (CLAUDE.md §3). Across the ui/background isolates this meant (a)
+    the About screen could read a stale cached copy that never saw errors
+    the background isolate recorded later in the same session, and (b)
+    because `record()` does read-modify-write, a stale read could clobber
+    every entry another isolate had written since. Swapped to
+    `SharedPreferencesAsync` (reads platform fresh every call), matching
+    `AppSettings`'s own pattern.
+  - **Fixed:** the mailto URIs (`Send feedback` + `Report a problem`) were
+    built via `Uri(queryParameters: ...)`, which form-encodes spaces as
+    literal `+` — several mail apps (Gmail included) don't decode that back
+    on a `mailto:` link, so subject/body arrived full of stray `+`
+    characters. Switched to hand-built percent-encoding
+    (`Uri.encodeComponent`, RFC 6068).
+  - **Still open — overlay isolate cannot record anything, at all.** The
+    overlay engine has zero plugins registered (see `lib/main.dart`'s note
+    on why — same reason `flutter_overlay_window`'s old `shareData()` bridge
+    was replaced by `IsolateNameServer` ports), so `SharedPreferencesAsync`
+    throws `MissingPluginException` there and `record()`'s catch swallows it
+    silently. This is exactly where the bubble and capture screen live, i.e.
+    the isolate most likely to actually throw. Fix needs a relay through the
+    background isolate's ports (same pattern as `_intentWritePortName`) —
+    deliberately NOT built blind in the no-device session above, since
+    landing new isolate/port wiring untested is exactly the failure mode
+    CLAUDE.md §3's four "real bugs found" gotchas all trace back to.
+    **Re-confirmed on-device 2026-08-11** (`docs/TEST_PLAN.md` case 81): an
+    overlay-isolate error still doesn't reach the log, no crash — behavior
+    unchanged, still needs the port-relay fix above, not a new regression.
+  - **Also noted, not yet acted on:** the buffer only catches *uncaught*
+    Dart exceptions and can lose the write if the process dies before an
+    `unawaited(record(...))` lands — most of the actual failure modes in
+    CLAUDE.md §3 (hangs, locally-caught errors) never reach these hooks at
+    all. A background-isolate breadcrumb trail (lifecycle events, not just
+    exceptions) would likely surface more than exception logging ever will.
+    Play Console → Android vitals already has fatal/ANR data for the closed
+    test with zero code changes — check there first.
+
+- **[P1] `flutter_overlay_window` crashes on service restart (`NullPointerException`
+  in `OverlayService.onStartCommand`) — found via Play Console Android vitals
+  2026-08-02, patch applied to a fork, on-device verify still pending.** Affected 3
+  closed testers (Nothing Phone, a Pixel, a Samsung) — Android killed the bubble's
+  background service under memory pressure and restarted it per normal `START_STICKY`
+  behavior, which delivers a `null` `Intent`; the plugin dereferenced it immediately
+  with no null check, at `intent.getIntExtra(...)`. Confirmed present on the plugin's
+  current `main` branch — `0.5.0` (our pinned/latest version) did NOT fix this specific
+  case despite its changelog claiming an `OverlayService` NPE fix (that was a different
+  one). Entirely native — `ProblemReportLog` can never see it (CLAUDE.md §3's "native
+  crashes leave no Flutter log" caveat, confirmed for real here). No newer plugin
+  version exists to upgrade to. **Done:** forked to `diniiidinesh/flutter_overlay_window`,
+  one-line null guard pushed to `fix/overlay-service-null-intent`, `why_did_i_unlock`'s
+  `pubspec.yaml` now points at that branch as a git dependency. **Still open:** file the
+  upstream bug report by hand (different repo owner — can't be done from a session
+  already scoped to `diniiidinesh/why_did_i_unlock`); `flutter pub get` + on-device
+  restart-path verification (`adb shell am force-stop` then unlock) before this can be
+  called done. Full plain-language RCA + exact remaining steps:
+  `docs/debug/rca-overlay-service-null-intent-crash-2026-08-02.md`.
+
 - **[decision] Full crash reporting / Crashlytics** — still deferred. See prior
   note: opt-in network reporting only when N outgrows 1:1 support; flips Data
   Safety in the same release.
