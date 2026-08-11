@@ -1,10 +1,15 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 import 'package:why_did_i_unlock/problem_report.dart';
 
 void main() {
   setUp(() async {
-    SharedPreferences.setMockInitialValues({});
+    // Same in-memory test double used elsewhere for SharedPreferencesAsync
+    // (see app_settings_test.dart) — the old SharedPreferences.setMockInitialValues
+    // only mocks the legacy sync platform, not SharedPreferencesAsyncPlatform, which
+    // is what ProblemReportLog actually uses.
+    SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
     await ProblemReportLog.clearForTest();
   });
 
