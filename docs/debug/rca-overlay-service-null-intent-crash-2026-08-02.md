@@ -100,7 +100,8 @@ first). Remaining: file the upstream issue by hand, then verify on-device.**
 
 ### What's still manual — do these when you're back
 
-5. **File the upstream issue** on `https://github.com/X-SLAYER/flutter_overlay_window/issues/new`
+5. ✅ **Filed the upstream issue** — done by Dinesh 2026-08-11, on
+   `https://github.com/X-SLAYER/flutter_overlay_window/issues/new`
    (this needs your own GitHub login — it's a different repo owner, which Claude Code
    sessions can't cross into once a session already has repos from another owner).
    Suggested title/body, ready to paste:
