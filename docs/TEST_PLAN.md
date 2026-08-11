@@ -281,7 +281,27 @@ session with no Flutter toolchain/device.
 
 | # | Case | Status | Notes / expected |
 |---|---|---|---|
-| 78 | Trigger a caught error in the **background** isolate (e.g. temporarily throw in a triage check), then open About → Report a problem without reopening the app | ❌ | The email body's "Recent in-app errors" includes the `[background]`-tagged entry — confirms the UI isolate's `SharedPreferencesAsync` read is no longer stale relative to a same-session background write. |
-| 79 | Trigger errors from two different isolates in one session, then check the log | ❌ | Both entries present, neither missing — confirms the old read-modify-write clobber (stale cached read overwriting the other isolate's entries) is gone. |
-| 80 | Tap "Send feedback" and "Report a problem", inspect the resulting draft email body/subject in the mail app | ❌ | No literal `+` characters where spaces should be (was the Gmail-decoding bug). |
-| 81 | Trigger an error while the **bubble/capture screen (overlay isolate)** is showing, then check the log | ❌ | Known-still-broken: expect the log to NOT include it (overlay isolate has no plugins — `record()` no-ops there). Confirms the documented remaining gap rather than a regression. |
+| 78 | Trigger a caught error in the **background** isolate (e.g. temporarily throw in a triage check), then open About → Report a problem without reopening the app | ✅ | Confirmed on-device 2026-08-11 via temporary `ProblemReportLog.record()` calls added to `main()`/`backgroundMain()`. Email body showed both `[...\|ui]` (13:58:14.801Z) and `[...\|background]` (13:58:14.909Z) entries in the same session, About screen read without reopening the app. |
+| 79 | Trigger errors from two different isolates in one session, then check the log | ✅ | Confirmed on-device 2026-08-11 — same test as case 78: both the `ui` and `background` entries from the same session are present together, neither clobbered. A later second `ui` entry (UI engine restarted) with no matching `background` entry is expected (different isolate lifecycles), not a clobber. |
+| 80 | Tap "Send feedback" and "Report a problem", inspect the resulting draft email body/subject in the mail app | ✅ | Confirmed on-device 2026-08-11 — draft body had real spaces and a literal `—` em dash rendering correctly, no `+` characters anywhere (was the Gmail-decoding bug). |
+| 81 | Trigger an error while the **bubble/capture screen (overlay isolate)** is showing, then check the log | ✅ | Confirmed on-device 2026-08-11 via a temporary `ProblemReportLog.record()` call added to `overlayMain()`. No "TEMP TEST case 81" entry appeared in the Report-a-problem log after triggering the bubble — confirms the known gap (overlay isolate has no plugins, `record()` silently no-ops there) is unchanged, not a regression. |
+
+### `flutter_overlay_window` fork — null-Intent restart crash (same branch, RCA `docs/debug/rca-overlay-service-null-intent-crash-2026-08-02.md`)
+
+**Do NOT use `adb shell am force-stop`** — it puts the app in Android's "stopped" state,
+which suppresses the auto-restart this crash depends on (confirmed on-device: false
+pass). **`adb shell kill -9 <pid>` also failed on-device** (`Operation not permitted` —
+`shell` lacks signal-kill permission on this device). Use `adb shell am crash <package>`
+instead — see RCA doc step 6 for the full procedure and why the precondition below
+matters.
+
+**Precondition, not optional:** a bubble/capture screen must be actively showing
+(`OverlayService` only runs while one is) *before* you run `am crash`, otherwise there's
+nothing for Android to restart and the test passes for the wrong reason. Confirm via
+`adb logcat` in a separate terminal during the crash+restart window — not via a
+subsequent lock/unlock, since `UnlockListenerService` restarts independently and can
+mask the result with a fresh, real (non-null) `Intent`.
+
+| # | Case | Status | Notes / expected |
+|---|---|---|---|
+| 82 | With a bubble actively showing, tail `adb logcat`, run `adb shell am crash <package>`, watch logcat (don't touch the phone) | ✅ | Confirmed on-device 2026-08-11 via `adb logcat -c` → `am crash` → `adb logcat -d` dump. Log shows `Scheduling restart of crashed service ...OverlayService in 10999ms` (twice, at 18:52:59 and 19:01:34 — confirms the precondition, `OverlayService` was actually alive), and in both cases the restarted process stayed up for minutes afterward with zero `FATAL EXCEPTION`/`NullPointerException` in the entire log. Null guard holds. |

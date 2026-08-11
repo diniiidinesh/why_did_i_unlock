@@ -131,13 +131,68 @@ first). Remaining: file the upstream issue by hand, then verify on-device.**
    maintainer can merge with one click.
 6. **On your laptop:** `flutter clean`, `flutter pub get` (this will rewrite
    `pubspec.lock`'s `flutter_overlay_window` entry to the git dependency — expected,
-   commit it), `flutter run --release`, then deliberately reproduce the restart path
-   (open the app, then `adb shell am force-stop com.whydidiunlock.why_did_i_unlock` to
-   simulate a kill, then unlock the phone again to trigger the service restart) and
-   confirm no crash and the bubble still works normally.
+   commit it), `flutter run --release`, then deliberately reproduce the restart path.
+
+   **`adb shell am force-stop <package>` does NOT reproduce this crash** — force-stop
+   puts the app into Android's "stopped" state, where the OS deliberately will not
+   auto-restart any of its services or deliver most broadcasts, specifically to honor a
+   user-initiated stop. The crash only happens when the low-memory killer reclaims the
+   process, which (unlike force-stop) *does* honor `START_STICKY` and restarts the
+   service with `intent = null` — a different code path entirely. (Confirmed on-device
+   2026-08-11: force-stop + unlock produced no overlay and no crash, which is expected
+   force-stop behavior, not evidence the fix works.)
+
+   **`adb shell kill -9 <pid>` also failed on-device (2026-08-11):** `Operation not
+   permitted` — the `shell` user doesn't have raw signal-kill permission over another
+   app's process on this device/Android version (this varies by device; don't assume it
+   works elsewhere either). Use the ActivityManager-mediated equivalent instead, which
+   goes through Android's own crash-reporting path rather than a raw signal and is
+   exposed to `shell` specifically for this kind of test, regardless of the target app's
+   debuggable flag:
+
+   ```
+   adb shell am crash com.whydidiunlock.why_did_i_unlock
+   ```
+
+   **Critical precondition, easy to get wrong: `OverlayService` only exists while a
+   bubble or capture screen is actively showing** (`showOverlay()`/`closeOverlay()` in
+   `lib/main.dart` start/stop it — it is not an always-on service like
+   `UnlockListenerService`). `am crash` kills the whole app process, but Android only
+   attempts a `START_STICKY` restart for services that were *actually running* at the
+   moment of the kill. If no bubble is showing when you run `am crash`, there is nothing
+   to restart and the null-guard code is never touched — the test will silently pass for
+   the wrong reason.
+
+   Also note **`UnlockListenerService` (our own, always-on) restarts independently and
+   responds to the next lock/unlock with a fresh, real (non-null) `Intent`** — so "I
+   locked, unlocked, and saw the overlay" is consistent with success whether or not
+   `OverlayService`'s null-guard was ever exercised. It is not, by itself, proof.
+
+   The procedure that actually isolates the bug:
+   1. Declare an intent so a bubble is actively showing (so `OverlayService` is alive).
+   2. In a second terminal, start `adb logcat` and leave it tailing.
+   3. Run `adb shell am crash com.whydidiunlock.why_did_i_unlock`.
+   4. Watch logcat for a few seconds **without touching the phone**. Pre-fix, this
+      restart would throw a `FATAL EXCEPTION` / `NullPointerException` at
+      `OverlayService.onStartCommand` right in that window. No crash there is the real
+      confirmation — not what happens after a subsequent lock/unlock.
+   5. Lock/unlock afterward only as a secondary sanity check that things still behave
+      normally.
 7. Once confirmed, this is a normal merge like any other fix. Keep the fork around
    until the upstream fix (if any) ships and you've verified you can drop back to the
    official version cleanly.
+
+## Confirmed on-device (2026-08-11)
+
+`adb logcat -c` → `adb shell am crash com.whydidiunlock.why_did_i_unlock` (bubble
+actively showing) → `adb logcat -d` dump, repeated twice. Both dumps show
+`ActivityManager: Scheduling restart of crashed service
+com.whydidiunlock.why_did_i_unlock/flutter.overlay.window.flutter_overlay_window.OverlayService
+in ~11000ms for start-requested` — proof `OverlayService` was genuinely alive and
+Android genuinely scheduled the null-`Intent` restart, not a false pass. In both cases
+the restarted process ran on for minutes afterward with no further `FATAL EXCEPTION`,
+and the full ~5.4MB combined log contains zero `NullPointerException` occurrences. Null
+guard confirmed working. `docs/TEST_PLAN.md` case 82 now ✅.
 
 ## Why not just patch the plugin's files inside `android/` directly, unforked?
 

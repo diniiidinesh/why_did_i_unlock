@@ -313,6 +313,9 @@ doing nothing) as one cause, not several.
     deliberately NOT built blind in the no-device session above, since
     landing new isolate/port wiring untested is exactly the failure mode
     CLAUDE.md §3's four "real bugs found" gotchas all trace back to.
+    **Re-confirmed on-device 2026-08-11** (`docs/TEST_PLAN.md` case 81): an
+    overlay-isolate error still doesn't reach the log, no crash — behavior
+    unchanged, still needs the port-relay fix above, not a new regression.
   - **Also noted, not yet acted on:** the buffer only catches *uncaught*
     Dart exceptions and can lose the write if the process dies before an
     `unawaited(record(...))` lands — most of the actual failure modes in
