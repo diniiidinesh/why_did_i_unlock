@@ -227,9 +227,11 @@ class _ManagePresetsScreenState extends State<ManagePresetsScreen> {
         onPressed: presets == null ? null : _create,
         child: const Icon(Icons.add),
       ),
-      body: presets == null
-          ? const Center(child: CircularProgressIndicator())
-          : presets.isEmpty
+      body: SafeArea(
+        top: false,
+        child: presets == null
+            ? const Center(child: CircularProgressIndicator())
+            : presets.isEmpty
               ? const Center(
                   child: Padding(
                     padding: EdgeInsets.all(24),
@@ -265,6 +267,7 @@ class _ManagePresetsScreenState extends State<ManagePresetsScreen> {
                     );
                   },
                 ),
+      ),
     );
   }
 }

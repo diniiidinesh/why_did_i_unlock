@@ -63,19 +63,22 @@ class _HistoryScreenState extends State<HistoryScreen> {
         foregroundColor: Colors.white,
         title: const Text('History'),
       ),
-      body: _events == null
-          ? const Center(child: CircularProgressIndicator())
-          : _events!.isEmpty
-              ? const Center(
-                  child: Text(
-                    'No unlocks logged yet',
-                    style: TextStyle(color: Colors.white54),
+      body: SafeArea(
+        top: false,
+        child: _events == null
+            ? const Center(child: CircularProgressIndicator())
+            : _events!.isEmpty
+                ? const Center(
+                    child: Text(
+                      'No unlocks logged yet',
+                      style: TextStyle(color: Colors.white54),
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: _events!.length,
+                    itemBuilder: (context, index) => _HistoryTile(event: _events![index]),
                   ),
-                )
-              : ListView.builder(
-                  itemCount: _events!.length,
-                  itemBuilder: (context, index) => _HistoryTile(event: _events![index]),
-                ),
+      ),
     );
   }
 }

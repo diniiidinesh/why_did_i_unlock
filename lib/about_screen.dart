@@ -116,7 +116,9 @@ class AboutScreen extends StatelessWidget {
         foregroundColor: Colors.white,
         title: const Text('About'),
       ),
-      body: ListView(
+      body: SafeArea(
+        top: false,
+        child: ListView(
         children: [
           const SizedBox(height: 16),
           Center(
@@ -196,6 +198,7 @@ class AboutScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
         ],
+        ),
       ),
     );
   }

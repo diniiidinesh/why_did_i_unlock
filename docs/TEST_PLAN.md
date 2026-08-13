@@ -305,3 +305,15 @@ mask the result with a fresh, real (non-null) `Intent`.
 | # | Case | Status | Notes / expected |
 |---|---|---|---|
 | 82 | With a bubble actively showing, tail `adb logcat`, run `adb shell am crash <package>`, watch logcat (don't touch the phone) | ✅ | Confirmed on-device 2026-08-11 via `adb logcat -c` → `am crash` → `adb logcat -d` dump. Log shows `Scheduling restart of crashed service ...OverlayService in 10999ms` (twice, at 18:52:59 and 19:01:34 — confirms the precondition, `OverlayService` was actually alive), and in both cases the restarted process stayed up for minutes afterward with zero `FATAL EXCEPTION`/`NullPointerException` in the entire log. Null guard holds. |
+
+### Edge-to-edge (Android 15+/targetSdk 36) + bubble glow clip (2026-08-11+)
+
+`docs/BACKLOG.md` has the full writeup. Neither verified on-device yet — no Flutter
+toolchain/device in the session that made these changes.
+
+| # | Case | Status | Notes / expected |
+|---|---|---|---|
+| 83 | On an Android 15+ (ideally 16) device with gesture nav, open About, History, Settings, Status, and Manage options; scroll each to the bottom | ❌ | Last list item fully visible and tappable, not obscured by the system gesture bar |
+| 84 | Same device, open Manage options specifically | ❌ | The amber "+" FAB is fully visible/tappable above the gesture bar, not clipped or partially hidden |
+| 85 | Trigger the bubble (collapsed, 52dp) over a busy app | ❌ | Amber rim visible, no tinted square/halo bleeding beyond the circle's edge — should read as a crisp circle, not a soft or hard-edged square glow |
+| 86 | Expand the bubble (Done/Snooze row) | ❌ | Same check as #85 — no color bleed beyond the pill's rounded-rect shape |
