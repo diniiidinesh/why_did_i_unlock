@@ -314,7 +314,7 @@ toolchain/device in the session that made these changes.
 
 | # | Case | Status | Notes / expected |
 |---|---|---|---|
-| 83 | On an Android 15+ (ideally 16) device with gesture nav, open About, History, Settings, Status, and Manage options; scroll each to the bottom | ❌ | Last list item fully visible and tappable, not obscured by the system gesture bar |
+| 83 | On an Android 15+ (ideally 16) device with gesture nav, open About, History, Settings, Status, and Manage options; scroll each to the bottom | ✅ | Confirmed on-device 2026-08-11 — enough bottom clearance for the nav controls. |
 | 84 | Same device, open Manage options specifically | ✅ | Confirmed on-device 2026-08-11 — FAB layout is fine. |
-| 85 | Trigger the bubble (collapsed, 52dp) over a busy app | ❌ | Amber rim visible, no tinted square/halo bleeding beyond the circle's edge — should read as a crisp circle, not a soft or hard-edged square glow |
-| 86 | Expand the bubble (Done/Snooze row) | ❌ | Same check as #85 — no color bleed beyond the pill's rounded-rect shape |
+| 85 | Trigger the bubble (collapsed, 52dp) over a busy app | ✅ | Confirmed on-device 2026-08-11 — crisp amber rim, no square glow bleed. |
+| 86 | Expand the bubble (Done/Snooze row) | ✅ | Confirmed on-device 2026-08-11, same check as #85. |

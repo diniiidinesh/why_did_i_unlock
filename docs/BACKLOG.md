@@ -343,8 +343,8 @@ doing nothing) as one cause, not several.
   merges a fix, then drop back to the official package. Full RCA:
   `docs/debug/rca-overlay-service-null-intent-crash-2026-08-02.md`.
 
-- **[P1] Edge-to-edge (Android 15+, `targetSdk 36`) — fix applied, on-device verify
-  pending.** Google Play Console flagged that apps targeting SDK 35+ display
+- **[DONE 2026-08-11] Edge-to-edge (Android 15+, `targetSdk 36`).** Google Play
+  Console flagged that apps targeting SDK 35+ display
   edge-to-edge by default and need to handle insets correctly. `targetSdk` here is 36
   (`android/app/build.gradle.kts`), well past that threshold — and at 36, Android
   removes the manifest opt-out flag entirely, so there's no "avoid this" path; the fix
@@ -361,12 +361,12 @@ doing nothing) as one cause, not several.
   content could sit under the system nav bar; `manage_presets_screen.dart` also has a
   `floatingActionButton`, the highest-risk case since it's fixed-position, not
   scrollable. Fixed by wrapping each of the 5 bodies in `SafeArea(top: false, ...)`
-  (Dart-only, no native/Kotlin files touched). **Not yet verified** — no
-  Flutter toolchain/device in the session that made this change; needs a real
-  Android 15+ (ideally 16) gesture-nav device (`docs/TEST_PLAN.md` cases 83–84).
+  (Dart-only, no native/Kotlin files touched). Confirmed on-device 2026-08-11 —
+  enough bottom clearance on all 5 screens for the gesture nav bar
+  (`docs/TEST_PLAN.md` cases 83–84).
 
-- **[P2] Bubble glow rendered as a flat tinted square, not a soft halo — fixed,
-  on-device verify pending.** Reported by Dinesh from actual device use: an orange
+- **[DONE 2026-08-11] Bubble glow rendered as a flat tinted square, not a soft
+  halo.** Reported by Dinesh from actual device use: an orange
   hue filled the bubble's whole square footprint rather than staying within the
   circle. Root cause: `_BeaconGlassShell`'s `BoxShadow` (`lib/bubble_widget.dart`)
   needs ~12.5dp to blur and fade to nothing, but the native overlay window is sized
@@ -385,11 +385,10 @@ doing nothing) as one cause, not several.
   paints nothing, so keeping it would've been dead code) — see
   `docs/erd/beacon-visual-identity-2026-07-24.md`'s update log for the full before/
   after. The bubble now has a crisp amber rim with no external glow; reintroducing one
-  later needs extra window margin, not just a shadow tweak. **Not yet verified** — no
-  Flutter toolchain/device in the session that made this change
-  (`docs/TEST_PLAN.md` cases 85–86).
+  later needs extra window margin, not just a shadow tweak. Confirmed on-device
+  2026-08-11, both collapsed and expanded (`docs/TEST_PLAN.md` cases 85–86).
 
-- **[DONE, on-device verify pending] Re-added "Call someone" preset with its icon.**
+- **[DONE 2026-08-11] Re-added "Call someone" preset with its icon.**
   Dinesh's request — "Calls" existed in the original pre-verb default set
   (`legacyDefaultPresetLabels`) but was dropped when the 2026-07-25 verb-preset
   redesign (`docs/erd/verb-presets-job-goers-2026-07-25.md`) replaced category
@@ -407,10 +406,13 @@ doing nothing) as one cause, not several.
   (`IntentStore._ensureDefaultPresetSeed`). Testers who *did* customize their presets
   are left alone, same as every prior seed bump — this only touches untouched
   installs. New migration test added (`test/intent_store_test.dart`, "seed v4
-  migrates untouched verb-v3 defaults"). **Not yet verified on-device** — no Flutter
-  toolchain/device in this session; `docs/TEST_PLAN.md` cases 66/69/71/71b cover
-  fresh install, the v3→v4 auto-migration, Restore defaults, and the new preset's
-  icon/behavior.
+  migrates untouched verb-v3 defaults"). Confirmed on-device 2026-08-11: fresh
+  install, Restore defaults, and the preset's icon/behavior all correct
+  (`docs/TEST_PLAN.md` cases 66/71/71b). **Case 69 (the v3→v4 auto-migration for
+  existing testers who never touched their presets) is still unverified** —
+  requires an "upgrade an existing install" scenario, not exercised by the
+  fresh-install/Restore-defaults checks above; lower priority since it only
+  affects existing testers' next unlock, not new installs.
 
 - **[decision] Raise `maxEnabledPresets` from 8 to 10 — deferred pending user
   feedback, not rejected.** Requested 2026-08-11 alongside the "Call someone"
