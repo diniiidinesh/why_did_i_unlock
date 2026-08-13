@@ -261,12 +261,13 @@ Check mail · Message someone · Book a cab · Order food · Pay someone.
 
 | # | Case | Status | Notes / expected |
 |---|---|---|---|
-| 66 | Fresh install unlock | ❌ | Five verb pills (Check mail / Message someone / Book a cab / Order food / **Pay someone**) + Just Like That |
+| 66 | Fresh install unlock | ❌ | Six verb pills (Check mail / Message someone / **Call someone** / Book a cab / Order food / Pay someone) + Just Like That |
 | 67 | Tap **Check mail** | ❌ | Bubble with that text; `kind=intent` |
 | 68 | Just Like That | ❌ | No bubble; history shows no-intent |
-| 69 | Upgrade from build with old five untouched | ❌ | Verbs appear next unlock without Restore |
-| 70 | Upgrade after customizing presets | ❌ | Custom list preserved (seed version may still bump) |
-| 71 | Restore defaults | ❌ | Confirm dialog lists verbs incl. Pay someone; list becomes the five |
+| 69 | Upgrade from build with old five (no Call someone) untouched | ❌ | New seed v4 migration fires: **Call someone** appears next unlock without the user tapping Restore |
+| 70 | Upgrade after customizing presets | ❌ | Custom list preserved (seed version still bumps, no auto-migration) |
+| 71 | Restore defaults | ❌ | Confirm dialog lists verbs incl. Call someone and Pay someone; list becomes the six |
+| 71b | Tap **Call someone** | ❌ | Bubble with that text, phone/call icon (`Icons.call`), `kind=intent`, `source=preset` |
 | 72 | Home “Couldn't load” / pull-to-retry | ❌ | Force a failed or null-store Home state (or cold open after kill); pull down → insights reload without reinstall |
 | 73 | Onboarding overlay step find-hint | ❌ | Copy names **Beacon**; Grant opens system list; return after grant → status shows Granted; user taps Continue (no auto-advance) |
 | 74 | Status: OEM highlight on matched maker | ❌ | Matched tile first + “Looks like your phone”; steps include leave smart optimize (Don’t optimize / Not optimized / No restrictions) |

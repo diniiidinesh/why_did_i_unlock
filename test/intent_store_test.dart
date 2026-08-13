@@ -632,6 +632,33 @@ void main() {
       await file.delete();
     });
 
+    test('seed v4 migrates untouched verb-v3 defaults (adds Call someone)', () async {
+      final tempPath = '${Directory.systemTemp.path}/intent_store_seed_v4_migrate.db';
+      final file = File(tempPath);
+      if (await file.exists()) await file.delete();
+
+      SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
+      var s = await IntentStore.open(path: tempPath);
+      for (final p in await s.allPresets()) {
+        await s.deletePreset(p.id);
+      }
+      for (final label in verbPresetLabelsV3) {
+        await s.createPreset(label);
+      }
+      expect(
+        (await s.activePresets()).map((p) => p.label).toSet(),
+        verbPresetLabelsV3.toSet(),
+      );
+      await s.close();
+
+      SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
+      s = await IntentStore.open(path: tempPath);
+      expect((await s.activePresets()).map((p) => p.label), defaultPresetLabels);
+      expect((await s.activePresets()).map((p) => p.label), contains('Call someone'));
+      await s.close();
+      await file.delete();
+    });
+
     test('seed v2 leaves a customized list alone', () async {
       final tempPath = '${Directory.systemTemp.path}/intent_store_seed_v2_custom.db';
       final file = File(tempPath);

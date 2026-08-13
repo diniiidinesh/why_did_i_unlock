@@ -389,6 +389,29 @@ doing nothing) as one cause, not several.
   Flutter toolchain/device in the session that made this change
   (`docs/TEST_PLAN.md` cases 85–86).
 
+- **[DONE, on-device verify pending] Re-added "Call someone" preset with its icon.**
+  Dinesh's request — "Calls" existed in the original pre-verb default set
+  (`legacyDefaultPresetLabels`) but was dropped when the 2026-07-25 verb-preset
+  redesign (`docs/erd/verb-presets-job-goers-2026-07-25.md`) replaced category
+  nouns with action verbs. Re-added as **"Call someone"** (matching the verb-phrase
+  convention of "Message someone"/"Pay someone", not the old "Calls" noun), placed
+  right after "Message someone" since both are communication actions. The icon
+  (`Icons.call`) was already sitting in `lib/bubble_icons.dart` from the legacy
+  `'calls'` mapping — just needed a `'call someone'` case added alongside it (and to
+  `_knownPresetLabelsLower`, so it gets the phone icon instead of a letter avatar).
+  `defaultPresetLabels` is now 6 items instead of 5; `maxEnabledPresets = 8`, so no
+  capacity conflict. Existing testers who never touched their presets get migrated
+  automatically — added `verbPresetLabelsV3` (the outgoing 5-item set) to the
+  seed-migration match list and bumped `defaultPresetsSeedVersion` 3→4, following the
+  exact pattern already used for the legacy→v2 and v2→v3 migrations
+  (`IntentStore._ensureDefaultPresetSeed`). Testers who *did* customize their presets
+  are left alone, same as every prior seed bump — this only touches untouched
+  installs. New migration test added (`test/intent_store_test.dart`, "seed v4
+  migrates untouched verb-v3 defaults"). **Not yet verified on-device** — no Flutter
+  toolchain/device in this session; `docs/TEST_PLAN.md` cases 66/69/71/71b cover
+  fresh install, the v3→v4 auto-migration, Restore defaults, and the new preset's
+  icon/behavior.
+
 - **[decision] Full crash reporting / Crashlytics** — still deferred. See prior
   note: opt-in network reporting only when N outgrows 1:1 support; flips Data
   Safety in the same release.
