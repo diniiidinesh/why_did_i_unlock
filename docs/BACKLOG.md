@@ -412,6 +412,18 @@ doing nothing) as one cause, not several.
   fresh install, the v3→v4 auto-migration, Restore defaults, and the new preset's
   icon/behavior.
 
+- **[decision] Raise `maxEnabledPresets` from 8 to 10 — deferred pending user
+  feedback, not rejected.** Requested 2026-08-11 alongside the "Call someone"
+  preset addition. Technically safe to raise (capture screen presets render in a
+  `Wrap` inside a `SingleChildScrollView`, `lib/main.dart` — extra presets just
+  wrap to more rows, no overflow/low-end-device risk). Held at 8 instead because
+  the existing cap is a *documented behavioral* decision, not a technical one —
+  `docs/DATA_MODEL.md` §7: "decision cost, not screen space" is the binding
+  constraint, current cap 8 with 5–6 *recommended*. Rather than guess whether 10
+  helps or hurts, added the actual question to
+  `docs/USER_INTERVIEWS.md` (Presets / capture screen) to ask real testers.
+  Revisit once that's been asked.
+
 - **[decision] Full crash reporting / Crashlytics** — still deferred. See prior
   note: opt-in network reporting only when N outgrows 1:1 support; flips Data
   Safety in the same release.

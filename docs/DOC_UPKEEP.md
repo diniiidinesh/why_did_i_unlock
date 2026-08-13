@@ -15,6 +15,7 @@
 | `README.md` | Front door + doc index | New doc added, or status headline changes. |
 | `docs/DATA_MODEL.md` | On-device schema (ERD) + invariants | The `intent_log`/`unlock_log`/preset schema changes. |
 | `docs/TEST_PLAN.md` | Automated + manual on-device test tracker | A new behaviour area is touched, or a manual case is run — mark Status/Evidence in place. |
+| `docs/USER_INTERVIEWS.md` | Interview questions tied to open product decisions | A decision gets deferred pending user feedback rather than guessed at — add the question under the relevant topic heading; mark `[ASKED]` with a summary once actually put to people. |
 | `docs/PLAY_SUBMISSION.md` | Play listing/review prep — FGS justification, Data Safety, closed-test checklist | A submission gate is done, a new dependency changes what Data Safety must say, or Google responds to a real review (log it in §6). |
 | `docs/PRIVACY_POLICY.md` | Privacy policy source of truth | The policy text changes — keep the hosted copy (`beacon-site` repo / `docs/site/privacy.html` mirror) in sync in the same change. |
 | `docs/SETUP.md` | Dev-environment bring-up (toolchain, device) | Setup steps or toolchain floor change. |
