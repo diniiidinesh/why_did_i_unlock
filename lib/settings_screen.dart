@@ -259,9 +259,11 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
         foregroundColor: Colors.white,
         title: const Text('Settings'),
       ),
-      body: !loaded
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
+      body: SafeArea(
+        top: false,
+        child: !loaded
+            ? const Center(child: CircularProgressIndicator())
+            : ListView(
               children: [
                 const _SectionHeader('Prompts'),
                 SwitchListTile(
@@ -351,6 +353,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                 const SizedBox(height: 24),
               ],
             ),
+      ),
     );
   }
 }

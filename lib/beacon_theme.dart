@@ -6,9 +6,6 @@ abstract final class BeaconColors {
   /// Primary accent — toggles, FAB, chart "Done", borders, highlights.
   static const Color amber = Color(0xFFFFB300);
 
-  /// Soft amber for glows / shadows (≈40% opacity).
-  static const Color amberGlow = Color(0x66FFB300);
-
   /// Frosted overlay fill — black @ 60% (bubble / glass shells).
   static const Color glassFill = Color(0x99000000);
 

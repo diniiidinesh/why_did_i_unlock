@@ -19,7 +19,7 @@ export 'brand.dart'
 /// dependency count low, `CLAUDE.md` §7) — must be bumped by hand alongside
 /// `pubspec.yaml`'s `version:` when that changes. [AboutScreen.version]
 /// exists specifically so tests don't depend on this staying in sync.
-const String appVersion = '0.6.2+10';
+const String appVersion = '0.6.3+11';
 
 /// Injected in place of a real `url_launcher` call so widget tests never
 /// touch a platform channel — same pattern `HistoryScreen.openStore` uses
@@ -116,7 +116,9 @@ class AboutScreen extends StatelessWidget {
         foregroundColor: Colors.white,
         title: const Text('About'),
       ),
-      body: ListView(
+      body: SafeArea(
+        top: false,
+        child: ListView(
         children: [
           const SizedBox(height: 16),
           Center(
@@ -196,6 +198,7 @@ class AboutScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
         ],
+        ),
       ),
     );
   }

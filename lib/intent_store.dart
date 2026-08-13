@@ -342,12 +342,15 @@ class IntentDismissal {
 const String _dbFileName = 'intents.db';
 const int _schemaVersion = 2;
 
-/// The five presets shipped on fresh install / Restore defaults.
+/// The six presets shipped on fresh install / Restore defaults.
 /// Verb phrases tuned for job-goer unlocks — see
-/// `docs/erd/verb-presets-job-goers-2026-07-25.md`.
+/// `docs/erd/verb-presets-job-goers-2026-07-25.md`. 'Call someone' re-added
+/// 2026-08-11 (was 'Calls' in the pre-verb set below) — see
+/// `docs/BACKLOG.md`.
 const List<String> defaultPresetLabels = [
   'Check mail',
   'Message someone',
+  'Call someone',
   'Book a cab',
   'Order food',
   'Pay someone',
@@ -373,10 +376,20 @@ const List<String> verbPresetLabelsV2 = [
   'Watch reels',
 ];
 
+/// Second verb seed (five labels, no 'Call someone'). Untouched v3 installs
+/// migrate to [defaultPresetLabels] when [defaultPresetsSeedVersion] bumps to 4.
+const List<String> verbPresetLabelsV3 = [
+  'Check mail',
+  'Message someone',
+  'Book a cab',
+  'Order food',
+  'Pay someone',
+];
+
 /// Prefs key for [defaultPresetLabels] seed generation. Bumped when the
 /// shipped default set changes so untouched installs can migrate once.
 const String defaultPresetsSeedVersionKey = 'default_presets_seed_version';
-const int defaultPresetsSeedVersion = 3;
+const int defaultPresetsSeedVersion = 4;
 
 /// A dashboard time window (T14) — every insight query is windowed and
 /// index-backed (docs/DATA_MODEL.md §8), never a full-table scan, since
@@ -481,10 +494,11 @@ class IntentStore {
   }
 
   /// Once per install: if prefs say we're behind [defaultPresetsSeedVersion]
-  /// and the enabled list is exactly a known prior default set (legacy five or
-  /// [verbPresetLabelsV2]), soft-delete those rows and re-seed
-  /// [defaultPresetLabels]. Customized lists are left alone; only the version
-  /// flag advances. See `docs/erd/verb-presets-job-goers-2026-07-25.md`.
+  /// and the enabled list is exactly a known prior default set (legacy five,
+  /// [verbPresetLabelsV2], or [verbPresetLabelsV3]), soft-delete those rows
+  /// and re-seed [defaultPresetLabels]. Customized lists are left alone; only
+  /// the version flag advances. See
+  /// `docs/erd/verb-presets-job-goers-2026-07-25.md`.
   Future<void> _ensureDefaultPresetSeed() async {
     final prefs = SharedPreferencesAsync();
     final version = await prefs.getInt(defaultPresetsSeedVersionKey) ?? 1;
@@ -495,7 +509,8 @@ class IntentStore {
     // Require unique labels equal to a prior default set (no customs mixed in).
     final matchesPriorDefaults = active.length == labels.length &&
         (_sameLabelSet(labels, legacyDefaultPresetLabels) ||
-            _sameLabelSet(labels, verbPresetLabelsV2));
+            _sameLabelSet(labels, verbPresetLabelsV2) ||
+            _sameLabelSet(labels, verbPresetLabelsV3));
     if (matchesPriorDefaults) {
       final now = DateTime.now().toUtc().millisecondsSinceEpoch;
       for (final preset in active) {

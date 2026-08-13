@@ -147,7 +147,9 @@ class _StatusScreenState extends State<StatusScreen> {
         foregroundColor: Colors.white,
         title: const Text('Status & troubleshooting'),
       ),
-      body: ListView(
+      body: SafeArea(
+        top: false,
+        child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           _PermissionCard(
@@ -211,6 +213,7 @@ class _StatusScreenState extends State<StatusScreen> {
             child: const Text('Show me the prompt now'),
           ),
         ],
+        ),
       ),
     );
   }

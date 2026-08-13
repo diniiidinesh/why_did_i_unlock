@@ -261,12 +261,13 @@ Check mail · Message someone · Book a cab · Order food · Pay someone.
 
 | # | Case | Status | Notes / expected |
 |---|---|---|---|
-| 66 | Fresh install unlock | ❌ | Five verb pills (Check mail / Message someone / Book a cab / Order food / **Pay someone**) + Just Like That |
+| 66 | Fresh install unlock | ❌ | Six verb pills (Check mail / Message someone / **Call someone** / Book a cab / Order food / Pay someone) + Just Like That |
 | 67 | Tap **Check mail** | ❌ | Bubble with that text; `kind=intent` |
 | 68 | Just Like That | ❌ | No bubble; history shows no-intent |
-| 69 | Upgrade from build with old five untouched | ❌ | Verbs appear next unlock without Restore |
-| 70 | Upgrade after customizing presets | ❌ | Custom list preserved (seed version may still bump) |
-| 71 | Restore defaults | ❌ | Confirm dialog lists verbs incl. Pay someone; list becomes the five |
+| 69 | Upgrade from build with old five (no Call someone) untouched | ❌ | New seed v4 migration fires: **Call someone** appears next unlock without the user tapping Restore |
+| 70 | Upgrade after customizing presets | ❌ | Custom list preserved (seed version still bumps, no auto-migration) |
+| 71 | Restore defaults | ❌ | Confirm dialog lists verbs incl. Call someone and Pay someone; list becomes the six |
+| 71b | Tap **Call someone** | ❌ | Bubble with that text, phone/call icon (`Icons.call`), `kind=intent`, `source=preset` |
 | 72 | Home “Couldn't load” / pull-to-retry | ❌ | Force a failed or null-store Home state (or cold open after kill); pull down → insights reload without reinstall |
 | 73 | Onboarding overlay step find-hint | ❌ | Copy names **Beacon**; Grant opens system list; return after grant → status shows Granted; user taps Continue (no auto-advance) |
 | 74 | Status: OEM highlight on matched maker | ❌ | Matched tile first + “Looks like your phone”; steps include leave smart optimize (Don’t optimize / Not optimized / No restrictions) |
@@ -305,3 +306,15 @@ mask the result with a fresh, real (non-null) `Intent`.
 | # | Case | Status | Notes / expected |
 |---|---|---|---|
 | 82 | With a bubble actively showing, tail `adb logcat`, run `adb shell am crash <package>`, watch logcat (don't touch the phone) | ✅ | Confirmed on-device 2026-08-11 via `adb logcat -c` → `am crash` → `adb logcat -d` dump. Log shows `Scheduling restart of crashed service ...OverlayService in 10999ms` (twice, at 18:52:59 and 19:01:34 — confirms the precondition, `OverlayService` was actually alive), and in both cases the restarted process stayed up for minutes afterward with zero `FATAL EXCEPTION`/`NullPointerException` in the entire log. Null guard holds. |
+
+### Edge-to-edge (Android 15+/targetSdk 36) + bubble glow clip (2026-08-11+)
+
+`docs/BACKLOG.md` has the full writeup. Neither verified on-device yet — no Flutter
+toolchain/device in the session that made these changes.
+
+| # | Case | Status | Notes / expected |
+|---|---|---|---|
+| 83 | On an Android 15+ (ideally 16) device with gesture nav, open About, History, Settings, Status, and Manage options; scroll each to the bottom | ❌ | Last list item fully visible and tappable, not obscured by the system gesture bar |
+| 84 | Same device, open Manage options specifically | ❌ | The amber "+" FAB is fully visible/tappable above the gesture bar, not clipped or partially hidden |
+| 85 | Trigger the bubble (collapsed, 52dp) over a busy app | ❌ | Amber rim visible, no tinted square/halo bleeding beyond the circle's edge — should read as a crisp circle, not a soft or hard-edged square glow |
+| 86 | Expand the bubble (Done/Snooze row) | ❌ | Same check as #85 — no color bleed beyond the pill's rounded-rect shape |

@@ -136,16 +136,18 @@ void main() {
     await tester.runAsync(() async {
       store = await openTestStore();
       // Bring the store to exactly maxEnabledPresets (8) enabled presets
-      // (5 defaults + 3 new), PLUS one more, explicitly disabled, so there's
-      // a real switch in the UI whose "turn on" action is the actual edge
-      // documented in docs/DATA_MODEL.md §7 — not a happy-path toggle, and
-      // not exercising the store API directly bypassing the screen.
-      // Created (and disabled) BEFORE the other three, while there's still
+      // (the defaults + enough new ones to fill the remaining headroom),
+      // PLUS one more, explicitly disabled, so there's a real switch in the
+      // UI whose "turn on" action is the actual edge documented in
+      // docs/DATA_MODEL.md §7 — not a happy-path toggle, and not exercising
+      // the store API directly bypassing the screen.
+      // Created (and disabled) BEFORE the others, while there's still
       // headroom under the cap — creating it after would throw immediately,
       // since createPreset() always enables by default.
       final oneTooManyId = await store.createPreset('One too many');
       await store.setPresetEnabled(oneTooManyId, false);
-      for (var i = 0; i < 3; i++) {
+      final toFillCap = maxEnabledPresets - defaultPresetLabels.length;
+      for (var i = 0; i < toFillCap; i++) {
         await store.createPreset('Extra $i');
       }
     });

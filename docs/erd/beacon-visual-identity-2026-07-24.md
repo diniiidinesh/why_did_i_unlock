@@ -18,6 +18,18 @@ Bubble hybrid UX (states/actions): `docs/erd/bubble-ux-hybrid-plan-2026-07-24.md
   `Beacon: Mindful Phone Use`, on-device `Beacon`
   (`docs/erd/beacon-store-rename-2026-07-24.md`). This file remains the
   *token* spec; naming lives in `lib/brand.dart`.
+- **`amberGlow` removed (bug fix).** The bubble's `BoxShadow` glow was found
+  to render as a flat amber-tinted square rather than a soft halo — the
+  native overlay window is sized to exactly match the bubble's own bounds
+  (no margin for a blur to fade before hitting the window edge), so the
+  shadow was getting hard-clipped there instead of fading. Fixed by clipping
+  `_BeaconGlassShell` to its exact shape (`ClipRRect`) so nothing paints
+  outside it, which makes any `BoxShadow` there invisible by construction —
+  so the shadow and the now-unused `amberGlow` token were removed rather
+  than left as dead code. The bubble now has a crisp amber rim with no
+  external glow; re-introducing one would need extra window margin, not
+  just a shadow tweak — see `lib/bubble_widget.dart`'s `_BeaconGlassShell`
+  doc comment.
 -->
 
 # Beacon visual identity
@@ -34,7 +46,6 @@ chrome language only.
 | Token | Value | Use |
 |---|---|---|
 | `BeaconColors.amber` | `#FFB300` | Primary accent — switches On, FAB, chart “Done”, selected tabs/chips, prompt preset outlines, bubble stroke |
-| `BeaconColors.amberGlow` | `#66FFB300` (~40% amber) | Soft glow / drop-shadow on the floating bubble |
 | `BeaconColors.glassFill` | `#99000000` (black @ 60%) | Frosted bubble / glass shell fill |
 | `BeaconColors.onGlass` | `#FFFFFFFF` | Text + icons on glass (max contrast) |
 | `BeaconColors.onAmber` | `#FF1A1200` | Ink on amber-filled controls (e.g. Done check) |

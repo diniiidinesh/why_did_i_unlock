@@ -247,7 +247,7 @@ void main() {
       // New tables exist and are usable.
       expect(await store.recentUnlocks(), isEmpty);
       final presets = await store.allPresets();
-      expect(presets, hasLength(5));
+      expect(presets, hasLength(defaultPresetLabels.length));
       expect(presets.map((p) => p.label), containsAll(defaultPresetLabels));
 
       await store.close();
@@ -475,7 +475,7 @@ void main() {
       final presets = await store.activePresets();
       expect(presets.last.id, id);
       expect(presets.last.label, 'Groceries');
-      expect(presets.last.sortOrder, 5);
+      expect(presets.last.sortOrder, defaultPresetLabels.length);
     });
 
     test('createPreset rejects an empty label', () async {
@@ -531,15 +531,17 @@ void main() {
     });
 
     test('enabling cannot exceed maxEnabledPresets', () async {
-      // 5 seeded + 3 more = 8 (the max), all enabled by createPreset's own check.
-      await store.createPreset('P6');
-      await store.createPreset('P7');
-      await store.createPreset('P8');
+      // Seeded defaults + enough more to hit the max, all enabled by
+      // createPreset's own check.
+      final toFillCap = maxEnabledPresets - defaultPresetLabels.length;
+      for (var i = 0; i < toFillCap; i++) {
+        await store.createPreset('Extra $i');
+      }
       expect((await store.activePresets()).length, maxEnabledPresets);
 
-      // A 9th can be created disabled-by-necessity... but createPreset itself
-      // refuses once at the enabled cap, since it enables by default.
-      expect(() => store.createPreset('P9'), throwsA(isA<PresetLimitExceeded>()));
+      // One more can be created disabled-by-necessity... but createPreset
+      // itself refuses once at the enabled cap, since it enables by default.
+      expect(() => store.createPreset('One too many'), throwsA(isA<PresetLimitExceeded>()));
     });
 
     test('reorderPresets rewrites sort_order contiguously', () async {
@@ -632,6 +634,33 @@ void main() {
       await file.delete();
     });
 
+    test('seed v4 migrates untouched verb-v3 defaults (adds Call someone)', () async {
+      final tempPath = '${Directory.systemTemp.path}/intent_store_seed_v4_migrate.db';
+      final file = File(tempPath);
+      if (await file.exists()) await file.delete();
+
+      SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
+      var s = await IntentStore.open(path: tempPath);
+      for (final p in await s.allPresets()) {
+        await s.deletePreset(p.id);
+      }
+      for (final label in verbPresetLabelsV3) {
+        await s.createPreset(label);
+      }
+      expect(
+        (await s.activePresets()).map((p) => p.label).toSet(),
+        verbPresetLabelsV3.toSet(),
+      );
+      await s.close();
+
+      SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
+      s = await IntentStore.open(path: tempPath);
+      expect((await s.activePresets()).map((p) => p.label), defaultPresetLabels);
+      expect((await s.activePresets()).map((p) => p.label), contains('Call someone'));
+      await s.close();
+      await file.delete();
+    });
+
     test('seed v2 leaves a customized list alone', () async {
       final tempPath = '${Directory.systemTemp.path}/intent_store_seed_v2_custom.db';
       final file = File(tempPath);
@@ -659,8 +688,8 @@ void main() {
         final id = await store.createPreset('Temp $i');
         await store.deletePreset(id);
       }
-      // 5 seeded + 10 created-then-deleted = 15 rows, but only 5 active.
-      expect((await store.allPresets()).length, 15);
+      // Seeded defaults + 10 created-then-deleted rows, but only the defaults active.
+      expect((await store.allPresets()).length, defaultPresetLabels.length + 10);
       // Must still be able to create — this threw before the fix.
       await store.createPreset('Still allowed');
       expect((await store.activePresets()).map((p) => p.label), contains('Still allowed'));

@@ -281,12 +281,10 @@ doing nothing) as one cause, not several.
   (`lib/problem_report.dart`, hooks on ui/background/overlay engines, stored
   in SharedPreferences). Still no network crash SDK. Hard native crashes
   remain uncaptured — email copy explains that.
-- **[P1] "Report a problem" was effectively non-functional — partially fixed
-  2026-08-01, one piece still open.** Root-caused after a tester (Dinesh)
-  reported empty logs on every attempt. Five causes found, two fixed on
-  `claude/bug-report-crash-logging-kc419n` (untested on-device — no Flutter
-  toolchain/device available in that session; needs `flutter analyze` +
-  `flutter test` + a real on-device error-then-report cycle before merge):
+- **[P1] "Report a problem" was effectively non-functional — fixed and merged
+  2026-08-11 (PR #15), one piece still open.** Root-caused after a tester (Dinesh)
+  reported empty logs on every attempt. Five causes found, two fixed and confirmed
+  on-device (`docs/TEST_PLAN.md` cases 78–81, `flutter analyze`/`flutter test` clean):
   - **Fixed:** `ProblemReportLog` used `SharedPreferences.getInstance()`,
     the exact per-isolate-singleton-caching bug `AppSettings` was written to
     avoid (CLAUDE.md §3). Across the ui/background isolates this meant (a)
@@ -325,25 +323,106 @@ doing nothing) as one cause, not several.
     Play Console → Android vitals already has fatal/ANR data for the closed
     test with zero code changes — check there first.
 
-- **[P1] `flutter_overlay_window` crashes on service restart (`NullPointerException`
-  in `OverlayService.onStartCommand`) — found via Play Console Android vitals
-  2026-08-02, patch applied to a fork, on-device verify still pending.** Affected 3
-  closed testers (Nothing Phone, a Pixel, a Samsung) — Android killed the bubble's
-  background service under memory pressure and restarted it per normal `START_STICKY`
-  behavior, which delivers a `null` `Intent`; the plugin dereferenced it immediately
-  with no null check, at `intent.getIntExtra(...)`. Confirmed present on the plugin's
-  current `main` branch — `0.5.0` (our pinned/latest version) did NOT fix this specific
-  case despite its changelog claiming an `OverlayService` NPE fix (that was a different
-  one). Entirely native — `ProblemReportLog` can never see it (CLAUDE.md §3's "native
-  crashes leave no Flutter log" caveat, confirmed for real here). No newer plugin
-  version exists to upgrade to. **Done:** forked to `diniiidinesh/flutter_overlay_window`,
-  one-line null guard pushed to `fix/overlay-service-null-intent`, `why_did_i_unlock`'s
-  `pubspec.yaml` now points at that branch as a git dependency. **Still open:** file the
-  upstream bug report by hand (different repo owner — can't be done from a session
-  already scoped to `diniiidinesh/why_did_i_unlock`); `flutter pub get` + on-device
-  restart-path verification (`adb shell am force-stop` then unlock) before this can be
-  called done. Full plain-language RCA + exact remaining steps:
+- **[DONE 2026-08-11, PR #15] `flutter_overlay_window` crashes on service restart
+  (`NullPointerException` in `OverlayService.onStartCommand`) — found via Play
+  Console Android vitals 2026-08-02.** Affected 3 closed testers (Nothing Phone, a
+  Pixel, a Samsung) — Android killed the bubble's background service under memory
+  pressure and restarted it per normal `START_STICKY` behavior, which delivers a
+  `null` `Intent`; the plugin dereferenced it immediately with no null check, at
+  `intent.getIntExtra(...)`. `0.5.0` (our pinned/latest version) did NOT fix this
+  specific case despite its changelog claiming an `OverlayService` NPE fix (that was
+  a different one) — no newer plugin version exists to upgrade to. Entirely native —
+  `ProblemReportLog` can never see it (CLAUDE.md §3's "native crashes leave no
+  Flutter log" caveat, confirmed for real here). Fixed via a fork
+  (`diniiidinesh/flutter_overlay_window`, branch `fix/overlay-service-null-intent`)
+  with a one-line null guard, wired in via a git dependency in `pubspec.yaml`.
+  Confirmed on-device (`docs/TEST_PLAN.md` case 82): `adb shell am crash` twice with
+  the bubble live, Android genuinely rescheduled the null-Intent restart both times,
+  zero `NullPointerException`/`FATAL EXCEPTION` afterward. Upstream issue filed by
+  Dinesh 2026-08-11. **Ongoing:** keep the fork until (if) the upstream maintainer
+  merges a fix, then drop back to the official package. Full RCA:
   `docs/debug/rca-overlay-service-null-intent-crash-2026-08-02.md`.
+
+- **[P1] Edge-to-edge (Android 15+, `targetSdk 36`) — fix applied, on-device verify
+  pending.** Google Play Console flagged that apps targeting SDK 35+ display
+  edge-to-edge by default and need to handle insets correctly. `targetSdk` here is 36
+  (`android/app/build.gradle.kts`), well past that threshold — and at 36, Android
+  removes the manifest opt-out flag entirely, so there's no "avoid this" path; the fix
+  has to be real. Not about the bubble/overlay (drawn via `WindowManager` from a
+  service, not the Activity — edge-to-edge is an Activity-window concept, doesn't
+  apply there). Flutter's engine already runs edge-to-edge by default
+  (`decorFitsSystemWindows = false`), so `enableEdgeToEdge()` (the native/Kotlin
+  remedy Google's message is templated for) isn't the applicable fix — this is a Dart
+  layout question. Audited all 9 `Scaffold`s in `lib/`: 3 already used `SafeArea`
+  (`home_screen.dart`, `main.dart`, `onboarding_screen.dart`); 5 didn't
+  (`about_screen.dart`, `history_screen.dart`, `settings_screen.dart`,
+  `status_screen.dart`, `manage_presets_screen.dart`) — all bare
+  `Scaffold(body: ListView(...))`, so on a gesture-nav device the bottom of scrollable
+  content could sit under the system nav bar; `manage_presets_screen.dart` also has a
+  `floatingActionButton`, the highest-risk case since it's fixed-position, not
+  scrollable. Fixed by wrapping each of the 5 bodies in `SafeArea(top: false, ...)`
+  (Dart-only, no native/Kotlin files touched). **Not yet verified** — no
+  Flutter toolchain/device in the session that made this change; needs a real
+  Android 15+ (ideally 16) gesture-nav device (`docs/TEST_PLAN.md` cases 83–84).
+
+- **[P2] Bubble glow rendered as a flat tinted square, not a soft halo — fixed,
+  on-device verify pending.** Reported by Dinesh from actual device use: an orange
+  hue filled the bubble's whole square footprint rather than staying within the
+  circle. Root cause: `_BeaconGlassShell`'s `BoxShadow` (`lib/bubble_widget.dart`)
+  needs ~12.5dp to blur and fade to nothing, but the native overlay window is sized
+  to exactly match the bubble's own bounds (52dp collapsed) with zero margin — a
+  circle's corner-to-window-corner gap is only ~10.8dp, less room than the blur
+  needs, so it got hard-clipped at the window edge instead of fading, reading as a
+  flat tint rather than a halo. Two fix options were weighed: give the window extra
+  margin so the blur can fade properly (preserves the design doc's "soft glow" intent
+  more faithfully, but touches window-size math shared across bubble
+  show/drag-snap/orientation-reopen call sites — a fragile, bug-prone area per
+  `docs/ARCHITECTURE.md` §5) vs. clip the shadow to the shape exactly (guarantees zero
+  color beyond the circle, Dart-only, zero risk to shared geometry code, but loses the
+  external glow entirely). **Dinesh chose the clip.** Implemented by wrapping
+  `_BeaconGlassShell` in `ClipRRect` and removing the now-dead `BoxShadow` +
+  `BeaconColors.amberGlow` token (a shadow clipped exactly to its own source shape
+  paints nothing, so keeping it would've been dead code) — see
+  `docs/erd/beacon-visual-identity-2026-07-24.md`'s update log for the full before/
+  after. The bubble now has a crisp amber rim with no external glow; reintroducing one
+  later needs extra window margin, not just a shadow tweak. **Not yet verified** — no
+  Flutter toolchain/device in the session that made this change
+  (`docs/TEST_PLAN.md` cases 85–86).
+
+- **[DONE, on-device verify pending] Re-added "Call someone" preset with its icon.**
+  Dinesh's request — "Calls" existed in the original pre-verb default set
+  (`legacyDefaultPresetLabels`) but was dropped when the 2026-07-25 verb-preset
+  redesign (`docs/erd/verb-presets-job-goers-2026-07-25.md`) replaced category
+  nouns with action verbs. Re-added as **"Call someone"** (matching the verb-phrase
+  convention of "Message someone"/"Pay someone", not the old "Calls" noun), placed
+  right after "Message someone" since both are communication actions. The icon
+  (`Icons.call`) was already sitting in `lib/bubble_icons.dart` from the legacy
+  `'calls'` mapping — just needed a `'call someone'` case added alongside it (and to
+  `_knownPresetLabelsLower`, so it gets the phone icon instead of a letter avatar).
+  `defaultPresetLabels` is now 6 items instead of 5; `maxEnabledPresets = 8`, so no
+  capacity conflict. Existing testers who never touched their presets get migrated
+  automatically — added `verbPresetLabelsV3` (the outgoing 5-item set) to the
+  seed-migration match list and bumped `defaultPresetsSeedVersion` 3→4, following the
+  exact pattern already used for the legacy→v2 and v2→v3 migrations
+  (`IntentStore._ensureDefaultPresetSeed`). Testers who *did* customize their presets
+  are left alone, same as every prior seed bump — this only touches untouched
+  installs. New migration test added (`test/intent_store_test.dart`, "seed v4
+  migrates untouched verb-v3 defaults"). **Not yet verified on-device** — no Flutter
+  toolchain/device in this session; `docs/TEST_PLAN.md` cases 66/69/71/71b cover
+  fresh install, the v3→v4 auto-migration, Restore defaults, and the new preset's
+  icon/behavior.
+
+- **[decision] Raise `maxEnabledPresets` from 8 to 10 — deferred pending user
+  feedback, not rejected.** Requested 2026-08-11 alongside the "Call someone"
+  preset addition. Technically safe to raise (capture screen presets render in a
+  `Wrap` inside a `SingleChildScrollView`, `lib/main.dart` — extra presets just
+  wrap to more rows, no overflow/low-end-device risk). Held at 8 instead because
+  the existing cap is a *documented behavioral* decision, not a technical one —
+  `docs/DATA_MODEL.md` §7: "decision cost, not screen space" is the binding
+  constraint, current cap 8 with 5–6 *recommended*. Rather than guess whether 10
+  helps or hurts, added the actual question to
+  `docs/USER_INTERVIEWS.md` (Presets / capture screen) to ask real testers.
+  Revisit once that's been asked.
 
 - **[decision] Full crash reporting / Crashlytics** — still deferred. See prior
   note: opt-in network reporting only when N outgrows 1:1 support; flips Data

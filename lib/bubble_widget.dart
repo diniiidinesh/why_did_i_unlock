@@ -34,21 +34,16 @@ double expandedBubbleWidthDp(String text) {
   return raw.clamp(bubbleExpandedMinWidthDp, bubbleExpandedMaxWidthDp);
 }
 
-List<BoxShadow> get _beaconGlow => const [
-      BoxShadow(
-        color: BeaconColors.amberGlow,
-        blurRadius: 12,
-        spreadRadius: 0.5,
-        offset: Offset(0, 0),
-      ),
-      BoxShadow(
-        color: Color(0x33000000),
-        blurRadius: 8,
-        offset: Offset(0, 3),
-      ),
-    ];
-
 /// Shared frosted shell: blur + black glass @ 60% + amber rim (1.5dp).
+///
+/// No glow/drop-shadow beyond the shell's own bounds — the native overlay
+/// window is sized to exactly match this shape (see the `showOverlay()`
+/// call sites in `lib/main.dart`), with no margin for a blurred shadow to
+/// fade out before hitting the window edge. A `BoxShadow` here previously
+/// got hard-clipped at that edge instead of fading, reading as a flat
+/// amber-tinted square around the circle rather than a soft halo. `ClipRRect`
+/// below guarantees nothing paints outside [borderRadius], matching the
+/// window bounds exactly.
 class _BeaconGlassShell extends StatelessWidget {
   final double? width;
   final double height;
@@ -64,13 +59,9 @@ class _BeaconGlassShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return SizedBox(
       width: width,
       height: height,
-      decoration: BoxDecoration(
-        borderRadius: borderRadius,
-        boxShadow: _beaconGlow,
-      ),
       child: ClipRRect(
         borderRadius: borderRadius,
         child: BackdropFilter(

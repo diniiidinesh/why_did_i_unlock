@@ -7,9 +7,10 @@ import 'package:flutter/material.dart';
 IconData iconForIntentLabel(String? label) {
   final key = (label ?? '').trim().toLowerCase();
   return switch (key) {
-    // Current defaults (verb seed v3)
+    // Current defaults (verb seed v4)
     'check mail' => Icons.mail_outline,
     'message someone' => Icons.chat,
+    'call someone' => Icons.call,
     'book a cab' => Icons.local_taxi,
     'order food' => Icons.restaurant,
     'pay someone' => Icons.account_balance_wallet,
@@ -28,6 +29,7 @@ IconData iconForIntentLabel(String? label) {
 const Set<String> _knownPresetLabelsLower = {
   'check mail',
   'message someone',
+  'call someone',
   'book a cab',
   'order food',
   'pay someone',
