@@ -410,8 +410,30 @@ Help](https://support.google.com/googleplay/android-developer/answer/14151465)):
 - [IN PROGRESS, started ~2026-07-30] Keep ≥12 opted-in **continuously for
       14 days** → target completion **~2026-08-13**. If the count dips below 12,
       the window is at risk — recruit replacements immediately.
-- [ ] After 14 continuous days: Dashboard → apply for production access → answer
-      Google's testing questionnaire honestly.
+- [DONE 2026-08-13] After 14 continuous days: Dashboard → apply for production
+      access → questionnaire answered, production access granted.
+
+### Every release: upload the R8 mapping file (found 2026-08-13)
+
+Release build 11 (0.6.3) shipped R8 enabled by default (Full Mode + Resource
+Shrinking — inherited from the Flutter Gradle plugin, not anything explicitly
+configured in `android/app/build.gradle.kts`) — confirmed via Play Console's
+"App bundle" detail page: `Optimization percentage` / `Obfuscation percentage`
+/ `Shrinking percentage` all showed `-` with a warning icon, because the R8
+mapping file was never uploaded.
+
+**Consequence if skipped:** any future Android vitals crash report for a
+release involves obfuscated Kotlin/Java class and method names instead of
+real ones — exactly the kind of readable stack trace that let us root-cause
+the `OverlayService` null-Intent crash (`docs/debug/rca-overlay-service-null-intent-crash-2026-08-02.md`).
+Without the mapping file, a future crash in *our own* Kotlin code (not just
+plugin code) would be far harder to read from Play Console alone.
+
+- [ ] After every `flutter build appbundle --release`, upload
+      `build/app/outputs/mapping/release/mapping.txt` via Play Console → the
+      release → **App bundle explorer** → select the version → **Downloads**
+      tab → upload deobfuscation file. Retroactively upload for build 11 if
+      still possible.
 
 ### "Continuously opted-in" trap
 
