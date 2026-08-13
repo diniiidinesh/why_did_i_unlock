@@ -764,6 +764,10 @@ void backgroundMain() {
       await _showCaptureScreen(width, height);
     } else if (call.method == 'onLock') {
       debugPrint('🔒 LOCK EVENT RECEIVED at ${DateTime.now()}');
+      unawaited(ProblemReportLog.recordBreadcrumb(
+        'background',
+        _overlayIsActive ? 'lock → signaled to overlay' : 'lock (no overlay up)',
+      ));
       // Only the CAPTURE screen should close on lock; a live bubble (an
       // outstanding intent) stays up — see _lockSignalPortName's doc and
       // docs/erd/sprint4-app-shell-plan-2026-07-23.md §3a. Skip the signal
@@ -817,6 +821,7 @@ void backgroundMain() {
         _activeOverlayKind = _ActiveOverlayKind.none;
         _armSnoozeTimer();
         debugPrint('😴 Snooze armed for ${_bubbleSnoozeDuration.inMinutes}m');
+        unawaited(ProblemReportLog.recordBreadcrumb('background', 'bubble snoozed'));
         return;
       }
       // Bubble visible (declare UI path) — set kind before DB so orientation
@@ -826,6 +831,19 @@ void backgroundMain() {
         _bubbleOverlayText = map['text'] as String? ?? _bubbleOverlayText;
         _bubbleOverlayDpr = (map['dpr'] as num?)?.toDouble() ?? _bubbleOverlayDpr;
         debugPrint('🫧 Overlay kind=bubble (showing)');
+        unawaited(ProblemReportLog.recordBreadcrumb('background', 'bubble showing'));
+        return;
+      }
+      // Ad-hoc one-line notes from the OVERLAY isolate, which has no plugins
+      // of its own (see ProblemReportLog's class doc) — this relay is how an
+      // overlay-side event still reaches the on-device log. Deliberately
+      // free-text but NEVER passed user-declared intent text — see call
+      // sites in [_abandonLostBubble] etc.
+      if (map['type'] == 'breadcrumb') {
+        final msg = map['message'] as String?;
+        if (msg != null) {
+          unawaited(ProblemReportLog.recordBreadcrumb('overlay', msg));
+        }
         return;
       }
       // Edge snap — no DB. See [_snapBubbleToEdge].
@@ -864,16 +882,21 @@ void backgroundMain() {
           final event = IntentEvent.fromMessage(map);
           await store.insertOpenIntent(event);
           if (kDebugMode) debugPrint('📂 Intent opened: text="${event.text}"');
+          // Breadcrumb intentionally omits event.text (user-declared content)
+          // — see recordBreadcrumb's doc.
+          unawaited(ProblemReportLog.recordBreadcrumb('background', 'intent declared'));
         case 'dismiss':
           _clearSnoozeState();
           final dismissal = IntentDismissal.fromMessage(map);
           await store.markIntentDone(clientId: dismissal.clientId, completedAt: dismissal.completedAt);
           debugPrint('✅ Intent marked done: clientId=${dismissal.clientId}');
+          unawaited(ProblemReportLog.recordBreadcrumb('background', 'intent dismissed'));
         case 'noIntent':
           _clearSnoozeState();
           final event = IntentEvent.fromMessage(map);
           await store.insertEvent(event);
           if (kDebugMode) debugPrint('💾 Stored no-intent event: text="${event.text}"');
+          unawaited(ProblemReportLog.recordBreadcrumb('background', 'no-intent unlock ("Just Like That")'));
         case 'requestPresets':
           await _replyActivePresetsToOverlay(store);
         default:
@@ -1024,6 +1047,15 @@ Future<void> _logUnlock({
   required bool promptShown,
   SkipReason? skipReason,
 }) async {
+  // Fire-and-forget, unconditional (not inside the try/store-gated block
+  // below) — same "must never sit on the unlock path, must never suppress
+  // the prompt" reasoning as this function's own doc comment, and it must
+  // survive an unavailable IntentStore too, since "store keeps failing to
+  // open" is itself exactly the kind of thing a breadcrumb trail should show.
+  unawaited(ProblemReportLog.recordBreadcrumb(
+    'background',
+    promptShown ? 'unlock → prompt shown' : 'unlock → skipped (${skipReason?.name ?? "unknown"})',
+  ));
   try {
     final store = await _ensureIntentStore();
     if (store == null) {
@@ -1581,23 +1613,100 @@ class _OverlayRootState extends State<OverlayRoot> {
     final widthDp = expanded ? expandedBubbleWidthDp(_intentText) : bubbleCollapsedDp;
     final heightDp = bubbleExpandedHeightDp;
     await FlutterOverlayWindow.closeOverlay();
-    await FlutterOverlayWindow.showOverlay(
-      height: (heightDp * dpr).round(),
-      width: (widthDp * dpr).round(),
-      // Always centerRight so drag-snap [moveOverlay] coords stay consistent
-      // (x=0 = right). Left dock is a single post-show move with resetY.
-      alignment: OverlayAlignment.centerRight,
-      flag: OverlayFlag.defaultFlag,
-      overlayTitle: appDisplayName,
-      overlayContent: _intentText,
-      enableDrag: true,
-      positionGravity: PositionGravity.none,
-    );
+    // GUARDED, and it must stay that way — this close+reopen is the overlay
+    // isolate's twin of the background-path bug fixed in _presentCaptureOverlay
+    // (docs/BACKLOG.md "hung showOverlay() left _overlayIsActive stuck true"),
+    // and it was left unguarded when that one was fixed. Confirmed on-device
+    // 2026-08-13: the window vanished with the process still alive (no LMK
+    // kill, no crash in logcat), background still logging "🟡 Overlay already
+    // active" on every unlock and the overlay isolate still answering the lock
+    // signal with "bubble is live" — i.e. BOTH sides believed a bubble was up
+    // while the screen had none, and force-stop was the only recovery.
+    //
+    // This path is far more exposed than the capture path: it runs on EVERY
+    // expand/collapse, including the unattended auto-collapse timer, which
+    // reaches it through `unawaited(...)` — so a raw throw here becomes an
+    // unhandled async error that release builds swallow without a trace,
+    // which is exactly why the original failure left no fingerprint. Hence
+    // both a timeout AND a catch-all: once closeOverlay() has succeeded, ANY
+    // failure to reopen means the window is gone for good.
+    var reopened = false;
+    try {
+      reopened = await _withTimeout(
+            'showOverlay(bubble resize)',
+            FlutterOverlayWindow.showOverlay(
+              height: (heightDp * dpr).round(),
+              width: (widthDp * dpr).round(),
+              // Always centerRight so drag-snap [moveOverlay] coords stay
+              // consistent (x=0 = right). Left dock is a single post-show
+              // move with resetY.
+              alignment: OverlayAlignment.centerRight,
+              flag: OverlayFlag.defaultFlag,
+              overlayTitle: appDisplayName,
+              overlayContent: _intentText,
+              enableDrag: true,
+              positionGravity: PositionGravity.none,
+            ).then((_) => true),
+          ) ??
+          false;
+    } catch (e) {
+      debugPrint('⚠️ Overlay: bubble reopen threw ($e)');
+    }
+    if (!reopened) {
+      await _abandonLostBubble();
+      return;
+    }
     if (left) {
       _requestBubbleSnap(widthDp: widthDp, dockLeft: true, resetY: true);
     } else {
       _dockedLeft = false;
     }
+  }
+
+  /// Last resort when [_showBubbleWindow]'s reopen fails: the bubble's window
+  /// is already closed and is not coming back, so the only question left is
+  /// whether the app notices.
+  ///
+  /// Fails OPEN, deliberately. Losing one bubble costs the user a single
+  /// outstanding intent; leaving the two "is an overlay showing" flags stuck
+  /// true costs them the app's entire core loop — every subsequent unlock
+  /// skips as `overlay_active` with no prompt, no bubble and no error, until
+  /// a force-stop they have no reason to think of. The declared intent's row
+  /// was already persisted at declare time (see [_submitIntent]) and is
+  /// deliberately NOT marked done here: it was abandoned, not completed, and
+  /// writing a false completion would also arm [TimeCooldownPolicy] against
+  /// the next real unlock.
+  Future<void> _abandonLostBubble() async {
+    debugPrint('🩹 Overlay: bubble window lost — resetting to capture so unlocks keep prompting');
+    // Relayed to background (this isolate has no plugins of its own — see
+    // ProblemReportLog's class doc) — the single most useful breadcrumb this
+    // change adds, since this is precisely the recovery path for the 2026-08-13
+    // stuck-overlay bug; if it ever fires in the field, a report should show it.
+    _sendToBackground({'type': 'breadcrumb', 'message': 'bubble window lost — recovered to capture'});
+    _cancelAutoCollapse();
+    _snapDebounce?.cancel();
+    // Clears the background isolate's _overlayIsActive. Safe to call for a
+    // window that is already gone — this is exactly the "real close" it
+    // means, just reached by failure rather than by the user.
+    _signalOverlayClosed();
+    // Same reset as _dismissBubble, and for the same reason: the plugin
+    // caches this engine, so without it the next unlock reattaches a cached
+    // view still in bubble mode inside a full-screen capture window, which
+    // swallows every touch and blocks the phone.
+    if (mounted) {
+      setState(() {
+        _mode = _OverlayMode.capture;
+        _intentText = '';
+        _intentSource = '';
+        _declaredAt = null;
+        _intentClientId = null;
+        _intentPresetId = null;
+        _bubbleUiMode = _BubbleUiMode.expanded;
+        _dockedLeft = false;
+        _sessionIsManual = false;
+      });
+    }
+    _requestPresets();
   }
 
   void _cancelAutoCollapse() {

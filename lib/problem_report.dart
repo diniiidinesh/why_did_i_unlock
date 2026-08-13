@@ -38,6 +38,18 @@ class ProblemReportLog {
   /// Cap what we put in a mailto: body (many mail apps truncate long URIs).
   static const maxEmailChars = 1600;
 
+  /// Separate key/rolling buffer from [prefsKey] — breadcrumbs are one-line
+  /// lifecycle notes ("unlock → skipped (cooldown)"), not exceptions, and
+  /// sharing a buffer with stack traces would let a burst of the (far more
+  /// common) former crowd out the latter, which is the whole reason to
+  /// distinguish "what broke" (errors) from "what happened before it broke"
+  /// (breadcrumbs) in the first place.
+  static const breadcrumbsPrefsKey = 'problem_report_breadcrumbs_v1';
+
+  /// Smaller cap than [maxStoredChars] on purpose — breadcrumbs are terse
+  /// one-liners, not stack traces, so this still holds ~15-20 recent events.
+  static const maxStoredBreadcrumbChars = 1000;
+
   /// Append one error. Safe to call from any isolate with plugin access
   /// (UI/background — NOT the overlay isolate, see the class doc comment).
   static Future<void> record(String engine, Object error, [StackTrace? stack]) async {
@@ -58,17 +70,60 @@ class ProblemReportLog {
     }
   }
 
-  /// Text block for a problem-report email body.
+  /// Append one breadcrumb: a short, no-stack-trace note on something the
+  /// app did (an unlock's outcome, a bubble lifecycle event) — not an error.
+  /// Deliberately takes a short freeform [message] rather than structured
+  /// fields, and deliberately does NOT accept user-declared intent text as
+  /// an argument anywhere it's called from — see call sites in `lib/main.dart`
+  /// for the events this covers. Same fire-and-forget, never-throws contract
+  /// as [record]; same isolate caveat (see the class doc comment) — the
+  /// overlay isolate can't call this directly, but its events reach here via
+  /// the `'breadcrumb'` relay message type in `backgroundMain`'s
+  /// `intentWritePort` listener, since that already exists for the overlay's
+  /// declare/dismiss/snooze relays and needed no new plumbing to reuse.
+  static Future<void> recordBreadcrumb(String engine, String message) async {
+    final stamp = DateTime.now().toUtc().toIso8601String();
+    final entry = '[$stamp|$engine] ${_clip(message, 200)}\n';
+    try {
+      final prefs = SharedPreferencesAsync();
+      final prev = await prefs.getString(breadcrumbsPrefsKey) ?? '';
+      var next = '$prev$entry';
+      if (next.length > maxStoredBreadcrumbChars) {
+        next = next.substring(next.length - maxStoredBreadcrumbChars);
+      }
+      await prefs.setString(breadcrumbsPrefsKey, next);
+    } catch (_) {
+      // Never let diagnostics break the app.
+    }
+  }
+
+  /// Text block for a problem-report email body. Breadcrumbs are listed
+  /// first (chronological lead-up) and are omitted entirely when there are
+  /// none, rather than printing an empty "Recent activity:" header — most
+  /// reports from a freshly-installed or freshly-cleared device won't have
+  /// any yet, and an empty section reads as broken rather than as "nothing
+  /// happened to log," unlike the errors section's explicit empty-state copy
+  /// below (errors are the section a tester is specifically asked about, so
+  /// that one stays explicit either way).
   static Future<String> snapshotForEmail() async {
     try {
       final prefs = SharedPreferencesAsync();
+      final breadcrumbs = (await prefs.getString(breadcrumbsPrefsKey) ?? '').trim();
       final raw = await prefs.getString(prefsKey) ?? '';
-      if (raw.trim().isEmpty) {
-        return '(No recent in-app errors were captured. If the app closed '
-            'abruptly with no dialog, describe what you were doing above — '
-            'native crashes leave no Flutter log on the device.)';
+      final errorsSection = raw.trim().isEmpty
+          ? '(No recent in-app errors were captured. If the app closed '
+              'abruptly with no dialog, describe what you were doing above — '
+              'native crashes leave no Flutter log on the device.)'
+          : raw;
+      final buffer = StringBuffer();
+      if (breadcrumbs.isNotEmpty) {
+        buffer.writeln('Recent activity:');
+        buffer.writeln(breadcrumbs);
+        buffer.writeln();
       }
-      return _clip(raw, maxEmailChars);
+      buffer.writeln('Recent in-app errors:');
+      buffer.write(errorsSection);
+      return _clip(buffer.toString(), maxEmailChars);
     } catch (_) {
       return '(Could not read the local error log.)';
     }
@@ -99,5 +154,6 @@ class ProblemReportLog {
   @visibleForTesting
   static Future<void> clearForTest() async {
     await SharedPreferencesAsync().remove(prefsKey);
+    await SharedPreferencesAsync().remove(breadcrumbsPrefsKey);
   }
 }
