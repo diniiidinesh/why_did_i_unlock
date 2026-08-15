@@ -312,6 +312,28 @@ background engine.
   unlock can try again. The unlock is logged as `SkipReason.pluginTimeout`.
   Full investigation (plus the related “empty presets after first post-reboot unlock”
   poison path): `docs/debug/rca-post-reboot-overlay-stall-presets-2026-07-24.md`.
+- **`FlutterOverlayWindow.closeOverlay()` must go through `_closeOverlayWindow()` —
+  never call it directly.** Same defect class again, and the one that actually caused
+  the long-running "unlock stopped prompting" bug (confirmed on-device 2026-08-15,
+  after two earlier fixes aimed at other failure modes that never fired). `closeOverlay()`
+  is called from the OVERLAY isolate, and in the stuck state logcat showed
+  `🔒 Overlay: closing capture screen on lock` on two consecutive locks with
+  `🔵 Overlay closed signal received` never arriving on the background side — the two
+  log lines sit either side of exactly one statement, so the close never returned.
+  Because `_signalOverlayClosed()` (pure Dart, cannot fail) sat *after* that await, it
+  never ran, and `_overlayIsActive` stayed true forever. Note a hung `await` does NOT
+  block the isolate's event loop, so every later lock re-entered and hung identically —
+  which is why it looked permanent rather than intermittent, and why the overlay isolate
+  still responded to other messages (ruling out the "overlay engine died" theory).
+- **THE RULE behind all four bullets above: a pure-Dart state signal must never sit
+  downstream of a plugin call that can hang.** `IsolateNameServer` port sends are
+  in-process and cannot fail; plugin calls from the overlay isolate demonstrably can
+  hang forever, because the plugin routes them through a single static native field
+  (`WindowSetup.messenger`) owned by whichever engine attached the plugin last — so
+  merely opening the app can leave the overlay isolate talking to a detached messenger.
+  When ordering the two, put the signal where a hang cannot starve it (before the call,
+  or after a `_withTimeout`-guarded one), and never let plugin success gate state
+  correctness. Every future overlay-isolate plugin call should assume it can hang.
 - **Never send a timed-out `activePresets()` as `[]` to the overlay.** `_withTimeout`
   returns `null` on hang; coercing that to an empty list and `port.send`-ing it
   permanently poisons the overlay's cached `_presets` (first unlock after CE
