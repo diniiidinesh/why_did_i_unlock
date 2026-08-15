@@ -3,7 +3,34 @@
 > Deferred engineering/feature work and ideas not yet built. Git-tracked on purpose
 > (survives machine switches).
 >
-> ### TOP OF NEXT THREAD (2026-07-29)
+> ### CURRENT PRIORITY ORDER (2026-08-15) — set by Dinesh after closed-test feedback
+>
+> Seven testers gave written feedback (verbatim + triage in
+> `docs/erd/onboarding-revamp-2026-08-15.md` Appendix A). Order of work agreed:
+>
+> 1. **[P0] Onboarding revamp — IN PROGRESS, handed to Cursor.**
+>    Copy diet → animated walkthrough → tooltip-based feature discovery → day-1
+>    stats. Full plan + Cursor guardrails:
+>    `docs/erd/onboarding-revamp-2026-08-15.md` (§9 sequencing, §11 handoff).
+> 2. **[P0] Outstanding-intent prompt** — plan already written
+>    (`docs/erd/outstanding-intent-prompt-2026-08-15.md`), not built. **Promoted
+>    on feedback evidence:** Vishishta's "my response isn't recorded and the app
+>    doesn't work on subsequent unlocks" and Rohit's "archive the prompt after a
+>    few hours" are both this gap. 48 of 109 unlocks in Dinesh's own export were
+>    `overlay_active` skips — the app deliberately saying nothing.
+> 3. **[P0] Bubble salience regression** — NEW, see the Reliability section below.
+>    Two independent testers; goes at the heart of the product thesis.
+> 4. **[P1] Insights rework** — Chukka: "insights not visible/helpful, the pie
+>    chart isn't that great," "unclear what value the app added." Note the
+>    per-app/category breakdown he wants needs `UsageStats` (`CLAUDE.md` §9
+>    policy risk) — scope the policy question before the feature.
+> 5. **[P1] `maxEnabledPresets` = 8** — the user-interview answer arrived; see
+>    the new item under Capture-screen / bubble UX.
+> 6. **Then** the pre-existing P1/P2 items below.
+>
+> The block below is the **superseded** 2026-07-29 state, kept for history.
+>
+> ### TOP OF NEXT THREAD (2026-07-29) — SUPERSEDED, see above
 >
 > Merged to `main` (PR #9 Stage B, then PR #8 Beacon rebrand), `0.6.1+9`. Branding,
 > privacy, Report a problem, prompt 100%, verb presets, Home load fix, **OEM
@@ -94,6 +121,23 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 
 ### Home insights / Settings follow-ups (post-T18)
 
+- **[P1 — NEW 2026-08-15] Insights aren't landing.** Chukka: *"Insights are not
+  visible/helpful; the pie chart isn't that great… no clear breakdown that can help
+  me change behaviour,"* and *"unclear what value [is] added by the app."*
+  Two separable problems: (a) the existing donut/duration presentation isn't
+  legible or actionable — addressable today with no new permissions; (b) the
+  breakdown he actually wants is **per-app / per-category** ("Social media, which
+  includes Twitter, Instagram") which needs `UsageStatsManager` — `CLAUDE.md` §9
+  policy risk, and a departure from the local-only, self-declared data model.
+  **Do (a) first; (b) needs a product+policy call, not just engineering.** The
+  day-1 stats screen in `docs/erd/onboarding-revamp-2026-08-15.md` §4C.5 is a
+  partial down-payment on (a).
+
+- **[P2 — NEW 2026-08-15] Rename the "Time to mark done" insight label.**
+  Vishishta: *"I am not clear what the 'Time to mark done' feature means."* It's a
+  duration statistic, not a feature, and the label reads like a setting. One-line
+  copy fix — folded into the onboarding work's PR 3 (`onboarding-revamp` §5.4).
+
 - **[P2] Outcome donut — prompt-level (per-preset) breakdown** — today's donut is outcome categories only (`IntentStore.outcomeBreakdown` → T15/T18). Want a split of **which presets** contributed inside a slice (e.g. within "done", how many were Payments vs Calls). A full dedicated per-preset breakdown screen is optional later; **MVP:** tap/long-press (or hover on desktop) a slice → tooltip/sheet showing preset-level counts for that outcome. Needs a store query that groups by `(outcome category, preset_id/label)` for the active insight window — not just category totals. Requested 2026-07-24.
 
 - **[P2] Multiple quiet-hours windows** — `AppSettings.quietHoursWindow` + Settings UI + `QuietHoursPolicy` + `docs/DATA_MODEL.md` §11 today hold a **single** start/end pair. Supporting several windows (e.g. nap + overnight) needs a settings schema change to a **list** of windows (not one pair), Settings UI to add/remove/edit windows, and policy logic that suppresses if *any* window contains `now` (including each window's midnight wrap). No `intent_log` migration — prefs/settings only — but treat as a real settings-format bump with a migration from the single-window shape. Requested 2026-07-24.
@@ -177,6 +221,58 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
 - **[P2] Show a max-presets counter (e.g. "5/8 enabled") in Manage Options.** `maxEnabledPresets`/`maxStoredPresets` already exist as constants in `lib/intent_store.dart`; this is purely a UI addition — a `Text` showing `${enabledCount}/$maxEnabledPresets` near the top of the list. Requested 2026-07-24 so users understand the cap before hitting `PresetLimitExceeded`, rather than only discovering it via an error.
 
 ## Capture-screen / bubble UX
+
+- **[P0 — NEW 2026-08-15] Bubble salience regression: the amber bubble is being
+  tuned out.** Two independent closed testers, same complaint. Sanchary: *"the
+  beacon has become easier to ignore now… before I would still have the awareness
+  of the purple thing in my peripheral vision. Now the orange thing is almost
+  blending into the… I am just not noticing it."* Omkar, independently, asked for
+  the bubble to **move to a random location and change colour** ("animate into a
+  nice random pokemon") for exactly the same reason — he describes suppressing
+  calendar reminders blindly as muscle memory: *"Operation successful but Patient
+  dead."*
+  **Likely cause:** the 2026-08-11 batch-2 change that clipped `_BeaconGlassShell`
+  to its exact shape (`ClipRRect`) and removed the `amberGlow`/`BoxShadow` token.
+  That fix was correct on its own terms — the glow was rendering as a flat
+  amber-tinted square because the native overlay window has zero margin for the
+  blur to fade — but it removed *salience* along with the artefact, and the
+  Beacon amber is lower-contrast against typical app backgrounds than the old
+  purple was.
+  **Why this is P0, not polish:** `CLAUDE.md` §10 puts the bubble at the centre of
+  the product thesis (the prompt alone is explicitly *not* the differentiator). A
+  bubble that gets tuned out is the whole product getting tuned out — Chukka's
+  *"the bubble actually helped me remember why I opened the phone only once in the
+  past ten days"* is the same failure measured differently.
+  **Options to scope (not yet decided):** restore a correctly-clipped halo by
+  sizing the overlay window with margin for the blur; periodic subtle motion or a
+  slow pulse (must respect `CLAUDE.md` §8 — no continuous animation in the overlay
+  engine, so any motion needs to be occasional and cheap); position drift over
+  time; colour shift as the intent ages (ties naturally to the unbuilt timer).
+  Needs a design call before building.
+
+- **[P1 — NEW 2026-08-15] `maxEnabledPresets = 8` — the user-interview answer
+  arrived.** Chukka: *"8 options feels like a limitation… it'll be helpful if more
+  options are present."* `CLAUDE.md` §12 / batch 2 recorded the cap as staying at 8
+  "pending a real user-interview answer" (`docs/USER_INTERVIEWS.md`). This is that
+  answer — one data point, not a mandate, but the question is no longer
+  unanswered. Counter-consideration: more pills on the capture screen fights the
+  fast-unlock-path and thumb-zone work, so raising the cap is not free. Record the
+  data point in `docs/USER_INTERVIEWS.md` either way.
+
+- **[P2 — NEW 2026-08-15] Save a typed custom intent as a reusable preset.**
+  Devansh: *"The prompts given manually on screen, is there a way to store them and
+  show them?"* Natural fit with Manage options and the parked suggestion catalog
+  below. Interacts with `maxEnabledPresets` (above) — a one-tap "save this" that
+  silently hits the cap would be a bad first experience, so scope the cap question
+  first.
+
+- **[explore — NEW 2026-08-15] Prompt on task deviation.** Rohit: *"If the user is
+  done with the task or gets diverted into another task, should we prompt the user
+  regarding the deviation?"* ⚠️ Detecting "diverted into another task" requires
+  `UsageStatsManager` or `AccessibilityService` — the exact policy-fragile surface
+  `CLAUDE.md` §9 flags as the single biggest existential risk. Same dependency as
+  the existing "[explore] Detect task completion & nudge" item. Scope the policy
+  question once, for both.
 
 - **[DONE 2026-07-21] "OK"/submit button** — SHIPPED next to the text field.
 - **[DONE 2026-07-21] "Just Like That" option** — SHIPPED (logs a purposeless unlock, closes without a bubble). Styling follow-up is item #2 at top of file.

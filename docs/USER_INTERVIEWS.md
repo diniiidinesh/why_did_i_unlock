@@ -28,3 +28,12 @@
     regularly, versus ones you'd tap once and never again?"
   - Follow-up if they want fewer: "Which of the current ones do you never
     use?"
+  - **[PARTIALLY ASKED 2026-08-15]** — one unprompted data point from written
+    closed-test feedback (not a 1:1, so the follow-ups above went unasked).
+    **Chukka:** *"8 Options feels like a limitation… It'll be helpful if more
+    options are present."* Same tester also reported *"phone usage hasn't gone
+    down"* and *"even if I write a note, I'm not fulfilling it"* — so read the
+    request in context: it may be a proxy for "the app isn't working for me"
+    rather than a literal capacity problem, which is exactly what the follow-up
+    questions above are designed to separate. **Still worth a real 1:1 before
+    changing the cap.** No other tester mentioned the limit.
