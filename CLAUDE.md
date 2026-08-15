@@ -108,6 +108,7 @@ Docs: for **what each doc is**, see the doc map in `README.md`; for **when to up
 ## 7. Working rules (how to collaborate on this project)
 
 - **Do NOT modify Kotlin / native Android files unless explicitly asked.** The native layer is delicate; changing it silently risks breaking things that currently work. If a task seems to require touching Kotlin, STOP and ask first, explaining why. (Approved exceptions so far: v0.3.0 screen-lock detection; 2026-07-24 `ScreenMetrics` + `onOrientationChanged` for bubble rotation — both followed ask-then-edit.)
+- **NEVER commit directly to `main`. Always work on a branch, and merge via PR.** `main` is the released branch — the app is in Play **production**, so anything landing there is a candidate for real users' phones. Claude Code must `git checkout -b <branch>` BEFORE the first commit of any change; if you notice you've already committed to `main` and haven't pushed, recover with `git branch <name>` at the current commit then `git reset --hard origin/main`. This happened 2026-08-15 (the overlay-liveness fix was committed straight to `main`, caught by Dinesh and moved to `fix/overlay-isolate-liveness-ping`) — no harm done only because it hadn't been pushed yet. Branch naming follows what's already in `git log`: `fix/…`, `claude/…`, or `cursor/…` by owner. Also: **do not push, merge, or open a PR unless asked** — committing locally is fine and reversible; publishing is not.
 - **Explain the "why," not just the "what."** I want the reasoning behind decisions, tradeoffs, and setup steps — not bare instructions.
 - **Work in small, sprint-sized increments.** Plan explicitly before building. Confirm scope before creating or editing files.
 - **Ask clarifying questions when scope is ambiguous** rather than guessing.
@@ -184,6 +185,7 @@ flutter clean                  # when builds get weird
 
 ## 14. Do NOT
 
+- Commit directly to `main` — branch first, merge via PR; and don't push/merge/open a PR unless asked (§7).
 - Touch Kotlin / native Android files unless explicitly asked.
 - Add analytics or network calls to the free/base experience.
 - Reintroduce React Native / Expo / Replit anything.
