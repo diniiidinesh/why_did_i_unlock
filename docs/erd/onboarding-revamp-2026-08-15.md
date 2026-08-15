@@ -643,8 +643,10 @@ Replaces the 78-word "How it works" entirely. Captions in §4B (7 × ≤ 6 words
 
 ### 11.1 Hard rules (from `CLAUDE.md` — these override convenience)
 
-- **Never commit directly to `main`.** Branch first (§9 has the names). `main` is
-  in Play **production** — anything landing there is a candidate for real phones.
+- **Never commit directly to `main`.** Branch first (§9 has the names). The app
+  is **in Play review**, not yet public (as of 2026-08-16) — but `main` is what
+  gets submitted, 29 closed testers already receive builds from it, and public
+  release is imminent. Treat it with full production caution.
 - **Do not touch Kotlin / native Android files.** Nothing in Parts A/B/C/E needs
   it. If Part D (notification, option N-3) is later approved, that is a *separate*
   decision requiring Dinesh's explicit sign-off — not something to slip in.
