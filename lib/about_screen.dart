@@ -19,7 +19,16 @@ export 'brand.dart'
 /// dependency count low, `CLAUDE.md` §7) — must be bumped by hand alongside
 /// `pubspec.yaml`'s `version:` when that changes. [AboutScreen.version]
 /// exists specifically so tests don't depend on this staying in sync.
-const String appVersion = '0.6.3+11';
+///
+/// **Hand-syncing failed once and cost real debugging time.** This sat at
+/// `0.6.3+11` through the `+12` release, so every "Report a problem" email
+/// from that build stated the wrong version — during the 2026-08-15 overlay
+/// investigation that sent us chasing a stale-build theory for two rounds
+/// before `adb shell dumpsys package` showed the APK was actually
+/// `versionCode=12`. `about_screen_version_test.dart` now parses
+/// `pubspec.yaml` and fails if the two ever diverge again, so this can drift
+/// only as far as the next `flutter test`.
+const String appVersion = '0.6.3+13';
 
 /// Injected in place of a real `url_launcher` call so widget tests never
 /// touch a platform channel — same pattern `HistoryScreen.openStore` uses
