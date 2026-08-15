@@ -28,7 +28,7 @@ for the exact assertions.
 | `test/outcome_donut_test.dart` | **Sprint 4 (T15).** `OutcomeDonut` (pure `CustomPainter`, no store dependency): legend percentages per slice, optional `centerLabel`, empty state for both an empty slice list and a slice list that sums to zero (no divide-by-zero). |
 | `test/about_screen_test.dart` | **Sprint 4 (T5).** `AboutScreen`: renders name/version/every action row, injected `version` override, `mailto:` URI built correctly (address + subject/body), a launch failure or thrown exception surfaces as a `SnackBar` (not silent), Support section has no payment link. All `url_launcher` calls are injected — no platform channel touched. |
 | `test/status_screen_test.dart` | **Sprint 4 (T6) + OEM UX.** Permission / battery cards; OEM vendors + not-listed; manufacturer highlight + Beacon find-hint; “Show me the prompt now” pixel size. |
-| `test/onboarding_screen_test.dart` | **Sprint 4 (T4) + OEM/overlay friction.** 5 steps; find-hint; grant/resume re-checks status (no auto-advance); matched OEM steps vs generic fallback; Continue never blocked on permission. |
+| `test/onboarding_screen_test.dart` | **Sprint 4 (T4) + onboarding revamp PR 1.** `OnboardingStep` enum ↔ `PageView` child-count invariant; permission/battery refresh on the *named* step (resume + page-change); copy diet headlines; collapsed "Can't find it?" / "Why does this happen?" disclosures; grant/resume re-checks status (no auto-advance); matched OEM steps vs generic fallback; Continue never blocked on permission. |
 | `test/oem_autostart_copy_test.dart` | **OEM UX.** `matchOemGuidance` / list prefer / find-hint naming. |
 | `test/manage_presets_screen_test.dart` | **Sprint 4 (T16).** `ManagePresetsScreen` against a **real** `IntentStore` (`sqflite_common_ffi`, same real-isolate-I/O pattern as `history_screen_test.dart`), not a fake double — reorder via `ReorderableDragStartListener` drag, rename, soft-delete (leaves the row soft-deleted, never touches its `intent_log` history), restore-defaults (same — old row stays soft-deleted, not hard-deleted), and the two real `docs/DATA_MODEL.md` §7 edge cases: enabling past the 8-enabled cap and creating past the 30-stored cap both surface the store's own `PresetLimitExceeded` message as a `SnackBar` rather than crashing. Soft-deleted presets are confirmed hidden from this list. |
 | `test/bubble_widget_test.dart` | **Bubble UX hybrid.** Icon map + letter avatar; expanded width clamp; collapsed/expanded chrome; Done/Snooze callbacks. |
@@ -269,7 +269,7 @@ Check mail · Message someone · Book a cab · Order food · Pay someone.
 | 71 | Restore defaults | ✅ | Confirmed on-device 2026-08-11 — Manage options layout with the new preset is fine. |
 | 71b | Tap **Call someone** | ✅ | Confirmed on-device 2026-08-11 as part of the unlock-screen check. |
 | 72 | Home “Couldn't load” / pull-to-retry | ❌ | Force a failed or null-store Home state (or cold open after kill); pull down → insights reload without reinstall |
-| 73 | Onboarding overlay step find-hint | ❌ | Copy names **Beacon**; Grant opens system list; return after grant → status shows Granted; user taps Continue (no auto-advance) |
+| 73 | Onboarding overlay step find-hint | ❌ | Copy names **Beacon** behind the collapsed **Can't find it?** row (PR 1 copy diet); Grant opens system list; return after grant → status shows Granted; user taps Continue (no auto-advance) |
 | 74 | Status: OEM highlight on matched maker | ❌ | Matched tile first + “Looks like your phone”; steps include leave smart optimize (Don’t optimize / Not optimized / No restrictions) |
 | 75 | Home OEM nudge | ❌ | With battery not exempt: “Keep monitoring alive” → Open Status / Dismiss; dismiss stays gone after reopen |
 | 76 | Friend Vivo/Xiaomi Autostart soak | ❌ | Vivo: App info → Battery usage → Background power control → **Allow background power usage** (not smart control); leave app closed 30–60 min; unlock still prompts. |
@@ -318,3 +318,16 @@ toolchain/device in the session that made these changes.
 | 84 | Same device, open Manage options specifically | ✅ | Confirmed on-device 2026-08-11 — FAB layout is fine. |
 | 85 | Trigger the bubble (collapsed, 52dp) over a busy app | ✅ | Confirmed on-device 2026-08-11 — crisp amber rim, no square glow bleed. |
 | 86 | Expand the bubble (Done/Snooze row) | ✅ | Confirmed on-device 2026-08-11, same check as #85. |
+
+### Onboarding revamp PR 1 — copy diet + step-enum refactor (2026-08-16)
+
+Branch `cursor/onboarding-copy-diet`. Presentation only — still 5 steps, How it
+works prose untouched (PR 2 replaces it). Highest-risk case is permission
+refresh after the named-step refactor; do not mark these passed here.
+
+| # | Case | Status | Notes / expected |
+|---|---|---|---|
+| 87 | Fresh install (clear data): walk all 5 onboarding steps | ❌ | Headlines: "Notice why you picked up your phone" → "How it works" → "One permission." → "Keep Beacon awake." → "Stays on your phone." How-it-works body is still the old prose. Final button is **Get started**. |
+| 88 | Permission step: collapsed **Can't find it?** | ❌ | Body is the 10-word line. Hint and "You can skip and grant this later…" are hidden until the row is expanded. Grant still works. |
+| 89 | OEM step: collapsed **Why does this happen?** | ❌ | Body is the 9-word line. `oemGuidanceIntro` is hidden until expanded. Matched OEM steps (or generic fallback) stay visible without expanding. |
+| 90 | **Permission grant → background → return** | ❌ | **Highest-risk regression in this change** (`docs/erd/onboarding-revamp-2026-08-15.md` §5.1 / §6). On "One permission.", tap Grant, flip the system toggle, return to the app. Status must flip to Granted without a restart. Same for Disable battery optimization on "Keep Beacon awake." |

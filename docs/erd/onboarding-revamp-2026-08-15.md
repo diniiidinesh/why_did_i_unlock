@@ -28,6 +28,13 @@
   unlock event rather than any scheduling API, so no exact-alarm permission and no
   boot rescheduling; must degrade to in-app if the permission is refused. Folded
   into PR 4 with the stats screen. Added §12 — per-PR task briefs for Cursor.
+- **2026-08-16** — PR 1 implemented on `cursor/onboarding-copy-diet` (not merged;
+  on-device verification still Dinesh's). `OnboardingStep` enum replaces the
+  hardcoded `_stepCount = 5` and integer comparisons in
+  `didChangeAppLifecycleState` / `_onPageChanged`; page list is derived from
+  the enum. §10 copy applied to the existing five steps (How it works prose
+  left in place for PR 2). Collapsed "Can't find it?" / "Why does this happen?"
+  disclosures added. Still 5 steps — no walkthrough, no "Try it now".
 
 ---
 
