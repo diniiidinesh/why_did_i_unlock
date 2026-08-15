@@ -6,7 +6,7 @@
 
 On every phone unlock, a prompt asks **"What are you unlocking for?"** You declare an intent (a preset or custom text), and it persists as a **floating bubble** across all apps until you dismiss it — a constant, gentle reminder of *why* you picked up your phone. An optional countdown timer is planned. The defensible idea is the **bubble + timer** accountability loop, not the unlock prompt alone.
 
-## Status (2026-08-11)
+## Status (2026-08-15)
 
 - **v0.3.0 shipped** (tagged 2026-07-17), verified on a real device: unlock/lock detection, intent-capture screen (presets + custom text), the bubble showing the declared intent, manual dismiss, and debug logging.
 - **v0.3.x** (reliability fixes merged to `main`, tagged `v0.3.1`): monitoring survives app-swipe-out, restarts after reboot, full-display capture screen.
@@ -16,9 +16,12 @@ On every phone unlock, a prompt asks **"What are you unlocking for?"** You decla
 - **v0.6.1 shipped — Beacon rebrand + Stage B** (merged to `main` 2026-07-27, PRs #8/#9, `0.6.1+9`): T17 CSV export, T18 Home insight cards + Your data, hybrid chat-head bubble (Done/Snooze, edge-snap, native orientation reopen), store brand **Beacon** (Play title `Beacon: Mindful Phone Use`, listing docs in `docs/PLAY_SUBMISSION.md`), Beacon amber UI tokens, branding assets/splash/FGS icon, Report a problem, prompt default **100%** with explained 1-min cooldown, verb default presets (Check mail / Message someone / Book a cab / Order food / Pay someone), Home mean row + pull-to-retry load fix, OEM autostart UX (manufacturer highlight + Home nudge) + overlay find-hint. Privacy live at `https://dineshkaliki.com/beacon/privacy/`.
 - **v0.6.2 shipped** (merged to `main` 2026-07-30, PR #14, `0.6.2+10`): tablet/Chromebook/Wear OS excluded from Play's compatible-devices list (`android.hardware.touchscreen` required), overlay snooze `debugPrint` gated behind `kDebugMode` (was logging declared-intent text in release builds).
 - **v0.6.2 fixes** (merged to `main` 2026-08-11, PR #15): "Report a problem" cross-isolate logging bug (stale/clobbered reads across isolates) + mailto `+`-encoding bug, both fixed; a real native crash surfaced by Android vitals (`flutter_overlay_window`'s `OverlayService` `NullPointerException` on Android's post-low-memory-kill service restart, hit 3 testers) fixed via a forked/patched plugin. Both confirmed on-device.
+- **v0.6.3** (`0.6.3+13`, merged to `main` through PR #17): two "unlock stopped prompting" bugs in the overlay lifecycle — a `showOverlay()` reopen call site missing its timeout guard, then a `closeOverlay()` hang leaving the active-overlay flag stuck true — both fixed with the timeout-guard pattern plus an `_abandonLostBubble()` recovery path that fails open. Also adds a breadcrumb trail (`ProblemReportLog.recordBreadcrumb`) so a problem report shows what *led up to* a failure, not just a caught exception. See `CLAUDE.md` §2 for the full account.
 - **Not built yet:** timer/countdown (next big product wedge), voice input.
 
-**Play closed test is live**: `0.6.2 (10)` is on the Closed testing - Alpha track with 29 invited testers (Friends 21 + Testers List 8); the 12-opted-in gate is cleared and the continuous 14-day window started ~2026-07-30 (target ~2026-08-13, see `docs/PLAY_SUBMISSION.md` §4). On-device QA matrix (`docs/TEST_PLAN.md` 54–76) still open.
+**Play production access granted 2026-08-13**: the 14-continuous-day / 12-opted-in closed-test gate cleared on schedule (29 testers invited — Friends 21 + Testers List 8) and `0.6.3 (11)` was submitted for production the same day. See `docs/PLAY_SUBMISSION.md` §4. On-device QA matrix (`docs/TEST_PLAN.md` 54–76) still open.
+
+**In flight (2026-08-15, docs only — no code yet):** written feedback from seven closed testers has been collected, triaged, and turned into a plan. The **onboarding revamp** (copy diet, animated walkthrough, tooltip-based feature discovery, day-1 stats + local notification) is scoped across four PRs in [`docs/erd/onboarding-revamp-2026-08-15.md`](docs/erd/onboarding-revamp-2026-08-15.md) and handed to Cursor. Priority order across all open work — including two P0s that are *not* onboarding (the outstanding-intent prompt, and a bubble-salience regression reported independently by two testers) — is in [`docs/BACKLOG.md`](docs/BACKLOG.md)'s `CURRENT PRIORITY ORDER` block.
 
 ## Documentation map
 
