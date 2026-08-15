@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'brand.dart';
 import 'problem_report.dart';
+import 'walkthrough.dart';
 
 export 'brand.dart'
     show
@@ -147,6 +148,19 @@ class AboutScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           const _SectionDivider(),
+          ListTile(
+            iconColor: Colors.white70,
+            textColor: Colors.white,
+            leading: const Icon(Icons.play_circle_outline),
+            title: const Text('How Beacon works'),
+            subtitle: const Text(
+              'Watch the prompt-and-bubble walkthrough',
+              style: TextStyle(color: Colors.white38),
+            ),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const WalkthroughScreen()),
+            ),
+          ),
           ListTile(
             iconColor: Colors.white70,
             textColor: Colors.white,

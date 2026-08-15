@@ -44,6 +44,7 @@ class AppSettings {
   /// rather than inventing a new name.
   static const String _onboardingCompletedKey = 'onboarding_completed';
   static const String _oemAutostartNudgeDismissedKey = 'oem_autostart_nudge_dismissed';
+  static const String _walkthroughSeenVersionKey = 'walkthrough_seen_version';
 
   // ---------------------------------------------------------------------
   // Bounds — see docs/DATA_MODEL.md §5 (Settings) for the product rationale.
@@ -68,6 +69,12 @@ class AppSettings {
   static const int defaultQuietHoursEndMinutes = 7 * 60; // 07:00 — wraps past midnight
   static const RetentionPeriod defaultRetention = RetentionPeriod.oneYear;
   static const bool defaultOnboardingCompleted = false;
+
+  /// Bump when the mechanic itself changes (e.g. the timer ships) so the
+  /// Home re-entry card resurfaces. Independent of [onboardingCompleted] —
+  /// see `docs/erd/onboarding-revamp-2026-08-15.md` §5.3.
+  static const int currentWalkthroughVersion = 1;
+  static const int defaultWalkthroughSeenVersion = 0;
 
   // ---------------------------------------------------------------------
   // Prompts on/off
@@ -97,6 +104,17 @@ class AppSettings {
 
   Future<void> setOnboardingCompleted(bool value) async {
     await SharedPreferencesAsync().setBool(_onboardingCompletedKey, value);
+  }
+
+  /// How many times the user has seen the current walkthrough mechanic.
+  /// `0` = never (existing installs, or a fresh install mid-onboarding).
+  Future<int> walkthroughSeenVersion() async {
+    final prefs = SharedPreferencesAsync();
+    return await prefs.getInt(_walkthroughSeenVersionKey) ?? defaultWalkthroughSeenVersion;
+  }
+
+  Future<void> setWalkthroughSeenVersion(int value) async {
+    await SharedPreferencesAsync().setInt(_walkthroughSeenVersionKey, value);
   }
 
   // ---------------------------------------------------------------------

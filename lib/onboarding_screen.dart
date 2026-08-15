@@ -6,6 +6,7 @@ import 'app_settings.dart';
 import 'brand.dart';
 import 'device_manufacturer.dart';
 import 'oem_autostart_copy.dart';
+import 'walkthrough.dart';
 
 /// First-run pages, in order. [values.length] is the page count.
 ///
@@ -15,13 +16,13 @@ import 'oem_autostart_copy.dart';
 /// point. See `docs/erd/onboarding-revamp-2026-08-15.md` §5.1.
 enum OnboardingStep {
   valueProp,
-  howItWorks,
+  walkthrough,
   permission,
   oem,
   yourData,
 }
 
-/// Five-step first-run flow: value prop → how it works → overlay permission
+/// Five-step first-run flow: value prop → walkthrough → overlay permission
 /// (explained before the system dialog, not a cold ask) → OEM reliability →
 /// data disclosure. See the sprint 4 plan's screen map — this replaces
 /// today's cold permission request in `HomeScreen.initState` (`CLAUDE.md` §9
@@ -66,7 +67,11 @@ class OnboardingScreen extends StatefulWidget {
         readManufacturer = readManufacturer ?? readDeviceManufacturer,
         completeOnboarding = completeOnboarding ?? _defaultCompleteOnboarding;
 
-  static Future<void> _defaultCompleteOnboarding() => const AppSettings().setOnboardingCompleted(true);
+  static Future<void> _defaultCompleteOnboarding() async {
+    const settings = AppSettings();
+    await settings.setOnboardingCompleted(true);
+    await settings.setWalkthroughSeenVersion(AppSettings.currentWalkthroughVersion);
+  }
 
   // Top-level-function tear-offs, not inline closures, so this constructor
   // can stay `const` — see status_screen.dart's identical pattern/doc.
@@ -144,7 +149,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
       case OnboardingStep.oem:
         _refreshBatteryExemption();
       case OnboardingStep.valueProp:
-      case OnboardingStep.howItWorks:
+      case OnboardingStep.walkthrough:
       case OnboardingStep.yourData:
         break;
     }
@@ -199,8 +204,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
     switch (step) {
       case OnboardingStep.valueProp:
         return const _ValuePropStep();
-      case OnboardingStep.howItWorks:
-        return const _HowItWorksStep();
+      case OnboardingStep.walkthrough:
+        return WalkthroughView(active: _step == OnboardingStep.walkthrough);
       case OnboardingStep.permission:
         return _PermissionStep(
           granted: _permissionGranted,
@@ -228,6 +233,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
           children: [
             Expanded(
               child: PageView(
+                key: const ValueKey('onboarding-pages'),
                 controller: _controller,
                 onPageChanged: _onPageChanged,
                 children: [
@@ -378,25 +384,6 @@ class _ValuePropStep extends StatelessWidget {
       ),
       headline: 'Notice why you picked up your phone',
       body: 'Most unlocks are autopilot. $appDisplayName makes them deliberate.',
-    );
-  }
-}
-
-class _HowItWorksStep extends StatelessWidget {
-  const _HowItWorksStep();
-
-  @override
-  Widget build(BuildContext context) {
-    return const _StepBody(
-      icon: Icons.timeline_outlined,
-      headline: 'How it works',
-      body:
-          'Unlock your phone and you\'ll be asked what you\'re doing. Tap a '
-          'preset or type your own reason — it follows you as a small bubble '
-          'across apps until you dismiss it.\n\n'
-          'By default you\'re asked on every unlock, except within 1 minute of '
-          'the last prompt (so rapid lock/unlock doesn\'t nag). Change that '
-          'gap — or how often you\'re asked — anytime in Settings.',
     );
   }
 }
