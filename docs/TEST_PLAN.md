@@ -269,7 +269,7 @@ Check mail · Message someone · Book a cab · Order food · Pay someone.
 | 71 | Restore defaults | ✅ | Confirmed on-device 2026-08-11 — Manage options layout with the new preset is fine. |
 | 71b | Tap **Call someone** | ✅ | Confirmed on-device 2026-08-11 as part of the unlock-screen check. |
 | 72 | Home “Couldn't load” / pull-to-retry | ❌ | Force a failed or null-store Home state (or cold open after kill); pull down → insights reload without reinstall |
-| 73 | Onboarding overlay step find-hint | ❌ | Copy names **Beacon** behind the collapsed **Can't find it?** row (PR 1 copy diet); Grant opens system list; return after grant → status shows Granted; user taps Continue (no auto-advance) |
+| 73 | Onboarding overlay step find-hint | ✅ | Confirmed on-device 2026-08-16 (PR 1). Hint is behind **Can't find it?**; grant → return shows Granted; Continue is not auto-advanced. See also 88/90. |
 | 74 | Status: OEM highlight on matched maker | ❌ | Matched tile first + “Looks like your phone”; steps include leave smart optimize (Don’t optimize / Not optimized / No restrictions) |
 | 75 | Home OEM nudge | ❌ | With battery not exempt: “Keep monitoring alive” → Open Status / Dismiss; dismiss stays gone after reopen |
 | 76 | Friend Vivo/Xiaomi Autostart soak | ❌ | Vivo: App info → Battery usage → Background power control → **Allow background power usage** (not smart control); leave app closed 30–60 min; unlock still prompts. |
@@ -321,13 +321,12 @@ toolchain/device in the session that made these changes.
 
 ### Onboarding revamp PR 1 — copy diet + step-enum refactor (2026-08-16)
 
-Branch `cursor/onboarding-copy-diet`. Presentation only — still 5 steps, How it
-works prose untouched (PR 2 replaces it). Highest-risk case is permission
-refresh after the named-step refactor; do not mark these passed here.
+Merged to `main` (PR #20). Presentation only — still 5 steps, How it works
+prose untouched (PR 2 replaces it). Verified on-device 2026-08-16, A063.
 
 | # | Case | Status | Notes / expected |
 |---|---|---|---|
-| 87 | Fresh install (clear data): walk all 5 onboarding steps | ❌ | Headlines: "Notice why you picked up your phone" → "How it works" → "One permission." → "Keep Beacon awake." → "Stays on your phone." How-it-works body is still the old prose. Final button is **Get started**. |
-| 88 | Permission step: collapsed **Can't find it?** | ❌ | Body is the 10-word line. Hint and "You can skip and grant this later…" are hidden until the row is expanded. Grant still works. |
-| 89 | OEM step: collapsed **Why does this happen?** | ❌ | Body is the 9-word line. `oemGuidanceIntro` is hidden until expanded. Matched OEM steps (or generic fallback) stay visible without expanding. |
-| 90 | **Permission grant → background → return** | ❌ | **Highest-risk regression in this change** (`docs/erd/onboarding-revamp-2026-08-15.md` §5.1 / §6). On "One permission.", tap Grant, flip the system toggle, return to the app. Status must flip to Granted without a restart. Same for Disable battery optimization on "Keep Beacon awake." |
+| 87 | Fresh install (clear data): walk all 5 onboarding steps | ✅ | Confirmed on-device 2026-08-16. Headlines: "Notice why you picked up your phone" → "How it works" → "One permission." → "Keep Beacon awake." → "Stays on your phone." How-it-works body still the old prose. Final button **Get started**. |
+| 88 | Permission step: collapsed **Can't find it?** | ✅ | Confirmed on-device 2026-08-16. Body is the 10-word line. Hint and skip-later line hidden until expanded. Grant still works. |
+| 89 | OEM step: collapsed **Why does this happen?** | ✅ | Confirmed on-device 2026-08-16. Body is the 9-word line. `oemGuidanceIntro` hidden until expanded. Matched OEM steps stay visible. |
+| 90 | **Permission grant → background → return** | ✅ | Confirmed on-device 2026-08-16. Grant overlay permission, leave, return → status shows Granted without a restart. Same for Disable battery optimization on "Keep Beacon awake." |

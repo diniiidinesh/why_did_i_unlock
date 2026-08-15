@@ -8,9 +8,10 @@
 > Seven testers gave written feedback (verbatim + triage in
 > `docs/erd/onboarding-revamp-2026-08-15.md` Appendix A). Order of work agreed:
 >
-> 1. **[P0] Onboarding revamp — IN PROGRESS, handed to Cursor.**
->    Copy diet → animated walkthrough → tooltip-based feature discovery → day-1
->    stats. Full plan + Cursor guardrails:
+> 1. **[P0] Onboarding revamp — IN PROGRESS.** PR 1 merged 2026-08-16
+>    (copy diet + `OnboardingStep` enum, on-device ✅). Next: animated
+>    walkthrough (`cursor/onboarding-walkthrough`). Then tooltips, then
+>    day-1 stats. Full plan + guardrails:
 >    `docs/erd/onboarding-revamp-2026-08-15.md` (§9 sequencing, §11 handoff).
 > 2. **[P0] Outstanding-intent prompt** — plan already written
 >    (`docs/erd/outstanding-intent-prompt-2026-08-15.md`), not built. **Promoted
