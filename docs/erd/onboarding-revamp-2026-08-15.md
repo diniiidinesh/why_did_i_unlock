@@ -23,6 +23,11 @@
   **handoff guardrails for Cursor**, who will implement this. Copy decisions:
   keep the softer step-1 headline, keep the "No analytics" line for now with an
   explicit coupling note (§10).
+- **2026-08-15 (handoff)** — Day-1 notification **decided into scope** (§4D.1–3):
+  *local*, not push; `flutter_local_notifications`; triggered off the existing
+  unlock event rather than any scheduling API, so no exact-alarm permission and no
+  boot rescheduling; must degrade to in-app if the permission is refused. Folded
+  into PR 4 with the stats screen. Added §12 — per-PR task briefs for Cursor.
 
 ---
 
@@ -136,8 +141,8 @@ complaint rather than correct it.
 - B. Animated 7-beat walkthrough replacing `_HowItWorksStep`.
 - C. Tooltip-based feature discovery from the first unlock, plus the day-1 stats
   screen (§4C).
-- D. Day-1 notification — *analysis + options only; needs a decision* (§4D).
-  **No longer blocks Part C.**
+- D. Day-1 **local** notification (§4D) — **decided: in scope, PR 4, via
+  `flutter_local_notifications`.** Does not block Part C.
 - E. Optional "try it now" practice prompt (§4E) — **confirmed in**.
 - Re-showing the walkthrough to existing installs (§5.3).
 
@@ -325,16 +330,59 @@ already handle. No `AlarmManager`, no `WorkManager`, no boot-rescheduling logic.
 | **N-2. `flutter_local_notifications`** | New dependency + `POST_NOTIFICATIONS` + runtime request | Well-maintained, standard. Conflicts mildly with "keep the dependency count low" (`CLAUDE.md` §7) |
 | **N-3. Post from the existing native FGS path** | **Kotlin change — needs explicit approval** (`CLAUDE.md` §7) + `POST_NOTIFICATIONS` | No new dependency. The service already posts a notification, so the machinery exists |
 
-**Recommendation:** build **N-1 first** (it is the same screen either way, and it
-unblocks Part C entirely), then add N-2 or N-3 as a separate PR. Rationale: the
-screen is the valuable half; the notification is the delivery mechanism, and
-adding a permission ask while we're actively trying to *shrink* the permission
-cliff deserves its own deliberate decision rather than riding along with a copy
-change.
+#### 4D.1 DECIDED (Dinesh, 2026-08-15): build it, via N-2, in PR 4
 
-**If we do add it:** request `POST_NOTIFICATIONS` at the **end** of onboarding,
-framed as opt-in ("Want a check-in tomorrow?"), not as a silent system dialog.
-Honest framing raises grant rates and matches the app's stance.
+**"Local notification", not push.** Worth stating explicitly because the words get
+used interchangeably: this is an on-device scheduled reminder. A *server* push
+(FCM) would require a backend, introduce the first network call anywhere in the
+dependency tree, and flip the Play Data Safety form from "no data collected" to a
+full disclosure — a `CLAUDE.md` §11 product decision, emphatically not an
+onboarding task. **Nothing in this ERD may add a network call.**
+
+**N-2 (`flutter_local_notifications`) over N-3 (native).** N-3 avoids the
+dependency but requires a Kotlin change, and this work is being implemented by
+Cursor. `CLAUDE.md` §7 protects the native layer precisely because it's delicate
+and breaks things that currently work; a new dependency is the cheaper, more
+reversible cost. Revisit only if the dependency proves problematic.
+
+#### 4D.2 No scheduling API — piggyback the unlock event
+
+**Do not use `zonedSchedule`.** Exact alarms on Android 13+ drag in
+`SCHEDULE_EXACT_ALARM`/`USE_EXACT_ALARM` (a second permission, and one Play
+scrutinises), plus boot-rescheduling logic to survive restarts.
+
+Instead: the background engine already wakes on **every unlock**. On that
+existing event, check
+
+```
+now - firstLaunchAt > 24h && !dayOneNudgeShown && onboardingCompleted
+```
+
+and if true, post the notification immediately with a plain `show()`, then set
+`dayOneNudgeShown`. No scheduling API, no exact-alarm permission, no boot
+rescheduling, no `AlarmManager`.
+
+Trade-off, and it's a favourable one: the reminder fires on the user's next
+unlock after the 24h mark rather than at a chosen clock time — i.e. when they are
+demonstrably holding the phone, not while it sits on a table.
+
+**Plugin-boundary note:** this runs in the **background** engine, which has
+plugins registered normally (it already uses `sqflite` and
+`shared_preferences`). Only the **overlay** engine lacks plugins
+(`docs/ARCHITECTURE.md` §5). Do not attempt this from overlay-isolate code.
+
+#### 4D.3 The permission ask
+
+`POST_NOTIFICATIONS` goes in the manifest, requested at runtime **at the end of
+onboarding**, as a visible opt-in row on the final step — *"Remind me tomorrow to
+check my first day"* — defaulted on, one tap to decline. Not a silent system
+dialog fired at launch.
+
+**Must degrade gracefully:** if the permission is denied (or the user opts out),
+fall back to N-1 behaviour — show the day-1 screen in-app on the next launch past
+the 24h mark. **The feature must not depend on the permission being granted.**
+This is not optional polish; a notification permission is the single easiest
+thing for a user to refuse.
 
 ### Part E — "Try it now" practice prompt *(confirmed in)*
 
@@ -481,12 +529,11 @@ asserts the current 5-step structure and copy):
 | — | Nudge thresholds | **Tunable constants in one block** (§4C.4), not user-facing settings |
 | — | Step-1 headline | **Keep the original softer headline** (§10) |
 | — | "No analytics" copy | **Keep for now**, with an explicit coupling note (§10) |
-| — | Implementation owner | **Cursor** — guardrails in §11 |
+| — | Day-1 notification | **In scope, PR 4.** Local (not push), via `flutter_local_notifications`, no scheduling API — §4D.1–4D.3 |
+| — | Implementation owner | **Cursor** — guardrails in §11, per-PR briefs in §12 |
 | — | Priority | Onboarding first, then the §2.5 / backlog items (`docs/BACKLOG.md`) |
 
 **Still open:**
-- **§4D — notification mechanism**: N-1 (in-app only, zero cost) vs. N-2 (new
-  dependency) vs. N-3 (Kotlin, needs explicit approval). Recommend N-1 first.
 - **§8.4 — beat timing**: 2.5s vs 3s. Named constant; Dinesh feel-tests
   on-device.
 - **§A2 — bubble salience**: not this ERD's call, but blocking a real regression.
@@ -506,13 +553,16 @@ Four PRs, each independently shippable and verifiable:
    done" rename (§5.4). Tooltips are the riskiest UI here (anchoring, lifecycle,
    rotation) — keep them isolated from the walkthrough so a problem in one
    doesn't hold back the other.
-4. **PR 4 — day-1 stats screen** (§4C.5), in-app trigger only (N-1).
-5. **PR 5 — the notification itself** (N-2 or N-3), only if §4D is decided.
+4. **PR 4 — day-1 stats screen (§4C.5) + the local notification (§4D).**
+   Deliberately one PR, not two: the notification's only destination is that
+   screen, and the screen alone only reaches users who already open the app.
+   Split apart, each half is half a feature. Last in the order, so nothing else
+   waits on the new dependency or the permission.
 
 Branches per `CLAUDE.md` §7 — Cursor owns these, so `cursor/…` per the
 existing convention: `cursor/onboarding-copy-diet`,
 `cursor/onboarding-walkthrough`, `cursor/onboarding-tooltips`,
-`cursor/onboarding-day-one-stats`, `cursor/onboarding-day-one-notification`.
+`cursor/onboarding-day-one`.
 
 ---
 
@@ -679,6 +729,110 @@ confirmed confusions.
 - **Any copy change beyond §10.** The copy is the product's voice; §10 is
   Dinesh-approved. Deviating "to fit the layout" is a product change wearing an
   implementation costume — if the copy doesn't fit, raise it.
+
+---
+
+## 12. Per-PR task briefs (Cursor)
+
+> One PR at a time, in order. **Do not start PR N+1 before PR N is verified
+> on-device by Dinesh** — PR 1 in particular exists to make PR 2 safe. Read §11
+> before the first edit.
+
+### PR 1 — Copy diet + step-enum refactor
+**Branch:** `cursor/onboarding-copy-diet`
+
+**Do:**
+1. Replace `_stepCount` and the integer step comparisons in
+   `lib/onboarding_screen.dart` with an `_OnboardingStep` enum. Derive the count
+   from the enum. Match on the enum in `didChangeAppLifecycleState` and
+   `_onPageChanged`. **This is the whole point of this PR — do it first.**
+2. Apply the §10 copy to all existing steps, verbatim. Do not reword.
+3. Add collapsed disclosures ("Can't find it?" on permission, "Why does this
+   happen?" on OEM) holding the existing `overlayPermissionFindHint` and
+   `oemGuidanceIntro` strings.
+4. Update `test/onboarding_screen_test.dart` for the new structure and copy.
+
+**Do NOT:** add or remove steps, touch the walkthrough, touch any other screen.
+
+**Done when:** `flutter analyze` clean, `flutter test` green, tests assert the
+enum↔page-count invariant and that permission refresh fires on the *named* step.
+
+---
+
+### PR 2 — Animated walkthrough
+**Branch:** `cursor/onboarding-walkthrough`
+
+**Do:**
+1. Build the 7-beat walkthrough (§4B) as its own widget, in its own file.
+   Reuse `BubbleWidget` and the real preset pills — **do not build mock
+   look-alikes, and do not modify `BubbleWidget`** (§11.2 #5).
+2. Replace `_HowItWorksStep` with it in the step enum.
+3. Beat duration as one named constant (Dinesh tunes it, §8.4).
+4. Implement all interaction rules: tap-pause, swipe-scrub, always-visible Skip,
+   plays once and holds, reduced-motion static fallback.
+5. Add `walkthroughSeenVersion` to `AppSettings`; add the one-time Home re-entry
+   card for existing installs (§5.3).
+6. Add the "How Beacon works" row in About or Status pointing at the same widget
+   (§5.4).
+
+**Do NOT:** use image assets, a `CustomPainter` render loop, or leave a `Ticker`
+running after the sequence ends (§4B performance).
+
+**Done when:** analyze/test clean; tests cover all 7 beats advancing, Skip,
+pause, reduced-motion variant, and both fresh-vs-existing install paths.
+
+---
+
+### PR 3 — Tooltips + "Try it now" + label rename
+**Branch:** `cursor/onboarding-tooltips`
+
+**Do:**
+1. Build the anchored-tooltip mechanism using `CompositedTransformTarget` /
+   `CompositedTransformFollower` / `OverlayEntry`. **No new package.**
+2. Implement every guardrail in §4C.3 — they are requirements, not suggestions.
+   The one-at-a-time queue and "never block the underlying control" are the two
+   that will otherwise ship as bugs.
+3. Add the `NudgeTuning` constant block (§4C.4) and the new `AppSettings` keys
+   from §2.2.
+4. First-visit banners on Settings and Manage options (§4C.2 step 4).
+5. "Try it now" as the final onboarding step (§4E) — skipped entirely, not
+   greyed, when overlay permission isn't granted.
+6. Rename the "Time to mark done" Home label (§5.4).
+
+**Do NOT:** render tooltips from overlay-engine code, or let a tooltip appear
+during onboarding itself.
+
+**Done when:** analyze/test clean; tests cover tooltip retire-on-open, the show
+cap, one-at-a-time queueing, and that "Try it now" is skipped without permission.
+Dinesh must confirm on-device that a practice prompt leaves **no** row in
+history/insights.
+
+---
+
+### PR 4 — Day-1 stats screen + local notification
+**Branch:** `cursor/onboarding-day-one`
+
+**Do:**
+1. Build the day-1 stats screen (§4C.5) using **existing** `IntentStore`
+   queries. Write no new SQL.
+2. Add `flutter_local_notifications` and `POST_NOTIFICATIONS`.
+3. Trigger from the **background engine's existing unlock handler** per §4D.2 —
+   plain `show()`, no `zonedSchedule`, no exact-alarm permission, no boot
+   rescheduling.
+4. Opt-in row on the final onboarding step, defaulted on (§4D.3).
+5. **Graceful degradation:** permission denied or declined → show the day-1
+   screen in-app on next launch past 24h. The feature must work without the
+   permission.
+6. Add a hidden debug affordance to fire the day-1 condition without waiting 24h
+   — otherwise this is untestable in practice (§6).
+
+**Do NOT:** add any network call. Do not use FCM or any server push. Do not call
+the notification plugin from overlay-isolate code.
+
+**Done when:** analyze/test clean; tests cover the 24h boundary, fires-once, and
+the permission-denied fallback path. Update `docs/PLAY_SUBMISSION.md` — a new
+permission is a Play-review-relevant change (`docs/DOC_UPKEEP.md` lists this as
+that doc's update trigger).
 
 ---
 
