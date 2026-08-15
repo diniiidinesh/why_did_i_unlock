@@ -447,7 +447,7 @@ Future<void> _onOrientationChanged(int widthPx, int heightPx) async {
 
 Future<void> _repositionCaptureForOrientation(int widthPx, int heightPx) async {
   debugPrint('📐 Orientation: one capture reopen ${widthPx}x$heightPx');
-  await FlutterOverlayWindow.closeOverlay();
+  await _closeOverlayWindow('orientation capture');
   final shown = await _withTimeout(
     'showOverlay(orientation capture)',
     FlutterOverlayWindow.showOverlay(
@@ -474,7 +474,7 @@ Future<void> _repositionBubbleForOrientation() async {
     '📐 Orientation: one bubble reopen at right-center '
     '(${side}x$side, text len=${_bubbleOverlayText.length})',
   );
-  await FlutterOverlayWindow.closeOverlay();
+  await _closeOverlayWindow('orientation bubble');
   final shown = await _withTimeout(
     'showOverlay(orientation bubble)',
     FlutterOverlayWindow.showOverlay(
@@ -1030,6 +1030,53 @@ Future<T?> _withTimeout<T>(String label, Future<T> future) async {
   } on TimeoutException {
     debugPrint('⏱️ $label timed out after 5s — skipping this unlock rather than risk a permanent stall');
     return null;
+  }
+}
+
+/// Closes the overlay window without ever letting the plugin call become
+/// load-bearing for state. **Always use this — never call
+/// `FlutterOverlayWindow.closeOverlay()` directly.**
+///
+/// `closeOverlay()` is a plugin call, and plugin calls made from the OVERLAY
+/// isolate are this codebase's documented hang hazard (`docs/ARCHITECTURE.md`
+/// §5: `shareData()`'s native handler never replies so an awaited call hangs
+/// forever; `isActive()` hangs below the Dart await where even `.timeout()`
+/// can't see it). The plugin routes them through a single static native field
+/// (`WindowSetup.messenger`) owned by whichever engine attached the plugin
+/// last, so merely opening the app can leave the overlay isolate talking to a
+/// detached messenger.
+///
+/// **Confirmed on-device 2026-08-15**, and it was the real root cause of
+/// "unlock stopped prompting" (the two earlier fixes addressed different
+/// failure modes and never fired): `_handleLockSignal` logged "closing
+/// capture screen on lock" and then never reached its very next statement,
+/// `_signalOverlayClosed()` — twice in a row, with `🔵 Overlay closed signal
+/// received` never appearing on the background side. `_overlayIsActive`
+/// therefore stayed true forever and no unlock prompted again until a
+/// force-stop. A hung `await` doesn't block the isolate's event loop, which
+/// is why each later lock printed the same line and hung again identically.
+///
+/// **The rule this encodes: a pure-Dart state signal must never sit
+/// downstream of a plugin call that can hang.** Every caller has to be able
+/// to reach its `_signalOverlayClosed()` / reopen / state reset no matter
+/// what the plugin does, so this swallows both a hang and a throw and always
+/// returns. Worst case the window outlives its close by the timeout — vastly
+/// cheaper than the app silently never prompting again.
+Future<void> _closeOverlayWindow(String label) async {
+  try {
+    final closed = await _withTimeout(
+      'closeOverlay($label)',
+      FlutterOverlayWindow.closeOverlay().then((_) => true),
+    );
+    if (closed == null) {
+      // Breadcrumbed, not just debugPrinted: this is the fingerprint of the
+      // 2026-08-15 root cause, and release builds are exactly where nobody is
+      // watching logcat. Relayed from whichever isolate hit it — the overlay
+      // isolate has no plugins of its own (see ProblemReportLog's class doc).
+      _sendToBackground({'type': 'breadcrumb', 'message': 'closeOverlay($label) hung — continued anyway'});
+    }
+  } catch (e) {
+    debugPrint('⚠️ closeOverlay($label) threw (continuing anyway): $e');
   }
 }
 
@@ -1612,7 +1659,10 @@ class _OverlayRootState extends State<OverlayRoot> {
     final dpr = MediaQuery.of(context).devicePixelRatio;
     final widthDp = expanded ? expandedBubbleWidthDp(_intentText) : bubbleCollapsedDp;
     final heightDp = bubbleExpandedHeightDp;
-    await FlutterOverlayWindow.closeOverlay();
+    // Guarded too: a hang HERE would skip both the reopen below and the
+    // _abandonLostBubble() recovery, stranding the bubble with no window and
+    // no reset — the earlier fix's blind spot.
+    await _closeOverlayWindow('bubble resize');
     // GUARDED, and it must stay that way — this close+reopen is the overlay
     // isolate's twin of the background-path bug fixed in _presentCaptureOverlay
     // (docs/BACKLOG.md "hung showOverlay() left _overlayIsActive stuck true"),
@@ -1747,7 +1797,7 @@ class _OverlayRootState extends State<OverlayRoot> {
       return;
     }
     debugPrint('🔒 Overlay: closing capture screen on lock');
-    await FlutterOverlayWindow.closeOverlay();
+    await _closeOverlayWindow('lock');
     // Tells the background isolate this is a REAL close (not the
     // close+reopen resize in _submitIntent) — see _overlayIsActive.
     _signalOverlayClosed();
@@ -1941,7 +1991,7 @@ class _OverlayRootState extends State<OverlayRoot> {
       debugPrint('🧪 Manual session — skipping intent_log no-intent write');
     }
 
-    await FlutterOverlayWindow.closeOverlay();
+    await _closeOverlayWindow('no-intent');
     // Tells the background isolate this is a REAL close (not the
     // close+reopen resize in _submitIntent) — see _overlayIsActive.
     _signalOverlayClosed();
@@ -1971,7 +2021,7 @@ class _OverlayRootState extends State<OverlayRoot> {
       'manual': _sessionIsManual,
       'dpr': dpr,
     });
-    await FlutterOverlayWindow.closeOverlay();
+    await _closeOverlayWindow('snooze');
     _signalOverlayClosed();
     // Gated per docs/PLAY_SUBMISSION.md §3b.1 — _intentText is the user's own
     // declared-intent text; debugPrint is not stripped from release builds.
@@ -2011,7 +2061,7 @@ class _OverlayRootState extends State<OverlayRoot> {
       debugPrint('🧪 Manual session — skipping intent_log dismiss write');
     }
 
-    await FlutterOverlayWindow.closeOverlay();
+    await _closeOverlayWindow('dismiss');
     // Tells the background isolate this is a REAL close (not the
     // close+reopen resize in _submitIntent) — see _overlayIsActive.
     _signalOverlayClosed();
