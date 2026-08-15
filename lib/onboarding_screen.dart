@@ -7,6 +7,20 @@ import 'brand.dart';
 import 'device_manufacturer.dart';
 import 'oem_autostart_copy.dart';
 
+/// First-run pages, in order. [values.length] is the page count.
+///
+/// Permission and battery-exemption refresh match on these names, never on
+/// raw indices — inserting a page without updating this enum (and the
+/// exhaustive switches that consume it) is a compile error, which is the
+/// point. See `docs/erd/onboarding-revamp-2026-08-15.md` §5.1.
+enum OnboardingStep {
+  valueProp,
+  howItWorks,
+  permission,
+  oem,
+  yourData,
+}
+
 /// Five-step first-run flow: value prop → how it works → overlay permission
 /// (explained before the system dialog, not a cold ask) → OEM reliability →
 /// data disclosure. See the sprint 4 plan's screen map — this replaces
@@ -66,16 +80,14 @@ class OnboardingScreen extends StatefulWidget {
   State<OnboardingScreen> createState() => _OnboardingScreenState();
 }
 
-const int _stepCount = 5;
-
 class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBindingObserver {
   final PageController _controller = PageController();
-  int _step = 0;
+  OnboardingStep _step = OnboardingStep.valueProp;
   bool? _permissionGranted;
 
   /// Same null-while-checking convention as [_permissionGranted]. Lives on
-  /// the same step as the OEM autostart guidance (step 3, index 3) since
-  /// both are "keep the background service alive" asks.
+  /// the OEM step since both the battery-exemption dialog and the OEM
+  /// autostart guidance are "keep the background service alive" asks.
   bool? _batteryExempt;
 
   OemGuidance? _matchedOem;
@@ -113,14 +125,28 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
     // background, not that call returning. Scoped to the permission step so
     // it's a no-op (and doesn't fire a stray plugin call) on every other
     // step of the flow.
-    if (state == AppLifecycleState.resumed && _step == 2) {
-      _refreshPermission();
+    //
+    // Same reasoning one step later: the battery-exemption system dialog
+    // (alongside OEM autostart guidance) also returns immediately, before
+    // the user has actually answered it.
+    //
+    // Match on [OnboardingStep], never a raw index — inserting a page
+    // before these would otherwise silently stop refresh (§5.1).
+    if (state == AppLifecycleState.resumed) {
+      _refreshStatusFor(_step);
     }
-    // Same reasoning, one step later: the battery-exemption system dialog
-    // (step 3, alongside OEM autostart guidance) also returns immediately,
-    // before the user has actually answered it.
-    if (state == AppLifecycleState.resumed && _step == 3) {
-      _refreshBatteryExemption();
+  }
+
+  void _refreshStatusFor(OnboardingStep step) {
+    switch (step) {
+      case OnboardingStep.permission:
+        _refreshPermission();
+      case OnboardingStep.oem:
+        _refreshBatteryExemption();
+      case OnboardingStep.valueProp:
+      case OnboardingStep.howItWorks:
+      case OnboardingStep.yourData:
+        break;
     }
   }
 
@@ -145,7 +171,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
   }
 
   void _next() {
-    if (_step == _stepCount - 1) {
+    if (_step == OnboardingStep.values.last) {
       _finish();
       return;
     }
@@ -162,16 +188,39 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
   }
 
   void _onPageChanged(int index) {
-    setState(() => _step = index);
+    final step = OnboardingStep.values[index];
+    setState(() => _step = step);
     // Re-checking whenever these steps come into view keeps status honest
     // when navigating back — without auto-advancing again.
-    if (index == 2) _refreshPermission();
-    if (index == 3) _refreshBatteryExemption();
+    _refreshStatusFor(step);
+  }
+
+  Widget _pageFor(OnboardingStep step) {
+    switch (step) {
+      case OnboardingStep.valueProp:
+        return const _ValuePropStep();
+      case OnboardingStep.howItWorks:
+        return const _HowItWorksStep();
+      case OnboardingStep.permission:
+        return _PermissionStep(
+          granted: _permissionGranted,
+          onGrant: _requestPermission,
+        );
+      case OnboardingStep.oem:
+        return _OemReliabilityStep(
+          batteryExempt: _batteryExempt,
+          onRequestBatteryExemption: _requestBatteryExemption,
+          matchedOem: _matchedOem,
+          manufacturerLoaded: _manufacturerLoaded,
+        );
+      case OnboardingStep.yourData:
+        return const _YourDataStep();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final isLast = _step == _stepCount - 1;
+    final isLast = _step == OnboardingStep.values.last;
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
@@ -182,19 +231,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
                 controller: _controller,
                 onPageChanged: _onPageChanged,
                 children: [
-                  const _ValuePropStep(),
-                  const _HowItWorksStep(),
-                  _PermissionStep(
-                    granted: _permissionGranted,
-                    onGrant: _requestPermission,
-                  ),
-                  _OemReliabilityStep(
-                    batteryExempt: _batteryExempt,
-                    onRequestBatteryExemption: _requestBatteryExemption,
-                    matchedOem: _matchedOem,
-                    manufacturerLoaded: _manufacturerLoaded,
-                  ),
-                  const _YourDataStep(),
+                  for (final step in OnboardingStep.values) _pageFor(step),
                 ],
               ),
             ),
@@ -202,11 +239,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
               padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
               child: Column(
                 children: [
-                  _StepDots(step: _step, count: _stepCount),
+                  _StepDots(step: _step.index, count: OnboardingStep.values.length),
                   const SizedBox(height: 16),
                   Row(
                     children: [
-                      if (_step > 0)
+                      if (_step.index > 0)
                         TextButton(onPressed: _back, child: const Text('Back'))
                       else
                         const SizedBox.shrink(),
@@ -290,6 +327,43 @@ class _StepBody extends StatelessWidget {
   }
 }
 
+/// Collapsed "Can't find it?" / "Why?" row. Justification lives here so the
+/// step body can stay at ≤10 words (onboarding revamp §4A / §10).
+class _CollapsedHint extends StatelessWidget {
+  final String title;
+  final List<String> paragraphs;
+
+  const _CollapsedHint({required this.title, required this.paragraphs});
+
+  @override
+  Widget build(BuildContext context) {
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: const EdgeInsets.only(bottom: 8),
+        expandedAlignment: Alignment.centerLeft,
+        iconColor: Colors.white70,
+        collapsedIconColor: Colors.white70,
+        title: Text(title, style: const TextStyle(color: Colors.white70, fontSize: 14)),
+        children: [
+          for (final paragraph in paragraphs)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  paragraph,
+                  style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.35),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ValuePropStep extends StatelessWidget {
   const _ValuePropStep();
 
@@ -303,10 +377,7 @@ class _ValuePropStep extends StatelessWidget {
         filterQuality: FilterQuality.high,
       ),
       headline: 'Notice why you picked up your phone',
-      body:
-          'Most unlocks happen on autopilot. This app asks what you\'re unlocking '
-          'for, then keeps that intent on screen as a bubble until you\'re done — '
-          'so a quick check becomes a deliberate one.',
+      body: 'Most unlocks are autopilot. $appDisplayName makes them deliberate.',
     );
   }
 }
@@ -353,13 +424,8 @@ class _PermissionStep extends StatelessWidget {
 
     return _StepBody(
       icon: Icons.layers_outlined,
-      headline: 'One permission is needed',
-      body:
-          'The bubble that follows you across apps needs the "Display over other '
-          'apps" permission. Android requires this for any floating overlay — we '
-          'only use it to show your declared intent, nothing else. You can '
-          'continue either way and grant it later from Status & troubleshooting.\n\n'
-          '$overlayPermissionFindHint',
+      headline: 'One permission.',
+      body: 'The bubble floats over other apps. Android needs your OK.',
       extra: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -367,6 +433,14 @@ class _PermissionStep extends StatelessWidget {
           const SizedBox(height: 12),
           if (granted != true)
             ElevatedButton(onPressed: onGrant, child: const Text('Grant permission')),
+          const SizedBox(height: 8),
+          _CollapsedHint(
+            title: 'Can\'t find it?',
+            paragraphs: [
+              overlayPermissionFindHint,
+              'You can skip and grant this later in Status & troubleshooting.',
+            ],
+          ),
         ],
       ),
     );
@@ -418,36 +492,16 @@ class _OemReliabilityStep extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: 6),
               child: Text('• $step', style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.35)),
             ),
-          const SizedBox(height: 8),
-          const Text(
-            'You can revisit every maker\'s steps anytime in Status & troubleshooting.',
-            style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.35),
-          ),
         ],
       );
     } else {
-      oemBlock = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(genericOemFallback, style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.35)),
-          const SizedBox(height: 8),
-          const Text(
-            'Full maker-specific steps are in Status & troubleshooting if you need them later.',
-            style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.35),
-          ),
-        ],
-      );
+      oemBlock = Text(genericOemFallback, style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.35));
     }
 
     return _StepBody(
       icon: Icons.battery_alert_outlined,
-      headline: 'Some phones need one more step',
-      body:
-          'Certain phone makers aggressively stop background apps to save '
-          'battery, which can silently stop the prompts.\n\n'
-          '$oemGuidanceIntro\n\n'
-          'First tap the standard Android exemption below, then follow your '
-          'maker\'s steps (especially leaving smart / auto optimize).',
+      headline: 'Keep $appDisplayName awake.',
+      body: 'Your phone may shut $appDisplayName down in the background.',
       extra: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -457,6 +511,11 @@ class _OemReliabilityStep extends StatelessWidget {
             ElevatedButton(onPressed: onRequestBatteryExemption, child: const Text('Disable battery optimization')),
           const SizedBox(height: 20),
           oemBlock,
+          const SizedBox(height: 8),
+          _CollapsedHint(
+            title: 'Why does this happen?',
+            paragraphs: [oemGuidanceIntro],
+          ),
         ],
       ),
     );
@@ -470,12 +529,8 @@ class _YourDataStep extends StatelessWidget {
   Widget build(BuildContext context) {
     return const _StepBody(
       icon: Icons.shield_outlined,
-      headline: 'Your data stays on your phone',
-      body:
-          'Everything you declare is stored only in this app\'s private storage — '
-          'no accounts, no analytics, no network calls of any kind. You\'ll be '
-          'able to review your history, adjust how long it\'s kept, export it, '
-          'or delete it at any time from Settings.',
+      headline: 'Stays on your phone.',
+      body: 'No account. No analytics. No internet.',
     );
   }
 }

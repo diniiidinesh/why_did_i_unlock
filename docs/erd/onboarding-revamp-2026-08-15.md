@@ -1,6 +1,7 @@
 # ERD — Onboarding revamp (copy diet + animated walkthrough + day-1 feature discovery)
 
-> Plan doc. Scoped 2026-08-15, **not yet built**. Owner: Dinesh.
+> Plan doc. Scoped 2026-08-15. **Part A (PR 1) merged 2026-08-16** (PR #20).
+> Parts B/C/D not yet built. Owner: Dinesh.
 > Parts A/B/C-in-app are pure main-UI-engine work — no isolate, overlay, native,
 > or schema changes. The day-1 **notification** (§4D) is the one piece that
 > breaks that boundary; it is deliberately isolated into its own PR so the rest
@@ -28,6 +29,16 @@
   unlock event rather than any scheduling API, so no exact-alarm permission and no
   boot rescheduling; must degrade to in-app if the permission is refused. Folded
   into PR 4 with the stats screen. Added §12 — per-PR task briefs for Cursor.
+- **2026-08-16** — PR 1 implemented on `cursor/onboarding-copy-diet` (not merged;
+  on-device verification still Dinesh's). `OnboardingStep` enum replaces the
+  hardcoded `_stepCount = 5` and integer comparisons in
+  `didChangeAppLifecycleState` / `_onPageChanged`; page list is derived from
+  the enum. §10 copy applied to the existing five steps (How it works prose
+  left in place for PR 2). Collapsed "Can't find it?" / "Why does this happen?"
+  disclosures added. Still 5 steps — no walkthrough, no "Try it now".
+- **2026-08-16 (verified)** — PR 1 merged (PR #20). On-device cases 87–90 ✅
+  (fresh 5-step walk, both disclosures, grant → leave → return). The integer-
+  index landmine is gone. Next is PR 2 (`cursor/onboarding-walkthrough`).
 
 ---
 
