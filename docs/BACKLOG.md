@@ -8,12 +8,10 @@
 > Seven testers gave written feedback (verbatim + triage in
 > `docs/erd/onboarding-revamp-2026-08-15.md` Appendix A). Order of work agreed:
 >
-> 1. **[P0] Onboarding revamp — IN PROGRESS.** PR 1 merged 2026-08-16
->    (copy diet + `OnboardingStep` enum, on-device ✅). PR 2 walkthrough and
->    PR 3 tooltips + Try it now merged 2026-08-16 (PRs #21/#22). **PR 4
->    (day-1 stats + local notification) is on `cursor/onboarding-day-one`.**
->    Full plan + guardrails: `docs/erd/onboarding-revamp-2026-08-15.md`
->    (§9 sequencing, §11 handoff).
+> 1. **[P0] Onboarding revamp — DONE 2026-08-16.** PRs #20–#23 (copy diet,
+>    walkthrough, tooltips + Try it now, day-1 recap). Existing installs
+>    are not asked for `POST_NOTIFICATIONS`; they still get the in-app recap.
+>    Plan: `docs/erd/onboarding-revamp-2026-08-15.md`.
 > 2. **[P0] Outstanding-intent prompt** — plan already written
 >    (`docs/erd/outstanding-intent-prompt-2026-08-15.md`), not built. **Promoted
 >    on feedback evidence:** Vishishta's "my response isn't recorded and the app

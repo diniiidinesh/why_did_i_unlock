@@ -78,8 +78,10 @@ class AppSettings {
   static const int defaultQuietHoursEndMinutes = 7 * 60; // 07:00 — wraps past midnight
   static const RetentionPeriod defaultRetention = RetentionPeriod.oneYear;
   static const bool defaultOnboardingCompleted = false;
-  /// Opt-in on the last onboarding step — defaulted on (§4D.3).
-  static const bool defaultDayOneReminderEnabled = true;
+  /// Storage default is **off**. The last onboarding step still shows the
+  /// switch defaulted on and writes this key on finish. Existing installs
+  /// never wrote the key, so they must not be treated as opted-in (§4D.3).
+  static const bool defaultDayOneReminderEnabled = false;
 
   /// Bump when the mechanic itself changes (e.g. the timer ships) so the
   /// Home re-entry card resurfaces. Independent of [onboardingCompleted] —

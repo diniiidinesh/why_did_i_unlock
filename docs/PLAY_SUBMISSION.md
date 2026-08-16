@@ -228,7 +228,7 @@ by the Flutter engine, **not** `QUERY_ALL_PACKAGES`.
   prompt.
 - **[ ] Verify the foreground-service notification is actually visible on
   Android 13+.** `POST_NOTIFICATIONS` is now in the manifest for the optional
-  day-1 recap reminder (`cursor/onboarding-day-one`). Play policy expects
+  day-1 recap reminder. Play policy expects
   a foreground service to be user-visible; granting the permission for that
   reminder also un-suppresses the ongoing FGS notification. **Check on a real
   Android 13+ device** both with the permission granted and refused.

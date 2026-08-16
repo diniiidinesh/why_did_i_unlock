@@ -363,12 +363,12 @@ the formal matrix — not every row was walked after the scroll/Got it fix.
 
 ### Onboarding revamp PR 4 — day-1 recap + local notification (2026-08-16)
 
-Branch `cursor/onboarding-day-one`. Do not mark these passed here.
+Merged PR #23. Shade reminder verified on-device 2026-08-16; remaining cases still Dinesh's.
 
 | # | Case | Status | Notes / expected |
 |---|---|---|---|
 | 101 | Last onboarding step: **"Remind me tomorrow to check my first day"** default on | ❌ | Switch on `Stays on your phone.` (no overlay) or `Try it once.` (overlay granted). Toggle off skips the system permission dialog. Finish still lands on Home. |
 | 102 | Unlock after 24h, reminder on, permission granted | ❌ | One local notification ("Your first day with Beacon"). Next unlock does **not** post another. Opening the app shows the recap screen once; Continue goes to Home. |
-| 103 | Permission denied **or** reminder off | ❌ | No notification. Opening the app past 24h still shows the recap. Continue marks it seen. |
+| 103 | Permission denied **or** reminder off (incl. existing installs who never opted in) | ❌ | No notification. Opening the app past 24h still shows the recap. Continue marks it seen. Testers already past onboarding are **not** asked for `POST_NOTIFICATIONS`. |
 | 104 | Hidden debug: long-press About version | ❌ | Dialog: **Preview recap** opens the stats screen now. **Pretend 24 hours passed** backdates first launch; a later unlock/reopen shows the real recap path. |
 | 105 | Recap numbers | ❌ | Unlocks / intents declared / Just Like That / most common reason match History for the first day. No new SQL. |

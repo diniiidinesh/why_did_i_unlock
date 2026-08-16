@@ -21,7 +21,7 @@ On every phone unlock, a prompt asks **"What are you unlocking for?"** You decla
 
 **Not yet live to the public — in Play review.** The 14-continuous-day / 12-opted-in closed-test gate cleared on schedule (29 testers invited — Friends 21 + Testers List 8), **production access was granted 2026-08-13**, and `0.6.3 (11)` was submitted the same day. It is awaiting review for that first public release as of 2026-08-16. See `docs/PLAY_SUBMISSION.md` §4. On-device QA matrix (`docs/TEST_PLAN.md` 54–76) still open.
 
-**In flight (2026-08-16):** the **onboarding revamp** is four PRs in [`docs/erd/onboarding-revamp-2026-08-15.md`](docs/erd/onboarding-revamp-2026-08-15.md). **PR 1–3 merged** (copy diet, walkthrough, tooltips + Try it now). Current branch is **`cursor/onboarding-day-one`** (day-1 stats + local notification). Priority order across all open work — including two P0s that are *not* onboarding (the outstanding-intent prompt, and a bubble-salience regression reported independently by two testers) — is in [`docs/BACKLOG.md`](docs/BACKLOG.md)'s `CURRENT PRIORITY ORDER` block.
+**In flight (2026-08-16):** onboarding revamp **done** (PRs #20–#23). Next P0 is the **outstanding-intent prompt** ([plan](docs/erd/outstanding-intent-prompt-2026-08-15.md)). Bubble-salience regression is the other remaining P0. Priority order: [`docs/BACKLOG.md`](docs/BACKLOG.md) `CURRENT PRIORITY ORDER`.
 
 ## Documentation map
 

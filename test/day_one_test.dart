@@ -222,6 +222,7 @@ void main() {
     test('posts once then not again', () async {
       final now = DateTime.utc(2026, 8, 17, 12);
       await settings.setOnboardingCompleted(true);
+      await settings.setDayOneReminderEnabled(true);
       await settings.ensureFirstLaunchAt(DateTime.utc(2026, 8, 16, 12));
       var shows = 0;
       await maybePostDayOneNotification(
@@ -242,9 +243,26 @@ void main() {
       expect(shows, 1);
     });
 
+    test('existing install does not post even with permission — reminder never opted in', () async {
+      final now = DateTime.utc(2026, 8, 17, 12);
+      await settings.setOnboardingCompleted(true);
+      await settings.ensureFirstLaunchAt(DateTime.utc(2026, 8, 16, 12));
+      expect(await settings.dayOneReminderEnabled(), isFalse);
+      var shows = 0;
+      await maybePostDayOneNotification(
+        settings: settings,
+        now: now,
+        notificationsGranted: () async => true,
+        show: () async { shows++; },
+      );
+      expect(shows, 0);
+      expect(await dayOneRecapShouldShow(settings, now), isTrue);
+    });
+
     test('permission-denied path never posts; recap remains due', () async {
       final now = DateTime.utc(2026, 8, 17, 12);
       await settings.setOnboardingCompleted(true);
+      await settings.setDayOneReminderEnabled(true);
       await settings.ensureFirstLaunchAt(DateTime.utc(2026, 8, 16, 12));
       var shows = 0;
       await maybePostDayOneNotification(
@@ -255,10 +273,7 @@ void main() {
       );
       expect(shows, 0);
       expect(await settings.dayOneNotificationPosted(), isFalse);
-      expect(
-        await dayOneRecapShouldShow(settings, now),
-        isTrue,
-      );
+      expect(await dayOneRecapShouldShow(settings, now), isTrue);
     });
   });
 }

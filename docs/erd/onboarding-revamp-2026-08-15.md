@@ -1,8 +1,7 @@
 # ERD — Onboarding revamp (copy diet + animated walkthrough + day-1 feature discovery)
 
-> Plan doc. Scoped 2026-08-15. **Part A (PR 1) merged 2026-08-16** (PR #20).
-> **Part C (PR 3) merged 2026-08-16** (PR #22). Next is Part D on
-> `cursor/onboarding-day-one`. Owner: Dinesh.
+> Plan doc. Scoped 2026-08-15. **Parts A–D merged 2026-08-16** (PRs #20–#23).
+> Owner: Dinesh.
 > Parts A/B/C-in-app are pure main-UI-engine work — no isolate, overlay, native,
 > or schema changes. The day-1 **notification** (§4D) is the one piece that
 > breaks that boundary; it is deliberately isolated into its own PR so the rest
@@ -74,8 +73,11 @@
   `cursor/onboarding-day-one`. Recap uses existing `IntentStore` queries.
   `flutter_local_notifications` posts from the background unlock handler
   (`plain show()`, no `zonedSchedule`). Opt-in row on the last onboarding
-  step; in-app recap if the permission is refused. Hidden long-press on
-  About version skips the 24h wait.
+  step; in-app recap if the permission is refused. Existing installs
+  never wrote the opt-in key, so they get the in-app recap only — no
+  notification ask (`defaultDayOneReminderEnabled = false`). Hidden
+  long-press on About version skips the 24h wait. Core-library desugaring
+  is required for the plugin's Android AAR.
 
 ---
 
@@ -470,6 +472,10 @@ plugins registered normally (it already uses `sqflite` and
 onboarding**, as a visible opt-in row on the final step — *"Remind me tomorrow to
 check my first day"* — defaulted on, one tap to decline. Not a silent system
 dialog fired at launch.
+
+**Existing installs never see this ask.** The stored default for
+`day_one_reminder_enabled` is **off**, so a missing key is not treated as
+opted-in. They still get the in-app recap.
 
 **Must degrade gracefully:** if the permission is denied (or the user opts out),
 fall back to N-1 behaviour — show the day-1 screen in-app on the next launch past
