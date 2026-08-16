@@ -3,7 +3,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'app_settings.dart';
 import 'brand.dart';
+import 'day_one.dart';
+import 'day_one_stats_screen.dart';
 import 'problem_report.dart';
 import 'walkthrough.dart';
 
@@ -117,6 +120,51 @@ class AboutScreen extends StatelessWidget {
     _open(context, Uri.parse(playListingUrl), failureMessage: failureMessage);
   }
 
+  /// Hidden tester affordance (`§6`): long-press the version label to fire
+  /// the day-1 recap without waiting 24h. Not listed as a row so it does
+  /// not show up as a real setting.
+  Future<void> _debugDayOne(BuildContext context) async {
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text('Day-1 debug', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'Skip the 24h wait so the first-day recap can be tested.',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'preview'),
+            child: const Text('Preview recap'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'backdate'),
+            child: const Text('Pretend 24 hours passed'),
+          ),
+        ],
+      ),
+    );
+    if (!context.mounted || choice == null) return;
+    if (choice == 'preview') {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const DayOneStatsScreen()),
+      );
+      return;
+    }
+    const settings = AppSettings();
+    await settings.overwriteFirstLaunchAt(
+      DateTime.now().subtract(DayOneNudge.delay + const Duration(minutes: 1)),
+    );
+    await settings.setDayOneNudgeShown(false);
+    await settings.setDayOneNotificationPosted(false);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('First launch set to 24h ago. Unlock or reopen Beacon.')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -144,7 +192,10 @@ class AboutScreen extends StatelessWidget {
             child: Text(appDisplayName, style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w600)),
           ),
           Center(
-            child: Text('Version $version', style: const TextStyle(color: Colors.white54, fontSize: 13)),
+            child: GestureDetector(
+              onLongPress: () => _debugDayOne(context),
+              child: Text('Version $version', style: const TextStyle(color: Colors.white54, fontSize: 13)),
+            ),
           ),
           const SizedBox(height: 24),
           const _SectionDivider(),

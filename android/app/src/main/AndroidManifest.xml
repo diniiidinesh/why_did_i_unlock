@@ -17,6 +17,12 @@
          surviving OEM background-kill to observe unlock events (same
          rationale as the specialUse foreground service). -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+    <!-- Optional day-1 recap reminder. Requested at the end of onboarding
+         only if the user leaves "Remind me tomorrow" on. The feature falls
+         back to an in-app screen if this is refused
+         (docs/erd/onboarding-revamp-2026-08-15.md §4D.3). Not a push / FCM
+         channel — nothing leaves the device. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- allowBackup="false": Sprint 3 introduces the first on-disk user data
          (the sqflite intent_log). Without this, Android's default auto-backup
          would sweep declared intent text into cloud/adb backups, conflicting

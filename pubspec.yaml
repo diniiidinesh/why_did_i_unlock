@@ -69,6 +69,10 @@ dependencies:
   # OEM guidance highlight (Status / onboarding): reads Build.MANUFACTURER
   # without custom Kotlin. See lib/device_manufacturer.dart + oem_autostart_copy.
   device_info_plus: ^11.2.0
+  # Day-1 recap reminder (onboarding revamp PR 4). Local only — posted
+  # from the background engine on an existing unlock, never zonedSchedule /
+  # FCM. Overlay isolate must not call this plugin.
+  flutter_local_notifications: ^19.4.2
 
 dev_dependencies:
   flutter_test:

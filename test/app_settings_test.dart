@@ -62,6 +62,17 @@ void main() {
       await settings.setDayOneNudgeShown(true);
       expect(await settings.dayOneNudgeShown(), isTrue);
 
+      expect(await settings.dayOneReminderEnabled(), isFalse);
+      await settings.setDayOneReminderEnabled(true);
+      expect(await settings.dayOneReminderEnabled(), isTrue);
+
+      expect(await settings.dayOneNotificationPosted(), isFalse);
+      await settings.setDayOneNotificationPosted(true);
+      expect(await settings.dayOneNotificationPosted(), isTrue);
+
+      await settings.overwriteFirstLaunchAt(DateTime.utc(2026, 8, 14));
+      expect(await settings.firstLaunchAtMs(), DateTime.utc(2026, 8, 14).millisecondsSinceEpoch);
+
       expect(await settings.settingsScreenOpened(), isFalse);
       await settings.setSettingsScreenOpened(true);
       expect(await settings.settingsScreenOpened(), isTrue);

@@ -58,6 +58,14 @@ class OnboardingScreen extends StatefulWidget {
   /// Called after [completeOnboarding] resolves on the final step.
   final VoidCallback? onFinished;
 
+  /// Persist the last-step "Remind me tomorrow" switch. Injected so tests
+  /// never touch SharedPreferences.
+  final Future<void> Function(bool enabled) persistDayOneReminder;
+
+  /// Runtime `POST_NOTIFICATIONS` request — only when the reminder switch
+  /// is on. Failures must not block finishing onboarding (§4D.3).
+  final Future<void> Function() requestNotificationPermission;
+
   const OnboardingScreen({
     super.key,
     Future<bool> Function()? checkPermission,
@@ -66,6 +74,8 @@ class OnboardingScreen extends StatefulWidget {
     Future<void> Function()? requestBatteryExemption,
     Future<String?> Function()? readManufacturer,
     Future<void> Function()? completeOnboarding,
+    Future<void> Function(bool enabled)? persistDayOneReminder,
+    Future<void> Function()? requestNotificationPermission,
     this.onShowPromptNow,
     this.onFinished,
   })  : checkPermission = checkPermission ?? FlutterOverlayWindow.isPermissionGranted,
@@ -73,7 +83,10 @@ class OnboardingScreen extends StatefulWidget {
         checkBatteryExemption = checkBatteryExemption ?? _defaultCheckBatteryExemption,
         requestBatteryExemption = requestBatteryExemption ?? _defaultRequestBatteryExemption,
         readManufacturer = readManufacturer ?? readDeviceManufacturer,
-        completeOnboarding = completeOnboarding ?? _defaultCompleteOnboarding;
+        completeOnboarding = completeOnboarding ?? _defaultCompleteOnboarding,
+        persistDayOneReminder = persistDayOneReminder ?? _defaultPersistDayOneReminder,
+        requestNotificationPermission =
+            requestNotificationPermission ?? _defaultRequestNotificationPermission;
 
   static Future<void> _defaultCompleteOnboarding() async {
     DiscoverySession.skipThisLaunch = true;
@@ -88,6 +101,14 @@ class OnboardingScreen extends StatefulWidget {
 
   static Future<void> _defaultRequestBatteryExemption() async {
     await Permission.ignoreBatteryOptimizations.request();
+  }
+
+  static Future<void> _defaultPersistDayOneReminder(bool enabled) {
+    return const AppSettings().setDayOneReminderEnabled(enabled);
+  }
+
+  static Future<void> _defaultRequestNotificationPermission() async {
+    await Permission.notification.request();
   }
 
   @override
@@ -110,6 +131,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
   /// Option A: while the walkthrough is mid-sequence, lock the outer pager
   /// and hide Continue / Back / dots so swipe + dots don't fight the 7 beats.
   bool _walkthroughPlaybackActive = false;
+
+  /// Last-step opt-in, default on (§4D.3). One tap to decline.
+  bool _dayOneReminderEnabled = true;
 
   @override
   void initState() {
@@ -208,6 +232,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
   }
 
   Future<void> _finish() async {
+    try {
+      await widget.persistDayOneReminder(_dayOneReminderEnabled);
+      if (_dayOneReminderEnabled) {
+        await widget.requestNotificationPermission();
+      }
+    } catch (_) {
+      // Reminder is optional — a refused/failed permission must not trap
+      // the user on onboarding. In-app recap still runs past 24h.
+    }
     await widget.completeOnboarding();
     widget.onFinished?.call();
   }
@@ -279,9 +312,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
           manufacturerLoaded: _manufacturerLoaded,
         );
       case OnboardingStep.yourData:
-        return const _YourDataStep();
+        return _YourDataStep(
+          showReminder: _visibleSteps.last == OnboardingStep.yourData,
+          reminderEnabled: _dayOneReminderEnabled,
+          onReminderChanged: (value) => setState(() => _dayOneReminderEnabled = value),
+        );
       case OnboardingStep.tryIt:
-        return _TryItStep(onShowMe: _tryIt, onSkip: _finish);
+        return _TryItStep(
+          onShowMe: _tryIt,
+          onSkip: _finish,
+          reminderEnabled: _dayOneReminderEnabled,
+          onReminderChanged: (value) => setState(() => _dayOneReminderEnabled = value),
+        );
     }
   }
 
@@ -583,8 +625,15 @@ class _OemReliabilityStep extends StatelessWidget {
 class _TryItStep extends StatelessWidget {
   final VoidCallback onShowMe;
   final VoidCallback onSkip;
+  final bool reminderEnabled;
+  final ValueChanged<bool> onReminderChanged;
 
-  const _TryItStep({required this.onShowMe, required this.onSkip});
+  const _TryItStep({
+    required this.onShowMe,
+    required this.onSkip,
+    required this.reminderEnabled,
+    required this.onReminderChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -592,11 +641,17 @@ class _TryItStep extends StatelessWidget {
       icon: Icons.touch_app_outlined,
       headline: 'Try it once.',
       body: 'See the prompt and bubble for real. Nothing is saved.',
-      extra: Row(
+      extra: Column(
         children: [
-          TextButton(onPressed: onSkip, child: const Text('Skip')),
-          const Spacer(),
-          ElevatedButton(onPressed: onShowMe, child: const Text('Show me')),
+          _DayOneReminderTile(enabled: reminderEnabled, onChanged: onReminderChanged),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              TextButton(onPressed: onSkip, child: const Text('Skip')),
+              const Spacer(),
+              ElevatedButton(onPressed: onShowMe, child: const Text('Show me')),
+            ],
+          ),
         ],
       ),
     );
@@ -604,14 +659,46 @@ class _TryItStep extends StatelessWidget {
 }
 
 class _YourDataStep extends StatelessWidget {
-  const _YourDataStep();
+  final bool showReminder;
+  final bool reminderEnabled;
+  final ValueChanged<bool> onReminderChanged;
+
+  const _YourDataStep({
+    required this.showReminder,
+    required this.reminderEnabled,
+    required this.onReminderChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return const _StepBody(
+    return _StepBody(
       icon: Icons.shield_outlined,
       headline: 'Stays on your phone.',
       body: 'No account. No analytics. No internet.',
+      extra: showReminder
+          ? _DayOneReminderTile(enabled: reminderEnabled, onChanged: onReminderChanged)
+          : null,
+    );
+  }
+}
+
+class _DayOneReminderTile extends StatelessWidget {
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
+
+  const _DayOneReminderTile({required this.enabled, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return SwitchListTile(
+      key: const ValueKey('day-one-reminder'),
+      contentPadding: EdgeInsets.zero,
+      title: const Text(
+        'Remind me tomorrow to check my first day',
+        style: TextStyle(color: Colors.white, fontSize: 14),
+      ),
+      value: enabled,
+      onChanged: onChanged,
     );
   }
 }

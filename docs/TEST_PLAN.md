@@ -20,6 +20,8 @@ for the exact assertions.
 | `test/intent_store_test.dart` | `IntentStore` repository. **Sprint 3 (1–9):** insert/read, empty DB, SQL-injection literal stored verbatim, idempotent `client_id`, `fromMessage` validation (7 sub-cases incl. `presetId` typing + `toMessage` round-trip), no-intent row shape, `recentEvents` limit+ordering, `lastCompletedAt` across kinds, reopen. **Sprint 4 (20–25):** real v1→v2 migration from a hand-built v1 file, `unlock_log` round-trip incl. every `SkipReason`, declare→dismiss lifecycle (`open`/`done`/`abandoned`, idempotency, no-op on unknown id, **no resurrection of abandoned rows**), `unlock_id` stateless resolution (incl. later-skipped-unlock and no-prompted-unlock cases), preset CRUD + limits + soft-delete + restore-defaults. |
 | `test/app_settings_test.dart` | `AppSettings` (30–35): defaults match the previously-hardcoded constants, round-trips, **clamping on both write and read**, retention enum mapping + sentinel, quiet-hours flag independent of window, `loadSnapshot` batching, cross-instance visibility. |
 | `test/prompt_policy_test.dart` | Triage policies. **Sprint 3 (10–12):** `ProbabilityPromptPolicy` bounds + seeded determinism, `TimeCooldownPolicy` boundary (`>=`), `CompositePromptPolicy` AND-semantics. **Sprint 4 (40–42):** `QuietHoursPolicy` same-day window, **overnight wraparound**, inclusive-start/exclusive-end boundaries, degenerate zero-width window fails open. |
+| `test/day_one_test.dart` | **Onboarding revamp PR 4.** 24h boundary, fires-once, permission-denied fallback, most-common-reason grouping, `maybePostDayOneNotification` posts once. |
+| `test/day_one_stats_screen_test.dart` | **Onboarding revamp PR 4.** Recap screen renders injected-store counts. |
 | `test/widget_test.dart` | `HomeScreen` title + nav entries (13, no Unlock-prompts Switch); `IntentCaptureScreen` presets/pill/field/OK (14), empty presets (16), preset id via `onSubmit` (17), custom text no `presetId` (18); AppLauncher onboarding gate (19). |
 | `test/history_screen_test.dart` | `HistoryScreen` renders events newest-first, styles `no_intent` rows distinctly (15). |
 | `test/home_screen_test.dart` | **Sprint 4 (T18).** Home insight cards: empty first-run copy, seeded counts + donut categories + median duration, null duration empty copy. Injected store + permission; `tester.runAsync` for sqflite. |
@@ -359,10 +361,14 @@ the formal matrix — not every row was walked after the scroll/Got it fix.
 | 99 | After the first real unlock: Settings tooltip then Manage | 🟡 | Feel-passed 2026-08-16. Opening Settings retires that tip forever. Got it is this visit only (up to 3 shows). Scroll must not stack a second Manage card. |
 | 100 | Home label **"How long until Done"** | ❌ | Duration card is no longer titled "Time to mark done". |
 
+### Onboarding revamp PR 4 — day-1 recap + local notification (2026-08-16)
+
+Merged PR #23. Shade reminder verified on-device 2026-08-16; remaining cases still Dinesh's.
+
 | # | Case | Status | Notes / expected |
 |---|---|---|---|
-| 96 | Fresh install **without** overlay permission: no Try it now | ❌ | After **Stays on your phone.** the primary button is **Get started**. There is no **Try it once.** page. |
-| 97 | Fresh install **with** overlay permission: Try it now, then Skip | ❌ | Last page is **Try it once.** / "See the prompt and bubble for real. Nothing is saved." **Skip** lands on Home with no practice prompt. History stays empty. |
-| 98 | Try it now **Show me** | ❌ | **Show me** opens the real capture overlay; declaring an intent (or Just Like That) leaves **no** new row in History / insights. Then Home. Same-session Home must **not** show Settings/Manage tooltips (`DiscoverySession.skipThisLaunch`). |
-| 99 | After the first real unlock: Settings tooltip then Manage | ❌ | Unlock once, open the app. Tooltip on **Open Settings** ("How often Beacon asks"); **Got it** (or tap elsewhere) then Manage options. Opening either screen retires that tooltip; first visit shows a dismissible banner. Overlay/capture never shows a tooltip. |
-| 100 | Home label **"How long until Done"** | ❌ | Duration card is no longer titled "Time to mark done". |
+| 101 | Last onboarding step: **"Remind me tomorrow to check my first day"** default on | ❌ | Switch on `Stays on your phone.` (no overlay) or `Try it once.` (overlay granted). Toggle off skips the system permission dialog. Finish still lands on Home. |
+| 102 | Unlock after 24h, reminder on, permission granted | ❌ | One local notification ("Your first day with Beacon"). Next unlock does **not** post another. Opening the app shows the recap screen once; Continue goes to Home. |
+| 103 | Permission denied **or** reminder off (incl. existing installs who never opted in) | ❌ | No notification. Opening the app past 24h still shows the recap. Continue marks it seen. Testers already past onboarding are **not** asked for `POST_NOTIFICATIONS`. |
+| 104 | Hidden debug: long-press About version | ❌ | Dialog: **Preview recap** opens the stats screen now. **Pretend 24 hours passed** backdates first launch; a later unlock/reopen shows the real recap path. |
+| 105 | Recap numbers | ❌ | Unlocks / intents declared / Just Like That / most common reason match History for the first day. No new SQL. |
