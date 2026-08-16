@@ -1,7 +1,8 @@
 # ERD — Onboarding revamp (copy diet + animated walkthrough + day-1 feature discovery)
 
 > Plan doc. Scoped 2026-08-15. **Parts A–D merged 2026-08-16** (PRs #20–#23).
-> Owner: Dinesh.
+> Recap-tap follow-up **PR #24** (same day): shade tap and icon open share
+> one destination. Owner: Dinesh.
 > Parts A/B/C-in-app are pure main-UI-engine work — no isolate, overlay, native,
 > or schema changes. The day-1 **notification** (§4D) is the one piece that
 > breaks that boundary; it is deliberately isolated into its own PR so the rest
@@ -69,6 +70,11 @@
   overlay still blocks later unlocks). Three show-cap and scroll-duplicate
   bugs were fixed before merge. Parked: replace a leftover *practice
   capture* on the next real unlock (not a declared bubble).
+- **2026-08-16 (handoff)** — Session close-out: overlay FGS shade accepted;
+  existing installs not opted in (PR #23); recap-tap is one destination
+  (PR #24). Remaining on-device gaps are TEST_PLAN 101/103–105 (not
+  merge-blocking). Next P0 is outstanding-intent, not more onboarding.
+
 - **2026-08-16 (notification tap → recap)** — Shade reminder tap opens
   the same "Your first day" screen as an icon open. Continue is the only
   path to Home. Payload `day_one_recap` so we ignore the overlay FGS

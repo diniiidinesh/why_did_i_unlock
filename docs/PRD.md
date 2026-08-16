@@ -133,7 +133,9 @@ v1.0 of this PRD asserted things about "Sprint 1" that weren't accurate against 
 
 **Not yet present (needed only once the corresponding feature is built):**
 - `RECORD_AUDIO` — for voice input (not yet built).
-- `POST_NOTIFICATIONS` — for timer alerts (not yet built).
+
+**Present, used by day-1 recap (not timer alerts):**
+- `POST_NOTIFICATIONS` — optional local reminder after 24h. Asked at the end of onboarding only if the user leaves "Remind me tomorrow" on. Existing installs are not asked. The in-app recap still shows if they refuse. Timer alerts are **not** built.
 
 **To confirm directly against the manifest rather than assume:** `RECEIVE_BOOT_COMPLETED` (auto-start after reboot) — listed as a requirement in v1.0 but not independently reverified for this rewrite.
 
