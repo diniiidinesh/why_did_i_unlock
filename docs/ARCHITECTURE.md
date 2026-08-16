@@ -13,7 +13,7 @@ exists to make the "why" durable.
 
 | Engine | Host (native) | Dart entry point | Lifetime | Plugins registered? | Job |
 |---|---|---|---|---|---|
-| **Main UI** | `MainActivity` (`FlutterActivity`) | `main()` → `MyApp` → `HomeScreen` | Ephemeral — dies when the Activity/task is destroyed (incl. swipe-away) | Yes (auto) | Show the settings/permission screen. Request the overlay permission (needs an Activity). Nothing else. |
+| **Main UI** | `MainActivity` (`FlutterActivity`) | `main()` → `MyApp` → `HomeScreen` | Ephemeral — dies when the Activity/task is destroyed (incl. swipe-away) | Yes (auto) | Show the settings/permission screen. Request the overlay permission (needs an Activity). Day-1 recap **tap** is handled here (`onDidReceiveNotificationResponse`) so a shade tap opens the recap if it is still due. |
 | **Background** | `UnlockListenerService` (foreground service) | `backgroundMain()` | **Persistent** — lives as long as the foreground service (survives task removal) | Yes (auto) | The "brain": receive unlock/lock events, run prompt triage, call `showOverlay()`. Also the sole writer of the Sprint 3 `intent_log` DB — opens it once, subscribes `overlayListener`, inserts on every relayed event. **Day-1 recap reminder** (`flutter_local_notifications.show`) also runs here, piggybacking the existing unlock handler — never from overlay. |
 | **Overlay** | `OverlayService` (from `flutter_overlay_window`) | `overlayMain()` → `OverlayRoot` | Cached; created lazily on first `showOverlay`, persists for the process | **No** (only the overlay plugin's own channel) | Render the capture screen and the hybrid bubble (Beacon frosted glass). Runs the capture→expanded→collapsed state machine. Theme: `beaconDarkTheme()` (same tokens as main UI). |
 

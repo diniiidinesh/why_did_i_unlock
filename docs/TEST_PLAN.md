@@ -368,7 +368,8 @@ Merged PR #23. Shade reminder verified on-device 2026-08-16; remaining cases sti
 | # | Case | Status | Notes / expected |
 |---|---|---|---|
 | 101 | Last onboarding step: **"Remind me tomorrow to check my first day"** default on | ❌ | Switch on `Stays on your phone.` (no overlay) or `Try it once.` (overlay granted). Toggle off skips the system permission dialog. Finish still lands on Home. |
-| 102 | Unlock after 24h, reminder on, permission granted | ❌ | One local notification ("Your first day with Beacon"). Next unlock does **not** post another. Opening the app shows the recap screen once; Continue goes to Home. |
+| 102 | Unlock after 24h, reminder on, permission granted | ❌ | One local notification ("Your first day with Beacon"). Next unlock does **not** post another. Opening the app **from the icon** or **tapping the notification** shows the recap once; Continue goes to Home. |
 | 103 | Permission denied **or** reminder off (incl. existing installs who never opted in) | ❌ | No notification. Opening the app past 24h still shows the recap. Continue marks it seen. Testers already past onboarding are **not** asked for `POST_NOTIFICATIONS`. |
 | 104 | Hidden debug: long-press About version | ❌ | Dialog: **Preview recap** opens the stats screen now. **Pretend 24 hours passed** backdates first launch; a later unlock/reopen shows the real recap path. |
 | 105 | Recap numbers | ❌ | Unlocks / intents declared / Just Like That / most common reason match History for the first day. No new SQL. |
+| 106 | Tap the day-1 notification | ❌ | Opens **"Your first day"** (not Home), whether the app was backgrounded or killed. Continue → Home. After Continue, a later tap stays on Home. |

@@ -6,7 +6,8 @@ import 'intent_store.dart';
 
 /// Destination for the day-1 recap (`§4C.5` / `§4D`). Comfort-copy, then
 /// real counts from existing [IntentStore] queries. Opens from
-/// [AppLauncher] after 24h, or from About's hidden long-press debug.
+/// [AppLauncher] after 24h (icon open **or** shade-reminder tap),
+/// or from About's hidden long-press debug.
 class DayOneStatsScreen extends StatefulWidget {
   final Future<IntentStore> Function()? openStore;
   final VoidCallback? onFinished;
