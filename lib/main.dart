@@ -1463,6 +1463,21 @@ class _AppLauncherState extends State<AppLauncher> {
         _showDayOneRecap = showRecap;
       });
     }
+    // Shade tap while Home is already up should open the recap if it is
+    // still due. Widget tests may hit a missing plugin — bind swallows it.
+    if (completed != false) {
+      DayOneNotifications.bindUiTapHandler(_showRecapFromNotificationTap);
+    }
+  }
+
+  void _showRecapFromNotificationTap() {
+    unawaited(_openRecapIfStillDue());
+  }
+
+  Future<void> _openRecapIfStillDue() async {
+    final due = await dayOneRecapShouldShow(_appSettings, DateTime.now());
+    if (!mounted || !due) return;
+    setState(() => _showDayOneRecap = true);
   }
 
   Future<void> _dismissDayOneRecap() async {

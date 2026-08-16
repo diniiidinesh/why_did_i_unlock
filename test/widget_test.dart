@@ -70,6 +70,21 @@ void main() {
     expect(find.text('Settings'), findsNothing);
   });
 
+  testWidgets('AppLauncher shows recap after 24h when opened from the icon', (tester) async {
+    final first = DateTime.now().subtract(const Duration(hours: 25)).millisecondsSinceEpoch;
+    SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.withData({
+      'onboarding_completed': true,
+      'first_launch_at': first,
+    });
+
+    await tester.pumpWidget(const MyApp());
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Your first day'), findsOneWidget);
+  });
+
   testWidgets(
     '14. IntentCaptureScreen renders presets, Just Like That, text field and OK',
     (tester) async {

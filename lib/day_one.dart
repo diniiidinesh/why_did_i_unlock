@@ -6,7 +6,8 @@ import 'intent_store.dart';
 /// Pure Dart so tests cover the 24h boundary and the "fires once" rule
 /// without a plugin. The background engine posts a local notification when
 /// [shouldNotify] is true; [AppLauncher] shows the recap screen when
-/// [recapIsDue] is true — even if the notification never went out.
+/// [recapIsDue] is true — even if the notification never went out. A tap
+/// on that reminder opens the same recap, not Home.
 class DayOneNudge {
   static const Duration delay = Duration(hours: 24);
 

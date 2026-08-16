@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -6,22 +8,37 @@ import 'app_settings.dart';
 import 'brand.dart';
 import 'day_one.dart';
 
-/// Local (on-device) day-1 recap reminder. **Background engine only** —
-/// never call from overlay-isolate code (`docs/ARCHITECTURE.md` §5; overlay
-/// has no plugins). No `zonedSchedule`, no exact-alarm, no boot reschedule:
-/// [maybePostDayOneNotification] is evaluated on the existing unlock path
-/// (`docs/erd/onboarding-revamp-2026-08-15.md` §4D.2).
+/// Posted from the **background** engine on the unlock path. Tap handling
+/// is on the **main UI** isolate (`AppLauncher`) so a shade tap opens the
+/// same recap as an icon open. Never call from overlay-isolate code
+/// (`docs/ARCHITECTURE.md` §5). No `zonedSchedule`, no exact-alarm, no boot
+/// reschedule: [maybePostDayOneNotification] piggybacks the existing unlock
+/// handler (`docs/erd/onboarding-revamp-2026-08-15.md` §4D.2).
 class DayOneNotifications {
   static final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
   static bool _ready = false;
+  static void Function()? _uiTapHandler;
 
   static const channelId = 'beacon_day_one';
   static const notificationId = 41;
+  /// Identifies this reminder in tap callbacks so we don't react to the
+  /// overlay foreground-service notification.
+  static const recapPayload = 'day_one_recap';
 
-  static Future<void> initialize() async {
+  /// Tap handler lives on the **main UI** isolate (`AppLauncher`). Posting
+  /// still happens in the background engine — each isolate has its own
+  /// plugin instance. The callback reads [_uiTapHandler] at tap time so a
+  /// later [bindUiTapHandler] still works if [initialize] ran first.
+  static Future<void> initialize({void Function()? onRecapTapped}) async {
+    if (onRecapTapped != null) _uiTapHandler = onRecapTapped;
     if (_ready) return;
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
-    await _plugin.initialize(const InitializationSettings(android: android));
+    await _plugin.initialize(
+      const InitializationSettings(android: android),
+      onDidReceiveNotificationResponse: (response) {
+        if (response.payload == recapPayload) _uiTapHandler?.call();
+      },
+    );
     await _plugin
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(
@@ -49,7 +66,16 @@ class DayOneNotifications {
           importance: Importance.defaultImportance,
         ),
       ),
+      payload: recapPayload,
     );
+  }
+
+  /// [AppLauncher] registers this so a shade tap while Home is already up
+  /// still opens the recap (a killed-process tap is handled by recap-due
+  /// in `_load`).
+  static void bindUiTapHandler(void Function() onTap) {
+    _uiTapHandler = onTap;
+    unawaited(initialize(onRecapTapped: onTap).catchError((_) {}));
   }
 }
 

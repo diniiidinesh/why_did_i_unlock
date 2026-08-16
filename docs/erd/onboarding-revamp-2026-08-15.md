@@ -69,6 +69,12 @@
   overlay still blocks later unlocks). Three show-cap and scroll-duplicate
   bugs were fixed before merge. Parked: replace a leftover *practice
   capture* on the next real unlock (not a declared bubble).
+- **2026-08-16 (notification tap → recap)** — Shade reminder tap opens
+  the same "Your first day" screen as an icon open. Continue is the only
+  path to Home. Payload `day_one_recap` so we ignore the overlay FGS
+  notification. A tap while Home is already up still switches to recap
+  if it has not been marked seen.
+
 - **2026-08-16 (PR 4)** — Day-1 stats + local notification on
   `cursor/onboarding-day-one`. Recap uses existing `IntentStore` queries.
   `flutter_local_notifications` posts from the background unlock handler
