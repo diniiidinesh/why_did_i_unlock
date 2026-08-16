@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'app_settings.dart';
+import 'discovery_tooltip.dart';
 import 'intent_store.dart';
 
 /// Reorder / rename / enable / soft-delete / restore-defaults UI for
@@ -19,8 +21,13 @@ import 'intent_store.dart';
 /// found once.
 class ManagePresetsScreen extends StatefulWidget {
   final Future<IntentStore> Function()? openStore;
+  final AppSettings settings;
 
-  const ManagePresetsScreen({super.key, this.openStore});
+  const ManagePresetsScreen({
+    super.key,
+    this.openStore,
+    this.settings = const AppSettings(),
+  });
 
   @override
   State<ManagePresetsScreen> createState() => _ManagePresetsScreenState();
@@ -33,6 +40,7 @@ class _ManagePresetsScreenState extends State<ManagePresetsScreen> {
   /// which is a real, valid state (docs/DATA_MODEL.md §7: the minimum
   /// enabled/stored preset count is deliberately zero).
   List<IntentPreset>? _presets;
+  bool _showFirstVisitBanner = false;
 
   @override
   void initState() {
@@ -47,6 +55,13 @@ class _ManagePresetsScreenState extends State<ManagePresetsScreen> {
       return;
     }
     _store = store;
+    final already = await widget.settings.managePresetsOpened();
+    if (!already) await widget.settings.setManagePresetsOpened(true);
+    if (!mounted) {
+      await store.close();
+      return;
+    }
+    setState(() => _showFirstVisitBanner = !already);
     await _reload();
   }
 
@@ -229,7 +244,15 @@ class _ManagePresetsScreenState extends State<ManagePresetsScreen> {
       ),
       body: SafeArea(
         top: false,
-        child: presets == null
+        child: Column(
+          children: [
+            if (_showFirstVisitBanner)
+              FirstVisitBanner(
+                message: DiscoveryCopy.manageBody,
+                onDismiss: () => setState(() => _showFirstVisitBanner = false),
+              ),
+            Expanded(
+              child: presets == null
             ? const Center(child: CircularProgressIndicator())
             : presets.isEmpty
               ? const Center(
@@ -267,6 +290,9 @@ class _ManagePresetsScreenState extends State<ManagePresetsScreen> {
                     );
                   },
                 ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -3,6 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences_platform_interface/in_memory_shared_preferences_async.dart';
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:why_did_i_unlock/app_settings.dart';
+import 'package:why_did_i_unlock/discovery_tooltip.dart';
 import 'package:why_did_i_unlock/intent_store.dart';
 import 'package:why_did_i_unlock/manage_presets_screen.dart';
 
@@ -299,6 +301,28 @@ void main() {
 
     expect(find.byType(SnackBar), findsOneWidget);
     expect(find.text('One too many'), findsNothing);
+
+    await tester.runAsync(() => store.close());
+  });
+
+  testWidgets('first visit shows a banner and marks Manage options opened', (tester) async {
+    late IntentStore store;
+    await tester.runAsync(() async => store = await openTestStore());
+    await pumpScreen(tester, store);
+
+    expect(find.text(DiscoveryCopy.manageBody), findsOneWidget);
+    expect(await const AppSettings().managePresetsOpened(), isTrue);
+
+    await tester.runAsync(() => store.close());
+  });
+
+  testWidgets('returning visit does not show the first-visit banner', (tester) async {
+    late IntentStore store;
+    await tester.runAsync(() async => store = await openTestStore());
+    await const AppSettings().setManagePresetsOpened(true);
+    await pumpScreen(tester, store);
+
+    expect(find.text(DiscoveryCopy.manageBody), findsNothing);
 
     await tester.runAsync(() => store.close());
   });

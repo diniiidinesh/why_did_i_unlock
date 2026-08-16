@@ -15,6 +15,7 @@ void main() {
     Future<String?> Function()? readManufacturer,
     Future<void> Function()? completeOnboarding,
     VoidCallback? onFinished,
+    void Function({required int screenWidth, required int screenHeight})? onShowPromptNow,
   }) {
     return tester.pumpWidget(MaterialApp(
       home: OnboardingScreen(
@@ -25,6 +26,7 @@ void main() {
         readManufacturer: readManufacturer ?? () async => null,
         completeOnboarding: completeOnboarding ?? () async {},
         onFinished: onFinished,
+        onShowPromptNow: onShowPromptNow,
       ),
     ));
   }
@@ -46,22 +48,23 @@ void main() {
     return (pageView.childrenDelegate as SliverChildListDelegate).children.length;
   }
 
-  test('OnboardingStep order is the current 5-step flow', () {
+  test('OnboardingStep order is value-prop through try-it', () {
     expect(OnboardingStep.values, [
       OnboardingStep.valueProp,
       OnboardingStep.walkthrough,
       OnboardingStep.permission,
       OnboardingStep.oem,
       OnboardingStep.yourData,
+      OnboardingStep.tryIt,
     ]);
   });
 
-  testWidgets('PageView child count stays in sync with OnboardingStep.values', (tester) async {
+  testWidgets('PageView omits Try it now when overlay permission is not granted', (tester) async {
     await pumpOnboarding(tester);
     await tester.pump();
 
-    expect(pageCount(tester), OnboardingStep.values.length);
     expect(pageCount(tester), 5);
+    expect(find.text('Try it once.'), findsNothing);
   });
 
   testWidgets('starts on the value-prop step with no Back button', (tester) async {
@@ -338,7 +341,7 @@ void main() {
     );
     await tester.pump();
 
-    await advanceTo(tester, OnboardingStep.values.last);
+    await advanceTo(tester, OnboardingStep.yourData);
 
     expect(find.text('Get started'), findsOneWidget);
     await tester.tap(find.text('Get started'));
@@ -346,6 +349,55 @@ void main() {
     await tester.pump();
 
     expect(completed, isTrue);
+    expect(finished, isTrue);
+  });
+
+  testWidgets('Try it now appears only with overlay permission and can skip', (tester) async {
+    var finished = false;
+    var shown = 0;
+    await pumpOnboarding(
+      tester,
+      checkPermission: () async => true,
+      onFinished: () => finished = true,
+      onShowPromptNow: ({required screenWidth, required screenHeight}) {
+        shown++;
+      },
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(pageCount(tester), 6);
+    await advanceTo(tester, OnboardingStep.tryIt);
+    expect(find.text('Try it once.'), findsOneWidget);
+    expect(find.text('See the prompt and bubble for real. Nothing is saved.'), findsOneWidget);
+    expect(find.text('Get started'), findsNothing);
+
+    await tester.tap(find.text('Skip'));
+    await tester.pump();
+    await tester.pump();
+    expect(finished, isTrue);
+    expect(shown, 0);
+  });
+
+  testWidgets('Try it now Show me fires the practice prompt then finishes', (tester) async {
+    var finished = false;
+    var shown = 0;
+    await pumpOnboarding(
+      tester,
+      checkPermission: () async => true,
+      onFinished: () => finished = true,
+      onShowPromptNow: ({required screenWidth, required screenHeight}) {
+        shown++;
+      },
+    );
+    await tester.pump();
+    await tester.pump();
+
+    await advanceTo(tester, OnboardingStep.tryIt);
+    await tester.tap(find.text('Show me'));
+    await tester.pump();
+    await tester.pump();
+    expect(shown, 1);
     expect(finished, isTrue);
   });
 }

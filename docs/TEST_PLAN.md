@@ -344,3 +344,25 @@ walkthrough. Do not mark these passed here.
 | 93 | Existing install: Home **"See how Beacon works"** card | ❌ | Upgrade over a completed-onboarding install. Card appears once; Watch opens the walkthrough; Dismiss (or finishing Watch) hides it permanently. |
 | 94 | About **"How Beacon works"** | ❌ | Row always present; opens the same walkthrough. Skip (top-right) jumps to the last beat; **Done** then pops. App-bar X also pops. Does not re-show the Home card once it has been dismissed. |
 | 95 | **Permission grant → return still works after the step insert** | ❌ | Highest-risk leftover from PR 1. Grant on **One permission.**, leave, return → Granted. Confirm it did not regress when How-it-works became the walkthrough. |
+
+### Onboarding revamp PR 3 — tooltips + Try it now (2026-08-16)
+
+Merged 2026-08-16 (PR #22). Dinesh feel-passed on-device; as-built flow is
+`docs/erd/onboarding-revamp-2026-08-15.md` §4C.6 / §4E. Cases below are still
+the formal matrix — not every row was walked after the scroll/Got it fix.
+
+| # | Case | Status | Notes / expected |
+|---|---|---|---|
+| 96 | Fresh install **without** overlay permission: no Try it now | ❌ | After **Stays on your phone.** the primary button is **Get started**. There is no **Try it once.** page. |
+| 97 | Fresh install **with** overlay permission: Try it now, then Skip | ❌ | Last page is **Try it once.** / "See the prompt and bubble for real. Nothing is saved." **Skip** lands on Home with no practice prompt. History stays empty. |
+| 98 | Try it now **Show me** | ❌ | **Show me** opens the real capture overlay; declaring an intent (or Just Like That) leaves **no** new row in History / insights. Then Home. Same-session Home must **not** show Settings/Manage tooltips (`DiscoverySession.skipThisLaunch`). |
+| 99 | After the first real unlock: Settings tooltip then Manage | 🟡 | Feel-passed 2026-08-16. Opening Settings retires that tip forever. Got it is this visit only (up to 3 shows). Scroll must not stack a second Manage card. |
+| 100 | Home label **"How long until Done"** | ❌ | Duration card is no longer titled "Time to mark done". |
+
+| # | Case | Status | Notes / expected |
+|---|---|---|---|
+| 96 | Fresh install **without** overlay permission: no Try it now | ❌ | After **Stays on your phone.** the primary button is **Get started**. There is no **Try it once.** page. |
+| 97 | Fresh install **with** overlay permission: Try it now, then Skip | ❌ | Last page is **Try it once.** / "See the prompt and bubble for real. Nothing is saved." **Skip** lands on Home with no practice prompt. History stays empty. |
+| 98 | Try it now **Show me** | ❌ | **Show me** opens the real capture overlay; declaring an intent (or Just Like That) leaves **no** new row in History / insights. Then Home. Same-session Home must **not** show Settings/Manage tooltips (`DiscoverySession.skipThisLaunch`). |
+| 99 | After the first real unlock: Settings tooltip then Manage | ❌ | Unlock once, open the app. Tooltip on **Open Settings** ("How often Beacon asks"); **Got it** (or tap elsewhere) then Manage options. Opening either screen retires that tooltip; first visit shows a dismissible banner. Overlay/capture never shows a tooltip. |
+| 100 | Home label **"How long until Done"** | ❌ | Duration card is no longer titled "Time to mark done". |

@@ -5,6 +5,7 @@ import 'package:shared_preferences_platform_interface/shared_preferences_async_p
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:why_did_i_unlock/about_screen.dart' show privacyPolicyUrl;
 import 'package:why_did_i_unlock/app_settings.dart';
+import 'package:why_did_i_unlock/discovery_tooltip.dart';
 import 'package:why_did_i_unlock/intent_store.dart';
 import 'package:why_did_i_unlock/settings_screen.dart';
 
@@ -313,6 +314,16 @@ void main() {
     expect(counts.unlockCount, 0);
     expect(counts.intentCount, 0);
     expect(presets, isNotEmpty);
+    await tester.runAsync(() => store.close());
+  });
+
+  testWidgets('first visit shows a banner and marks Settings opened', (tester) async {
+    final store = await openStore(tester);
+    await pumpScreen(tester, store: store);
+
+    expect(find.text(DiscoveryCopy.settingsBody), findsOneWidget);
+    expect(await settings.settingsScreenOpened(), isTrue);
+
     await tester.runAsync(() => store.close());
   });
 }

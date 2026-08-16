@@ -1450,9 +1450,12 @@ class _AppLauncherState extends State<AppLauncher> {
       return const Scaffold(backgroundColor: Colors.black);
     }
     if (!completed) {
-      return OnboardingScreen(onFinished: () {
-        if (mounted) setState(() => _onboardingCompleted = true);
-      });
+      return OnboardingScreen(
+        onShowPromptNow: triggerCapturePromptManually,
+        onFinished: () {
+          if (mounted) setState(() => _onboardingCompleted = true);
+        },
+      );
     }
     return const HomeScreen();
   }

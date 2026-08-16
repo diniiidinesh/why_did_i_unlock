@@ -1,7 +1,8 @@
 # ERD — Onboarding revamp (copy diet + animated walkthrough + day-1 feature discovery)
 
 > Plan doc. Scoped 2026-08-15. **Part A (PR 1) merged 2026-08-16** (PR #20).
-> **Part B (PR 2) in progress** on `cursor/onboarding-walkthrough`. Parts C/D not yet built. Owner: Dinesh.
+> **Part C (PR 3) merged 2026-08-16** (PR #22). Next is Part D on
+> `cursor/onboarding-day-one`. Owner: Dinesh.
 > Parts A/B/C-in-app are pure main-UI-engine work — no isolate, overlay, native,
 > or schema changes. The day-1 **notification** (§4D) is the one piece that
 > breaks that boundary; it is deliberately isolated into its own PR so the rest
@@ -56,6 +57,19 @@
   snooze fades. Timings: `walkthroughBeatDuration` /
   `walkthroughMorphDuration` / `walkthroughHighlightDuration` /
   `walkthroughSnoozeHoldDuration` (snooze holds a beat longer before fade).
+- **2026-08-16 (PR 3)** — Tooltips + Try it now + "How long until Done" on
+  `cursor/onboarding-tooltips`. Anchored overlay uses the target's
+  `RenderBox` (`lib/discovery_tooltip.dart`) rather than
+  `CompositedTransformFollower`, which painted hundreds of pixels off-screen
+  against Home's scrolling `ListView`. `OnboardingStep.tryIt` is omitted
+  unless overlay permission is granted. `NudgeTuning` + §2.2 keys live in
+  `AppSettings`. First-visit banners on Settings / Manage options. Analyze
+  and `flutter test` clean; on-device cases 96–100 still ❌.
+- **2026-08-16 (PR 3 as-built)** — Dinesh verified on-device. §4C.6 / §4E
+  record the flow in plain language (opening a screen ≠ Got it; practice
+  overlay still blocks later unlocks). Three show-cap and scroll-duplicate
+  bugs were fixed before merge. Parked: replace a leftover *practice
+  capture* on the next real unlock (not a declared bubble).
 
 ---
 
@@ -332,6 +346,51 @@ app added"* at the first moment the app actually has data to answer with. That
 is a different job from teaching controls, which is why splitting the two is an
 improvement rather than a scope cut.
 
+#### 4C.6 As-built flow (verified on-device 2026-08-16)
+
+Simple rules — this is what actually shipped, and what a tester will feel:
+
+1. **No tips during onboarding**, and none on the Home you land on *right
+   after* finishing it. Force-stop (or otherwise start a new process), then
+   **unlock the phone at least once**, then open Beacon. Tips need a real
+   unlock in the log. Clear-data + `flutter run` with no unlock → no tips.
+   That is gated, not broken.
+2. **One tip at a time**, Settings first, then Manage options. Scrolling does
+   **not** count as dismiss (that was a bug: a drag looked like a tap and
+   stacked a second Manage card).
+3. **Opening the screen retires that tip forever.** Changing cooldown in
+   Settings means "they found Settings" — it will not point there again.
+4. **Got it only ends this visit.** Kill the app / `flutter run` / a new
+   process and Manage (or Settings, if never opened) can appear again, up to
+   **3 shows** each (`NudgeTuning.maxTooltipShows`). After that, tips stop.
+5. **Around the 5th Home open**, if a screen was still never opened, Home
+   shows an **inline card** instead ("A few things you can change"). Unlocking
+   in the background does not increment that counter by itself — opening Home
+   does.
+6. **First visit to Settings / Manage** also gets a short banner on that
+   screen (where vs what).
+7. Tips are **Home only**. Never on the capture overlay or the floating
+   bubble.
+
+```mermaid
+flowchart TD
+  onboard[Finish onboarding] --> sameLaunch[Same launch: no tips]
+  sameLaunch --> nextOpen[New process + at least one real unlock]
+  nextOpen --> settingsTip[Settings tip]
+  settingsTip -->|Open Settings| settingsDone[Settings retired forever]
+  settingsTip -->|Got it or light tap on empty space| manageTip[Manage tip]
+  settingsTip -->|Scroll| settingsTip
+  settingsDone --> manageTip
+  manageTip -->|Open Manage options| manageDone[Manage retired forever]
+  manageTip -->|Got it| manageVisitDone[Hidden this visit]
+  manageVisitDone -->|Open Home again, under 3 shows| manageTip
+  manageVisitDone -->|3 shows used or 5th Home open| fallback[Inline Home card]
+  manageDone --> fallback
+```
+
+Code: `lib/discovery_tooltip.dart`, `lib/nudge_tuning.dart`, Home overlay
+insert in `lib/home_screen.dart`. Tuning constants only in `NudgeTuning`.
+
 ### Part D — The day-1 notification *(needs a decision — real cost)*
 
 **Scope narrowed (Dinesh, 2026-08-15):** now that tooltips own settings discovery
@@ -423,8 +482,19 @@ trace in history or insights.
   skipped entirely (not shown greyed out).
 - Copy must say nothing is saved, or a careful user will worry it polluted their
   data.
-- This is the strongest available answer to Vishishta's misconception: she gets
-  to see that picking a pill records the intent, before she's relying on it.
+
+**As-built (2026-08-16):** **Show me** uses the same overlay as Status's
+"Show me the prompt now" (`triggerCapturePromptManually`). Answers still skip
+`intent_log`. The dummy capture **stays up** if they leave Home — same as a
+real prompt — and later unlocks then skip with `overlay_active` until they
+dismiss it. Closing Beacon from Recents does **not** take it down. That is
+the one-overlay rule in `lib/main.dart`, not a Try-it-now-only bug.
+
+**Parked (agreed, not in PR 3):** on a **real unlock**, close a leftover
+*practice capture* (still the sheet, `manual: true`) and then run the normal
+prompt. Do **not** auto-close a bubble they already declared on the dummy —
+that is the outstanding-intent problem. Do **not** close overlays just
+because they left Home, or real bubbles die too.
 
 ---
 

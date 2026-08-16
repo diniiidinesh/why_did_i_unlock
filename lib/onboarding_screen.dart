@@ -5,6 +5,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'app_settings.dart';
 import 'brand.dart';
 import 'device_manufacturer.dart';
+import 'nudge_tuning.dart';
 import 'oem_autostart_copy.dart';
 import 'walkthrough.dart';
 
@@ -20,14 +21,16 @@ enum OnboardingStep {
   permission,
   oem,
   yourData,
+  tryIt,
 }
 
-/// Five-step first-run flow: value prop → walkthrough → overlay permission
-/// (explained before the system dialog, not a cold ask) → OEM reliability →
-/// data disclosure. See the sprint 4 plan's screen map — this replaces
-/// today's cold permission request in `HomeScreen.initState` (`CLAUDE.md` §9
-/// flags exactly this as the top onboarding drop-off risk) with an explained
-/// one.
+  /// First-run flow: value prop → walkthrough → overlay permission
+  /// (explained before the system dialog, not a cold ask) → OEM reliability →
+  /// data disclosure → optional "Try it now" (only when overlay permission is
+  /// already granted). See the sprint 4 plan's screen map — this replaces
+  /// today's cold permission request in `HomeScreen.initState` (`CLAUDE.md` §9
+  /// flags exactly this as the top onboarding drop-off risk) with an explained
+  /// one.
 ///
 /// Plugin/store-touching calls are injectable constructor params defaulting
 /// to the real calls, same shape as `HistoryScreen` / `StatusScreen`, so
@@ -48,6 +51,10 @@ class OnboardingScreen extends StatefulWidget {
   /// [readDeviceManufacturer]; inject in tests.
   final Future<String?> Function() readManufacturer;
 
+  /// Same shape as Status's "Show me the prompt now" — injectable so tests
+  /// don't import `main.dart` (that would drag the three-engine entrypoints).
+  final void Function({required int screenWidth, required int screenHeight})? onShowPromptNow;
+
   /// Called after [completeOnboarding] resolves on the final step.
   final VoidCallback? onFinished;
 
@@ -59,6 +66,7 @@ class OnboardingScreen extends StatefulWidget {
     Future<void> Function()? requestBatteryExemption,
     Future<String?> Function()? readManufacturer,
     Future<void> Function()? completeOnboarding,
+    this.onShowPromptNow,
     this.onFinished,
   })  : checkPermission = checkPermission ?? FlutterOverlayWindow.isPermissionGranted,
         requestPermission = requestPermission ?? FlutterOverlayWindow.requestPermission,
@@ -68,6 +76,7 @@ class OnboardingScreen extends StatefulWidget {
         completeOnboarding = completeOnboarding ?? _defaultCompleteOnboarding;
 
   static Future<void> _defaultCompleteOnboarding() async {
+    DiscoverySession.skipThisLaunch = true;
     const settings = AppSettings();
     await settings.setOnboardingCompleted(true);
     await settings.setWalkthroughSeenVersion(AppSettings.currentWalkthroughVersion);
@@ -107,6 +116,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadManufacturer();
+    // Needed so [OnboardingStep.tryIt] is in the pager from the first frame
+    // when overlay permission is already granted (not only after the
+    // permission step is visited).
+    _refreshPermission();
   }
 
   @override
@@ -155,6 +168,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
       case OnboardingStep.valueProp:
       case OnboardingStep.walkthrough:
       case OnboardingStep.yourData:
+      case OnboardingStep.tryIt:
         break;
     }
   }
@@ -181,7 +195,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
 
   void _next() {
     if (_hideWizardChrome) return;
-    if (_step == OnboardingStep.values.last) {
+    final pages = _visibleSteps;
+    if (_step == pages.last) {
       _finish();
       return;
     }
@@ -198,7 +213,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
   }
 
   void _onPageChanged(int index) {
-    final step = OnboardingStep.values[index];
+    final pages = _visibleSteps;
+    final step = pages[index.clamp(0, pages.length - 1)];
     setState(() {
       _step = step;
       // Assume playing as soon as the walkthrough page is selected; the
@@ -219,6 +235,27 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
 
   bool get _hideWizardChrome =>
       _step == OnboardingStep.walkthrough && _walkthroughPlaybackActive;
+
+  List<OnboardingStep> get _visibleSteps {
+    if (_permissionGranted == true) return OnboardingStep.values;
+    return [
+      for (final step in OnboardingStep.values)
+        if (step != OnboardingStep.tryIt) step,
+    ];
+  }
+
+  void _tryIt() {
+    final onShow = widget.onShowPromptNow;
+    if (onShow != null) {
+      final mq = MediaQuery.of(context);
+      final truePixels = mq.size * mq.devicePixelRatio;
+      onShow(
+        screenWidth: truePixels.width.round(),
+        screenHeight: truePixels.height.round(),
+      );
+    }
+    _finish();
+  }
 
   Widget _pageFor(OnboardingStep step) {
     switch (step) {
@@ -243,13 +280,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
         );
       case OnboardingStep.yourData:
         return const _YourDataStep();
+      case OnboardingStep.tryIt:
+        return _TryItStep(onShowMe: _tryIt, onSkip: _finish);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final isLast = _step == OnboardingStep.values.last;
+    final pages = _visibleSteps;
+    final isLast = _step == pages.last;
     final hideChrome = _hideWizardChrome;
+    final pageIndex = pages.indexOf(_step).clamp(0, pages.length - 1);
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
@@ -262,7 +303,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
                 onPageChanged: _onPageChanged,
                 physics: hideChrome ? const NeverScrollableScrollPhysics() : null,
                 children: [
-                  for (final step in OnboardingStep.values) _pageFor(step),
+                  for (final step in pages) _pageFor(step),
                 ],
               ),
             ),
@@ -272,21 +313,24 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
                 padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
                 child: Column(
                   children: [
-                    _StepDots(step: _step.index, count: OnboardingStep.values.length),
+                    _StepDots(step: pageIndex, count: pages.length),
                     const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        if (_step.index > 0)
-                          TextButton(onPressed: _back, child: const Text('Back'))
-                        else
-                          const SizedBox.shrink(),
-                        const Spacer(),
-                        ElevatedButton(
-                          onPressed: _next,
-                          child: Text(isLast ? 'Get started' : 'Continue'),
-                        ),
-                      ],
-                    ),
+                    if (_step == OnboardingStep.tryIt)
+                      const SizedBox.shrink()
+                    else
+                      Row(
+                        children: [
+                          if (pageIndex > 0)
+                            TextButton(onPressed: _back, child: const Text('Back'))
+                          else
+                            const SizedBox.shrink(),
+                          const Spacer(),
+                          ElevatedButton(
+                            onPressed: _next,
+                            child: Text(isLast ? 'Get started' : 'Continue'),
+                          ),
+                        ],
+                      ),
                   ],
                 ),
               ),
@@ -530,6 +574,29 @@ class _OemReliabilityStep extends StatelessWidget {
             title: 'Why does this happen?',
             paragraphs: [oemGuidanceIntro],
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TryItStep extends StatelessWidget {
+  final VoidCallback onShowMe;
+  final VoidCallback onSkip;
+
+  const _TryItStep({required this.onShowMe, required this.onSkip});
+
+  @override
+  Widget build(BuildContext context) {
+    return _StepBody(
+      icon: Icons.touch_app_outlined,
+      headline: 'Try it once.',
+      body: 'See the prompt and bubble for real. Nothing is saved.',
+      extra: Row(
+        children: [
+          TextButton(onPressed: onSkip, child: const Text('Skip')),
+          const Spacer(),
+          ElevatedButton(onPressed: onShowMe, child: const Text('Show me')),
         ],
       ),
     );
