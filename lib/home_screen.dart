@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -76,8 +77,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final GlobalKey _manageTargetKey = GlobalKey();
   final DiscoveryPolicy _discovery = const DiscoveryPolicy();
   OverlayEntry? _tooltipEntry;
+  final List<OverlayEntry> _tooltipEntries = [];
   DiscoveryTarget? _tooltipTarget;
   final Set<DiscoveryTarget> _tooltipDismissedThisSession = {};
+  /// Guards overlapping [_syncDiscovery] calls (scroll + load + Got it)
+  /// which otherwise insert a second [OverlayEntry] we can no longer hide.
+  int _discoverySyncToken = 0;
+  bool _discoveryScheduled = false;
+  int _pushedRoutes = 0;
+  Offset? _homePointerDown;
   bool _launchRecorded = false;
   int _appLaunchCount = 0;
   bool _settingsOpened = false;
@@ -157,8 +165,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _openRoute(WidgetBuilder builder) async {
+    _pushedRoutes++;
     _hideTooltip();
-    await Navigator.of(context).push(MaterialPageRoute(builder: builder));
+    try {
+      await Navigator.of(context).push(MaterialPageRoute(builder: builder));
+    } finally {
+      _pushedRoutes--;
+    }
     // Settings / Status / History / Manage can change prefs, permission, or
     // (via delete-all) the underlying logs — refresh when we become visible
     // again even if the process never left `resumed`.
@@ -310,13 +323,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _scheduleDiscovery() {
+    if (_discoveryScheduled) return;
+    _discoveryScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _discoveryScheduled = false;
       if (mounted) _syncDiscovery();
     });
   }
 
   Future<void> _syncDiscovery() async {
-    if (!mounted) return;
+    if (!mounted || _pushedRoutes > 0) return;
+    final token = ++_discoverySyncToken;
     final wantFallback = !_fallbackDismissedThisSession &&
         _discovery.showFallbackBanner(
           launchCount: _appLaunchCount,
@@ -336,17 +353,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       manageShows: _manageShows,
       dismissedThisSession: _tooltipDismissedThisSession,
     );
-    if (next == _tooltipTarget && _tooltipEntry != null) {
-      final visibleKey =
-          next == DiscoveryTarget.settings ? _settingsTargetKey : _manageTargetKey;
-      if (discoveryTargetIsVisible(visibleKey)) return;
+    if (next == null) {
       _hideTooltip();
       return;
     }
-    _hideTooltip();
-    if (next == null) return;
 
     final key = next == DiscoveryTarget.settings ? _settingsTargetKey : _manageTargetKey;
+    if (_tooltipTarget == next && _tooltipEntry != null) {
+      _tooltipEntry!.markNeedsBuild();
+      return;
+    }
     if (!discoveryTargetIsVisible(key)) return;
 
     final overlay = Overlay.maybeOf(context);
@@ -359,14 +375,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _manageShows += 1;
       await widget.settings.setManageTooltipShows(_manageShows);
     }
-    if (!mounted) return;
+    if (!mounted || token != _discoverySyncToken || _pushedRoutes > 0) return;
+    if (_tooltipDismissedThisSession.contains(next)) return;
+    if (_tooltipTarget == next && _tooltipEntry != null) {
+      _tooltipEntry!.markNeedsBuild();
+      return;
+    }
 
+    _hideTooltip();
     _tooltipTarget = next;
     _tooltipEntry = buildDiscoveryTooltipEntry(
       targetKey: key,
       target: next,
       onGotIt: _onTooltipGotIt,
     );
+    _tooltipEntries.add(_tooltipEntry!);
     overlay.insert(_tooltipEntry!);
   }
 
@@ -374,9 +397,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _advanceQueueAfterDismiss();
   }
 
-  void _onHomePointerDown(PointerDownEvent _) {
-    if (_tooltipTarget == null) return;
+  void _onHomePointerDown(PointerDownEvent event) {
+    _homePointerDown = event.position;
+  }
+
+  void _onHomePointerUp(PointerUpEvent event) {
+    final start = _homePointerDown;
+    _homePointerDown = null;
+    if (_tooltipTarget == null || start == null) return;
+    // A scroll starts with a pointer-down; treating that as "tap anywhere"
+    // dismissed Settings the moment the user dragged, then raced a second
+    // Manage overlay that Got it could not remove.
+    if ((event.position - start).distance > kTouchSlop) return;
     _advanceQueueAfterDismiss();
+  }
+
+  void _onHomePointerCancel(PointerCancelEvent _) {
+    _homePointerDown = null;
   }
 
   void _advanceQueueAfterDismiss() {
@@ -389,9 +426,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _hideTooltip() {
-    _tooltipEntry?.remove();
-    _tooltipEntry = null;
+    _discoverySyncToken++;
     _tooltipTarget = null;
+    _tooltipEntry = null;
+    for (final entry in _tooltipEntries) {
+      try {
+        entry.remove();
+      } catch (_) {}
+    }
+    _tooltipEntries.clear();
   }
 
   @override
@@ -470,10 +513,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           child: Listener(
             behavior: HitTestBehavior.translucent,
             onPointerDown: _onHomePointerDown,
+            onPointerUp: _onHomePointerUp,
+            onPointerCancel: _onHomePointerCancel,
             child: NotificationListener<ScrollNotification>(
-              onNotification: (_) {
+              onNotification: (notification) {
                 _tooltipEntry?.markNeedsBuild();
-                _scheduleDiscovery();
+                // Reposition only while scrolling. Re-evaluate what to show
+                // once at rest — every-frame _syncDiscovery inserted duplicates.
+                if (notification is ScrollEndNotification) {
+                  _scheduleDiscovery();
+                }
                 return false;
               },
               child: ListView(

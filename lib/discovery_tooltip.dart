@@ -100,14 +100,16 @@ OverlayEntry buildDiscoveryTooltipEntry({
     builder: (context) {
       final box = targetKey.currentContext?.findRenderObject();
       if (box is! RenderBox || !box.hasSize) return const SizedBox.shrink();
+      // Off-screen targets must not paint. Clamping onto the viewport was
+      // what stacked a leftover "Your reasons" card in the middle of Home.
+      if (!discoveryTargetIsVisible(targetKey)) return const SizedBox.shrink();
       final origin = box.localToGlobal(Offset.zero);
       final view = MediaQuery.sizeOf(context);
-      // Sit just above the control so the tap target itself stays free
-      // (`§4C.3`). Flip below if that would paint off the top of the screen.
       const tooltipWidth = 260.0;
       const estimatedHeight = 132.0;
       var top = origin.dy - estimatedHeight - 8;
       if (top < 8) top = origin.dy + box.size.height + 8;
+      if (top + 48 < 0 || top > view.height) return const SizedBox.shrink();
       var left = origin.dx;
       if (left + tooltipWidth > view.width - 8) {
         left = view.width - tooltipWidth - 8;
@@ -115,7 +117,7 @@ OverlayEntry buildDiscoveryTooltipEntry({
       if (left < 8) left = 8;
       return Positioned(
         left: left,
-        top: top.clamp(8.0, view.height - estimatedHeight),
+        top: top,
         child: Material(
           key: tooltipKey,
           color: Colors.transparent,

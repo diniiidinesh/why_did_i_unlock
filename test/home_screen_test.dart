@@ -249,6 +249,49 @@ void main() {
     await tester.runAsync(() => store.close());
   });
 
+  testWidgets('scrolling Home does not dismiss Settings or duplicate Manage', (tester) async {
+    DiscoverySession.skipThisLaunch = false;
+    final view = tester.view;
+    view.physicalSize = const Size(800, 2400);
+    view.devicePixelRatio = 1.0;
+    addTearDown(view.resetPhysicalSize);
+    addTearDown(view.resetDevicePixelRatio);
+
+    final store = await openStore(tester);
+    await tester.runAsync(() async {
+      await store.insertUnlock(unlockedAt: DateTime.now(), promptShown: true);
+    });
+    await const AppSettings().setWalkthroughSeenVersion(AppSettings.currentWalkthroughVersion);
+    await pumpHome(tester, store);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.byKey(const ValueKey('discovery-tooltip-settings')), findsOneWidget);
+
+    await tester.drag(find.byType(ListView), const Offset(0, -280));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.byKey(const ValueKey('discovery-tooltip-settings')), findsOneWidget);
+    expect(find.byKey(const ValueKey('discovery-tooltip-manage')), findsNothing);
+
+    await tester.tap(find.text(DiscoveryCopy.gotIt));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(find.byKey(const ValueKey('discovery-tooltip-settings')), findsNothing);
+    expect(find.byKey(const ValueKey('discovery-tooltip-manage')), findsOneWidget);
+
+    await tester.tap(find.text(DiscoveryCopy.gotIt));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 120));
+
+    expect(find.byKey(const ValueKey('discovery-tooltip-manage')), findsNothing);
+    expect(find.byKey(const ValueKey('discovery-tooltip-settings')), findsNothing);
+
+    await tester.runAsync(() => store.close());
+  });
+
   testWidgets('opening Settings retires that tooltip', (tester) async {
     DiscoverySession.skipThisLaunch = false;
     final view = tester.view;
