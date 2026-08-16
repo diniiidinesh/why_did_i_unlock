@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:why_did_i_unlock/brand.dart';
 import 'package:why_did_i_unlock/oem_autostart_copy.dart';
 import 'package:why_did_i_unlock/onboarding_screen.dart';
+import 'package:why_did_i_unlock/walkthrough.dart';
 
 void main() {
   Future<void> pumpOnboarding(
@@ -30,20 +31,25 @@ void main() {
 
   Future<void> advanceTo(WidgetTester tester, OnboardingStep step) async {
     for (var i = 0; i < step.index; i++) {
+      if (find.text('Continue').evaluate().isEmpty) {
+        await tester.tap(find.text('Skip'));
+        await tester.pump();
+        await tester.pump(); // post-frame onPlaybackActive unhides Continue
+      }
       await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
     }
   }
 
   int pageCount(WidgetTester tester) {
-    final pageView = tester.widget<PageView>(find.byType(PageView));
+    final pageView = tester.widget<PageView>(find.byKey(const ValueKey('onboarding-pages')));
     return (pageView.childrenDelegate as SliverChildListDelegate).children.length;
   }
 
   test('OnboardingStep order is the current 5-step flow', () {
     expect(OnboardingStep.values, [
       OnboardingStep.valueProp,
-      OnboardingStep.howItWorks,
+      OnboardingStep.walkthrough,
       OnboardingStep.permission,
       OnboardingStep.oem,
       OnboardingStep.yourData,
@@ -80,7 +86,15 @@ void main() {
     expect(find.text('Notice why you picked up your phone'), findsOneWidget);
 
     await tapContinue();
-    expect(find.text('How it works'), findsOneWidget);
+    expect(find.text('You unlock.'), findsOneWidget);
+    expect(find.text('Skip'), findsOneWidget);
+    expect(find.text('Continue'), findsNothing);
+    expect(find.byKey(const ValueKey('onboarding-wizard-chrome')), findsNothing);
+
+    await tester.tap(find.text('Skip'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Continue'), findsOneWidget);
 
     await tapContinue();
     expect(find.text('One permission.'), findsOneWidget);
@@ -99,6 +113,27 @@ void main() {
     await tester.tap(find.text('Back'));
     await tester.pumpAndSettle();
     expect(find.text('Keep $appDisplayName awake.'), findsOneWidget);
+  });
+
+  testWidgets('Skip on the walkthrough step jumps to the last beat, not the next onboarding page', (tester) async {
+    await pumpOnboarding(tester);
+    await tester.pump();
+    await advanceTo(tester, OnboardingStep.walkthrough);
+
+    expect(find.text('You unlock.'), findsOneWidget);
+    expect(find.text('Continue'), findsNothing);
+    final playing = tester.widget<PageView>(find.byKey(const ValueKey('onboarding-pages')));
+    expect(playing.physics, isA<NeverScrollableScrollPhysics>());
+
+    await tester.tap(find.text('Skip'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text(WalkthroughBeat.values.last.caption), findsOneWidget);
+    expect(find.text('One permission.'), findsNothing);
+    expect(find.text('Continue'), findsOneWidget);
+    final holding = tester.widget<PageView>(find.byKey(const ValueKey('onboarding-pages')));
+    expect(holding.physics, isNot(isA<NeverScrollableScrollPhysics>()));
   });
 
   testWidgets('permission step hides the find-hint until "Can\'t find it?" is expanded', (tester) async {

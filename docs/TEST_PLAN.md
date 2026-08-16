@@ -28,7 +28,8 @@ for the exact assertions.
 | `test/outcome_donut_test.dart` | **Sprint 4 (T15).** `OutcomeDonut` (pure `CustomPainter`, no store dependency): legend percentages per slice, optional `centerLabel`, empty state for both an empty slice list and a slice list that sums to zero (no divide-by-zero). |
 | `test/about_screen_test.dart` | **Sprint 4 (T5).** `AboutScreen`: renders name/version/every action row, injected `version` override, `mailto:` URI built correctly (address + subject/body), a launch failure or thrown exception surfaces as a `SnackBar` (not silent), Support section has no payment link. All `url_launcher` calls are injected — no platform channel touched. |
 | `test/status_screen_test.dart` | **Sprint 4 (T6) + OEM UX.** Permission / battery cards; OEM vendors + not-listed; manufacturer highlight + Beacon find-hint; “Show me the prompt now” pixel size. |
-| `test/onboarding_screen_test.dart` | **Sprint 4 (T4) + onboarding revamp PR 1.** `OnboardingStep` enum ↔ `PageView` child-count invariant; permission/battery refresh on the *named* step (resume + page-change); copy diet headlines; collapsed "Can't find it?" / "Why does this happen?" disclosures; grant/resume re-checks status (no auto-advance); matched OEM steps vs generic fallback; Continue never blocked on permission. |
+| `test/onboarding_screen_test.dart` | **Sprint 4 (T4) + onboarding revamp PR 1/2.** `OnboardingStep` enum ↔ `PageView` child-count invariant; walkthrough replaces How-it-works; permission/battery refresh on the *named* step; copy diet; collapsed disclosures; Continue never blocked on permission. |
+| `test/walkthrough_test.dart` | **Onboarding revamp PR 2.** 7-beat auto-advance; Skip jumps to last beat; tap pauses; reduced-motion static captions; standalone Skip closes. |
 | `test/oem_autostart_copy_test.dart` | **OEM UX.** `matchOemGuidance` / list prefer / find-hint naming. |
 | `test/manage_presets_screen_test.dart` | **Sprint 4 (T16).** `ManagePresetsScreen` against a **real** `IntentStore` (`sqflite_common_ffi`, same real-isolate-I/O pattern as `history_screen_test.dart`), not a fake double — reorder via `ReorderableDragStartListener` drag, rename, soft-delete (leaves the row soft-deleted, never touches its `intent_log` history), restore-defaults (same — old row stays soft-deleted, not hard-deleted), and the two real `docs/DATA_MODEL.md` §7 edge cases: enabling past the 8-enabled cap and creating past the 30-stored cap both surface the store's own `PresetLimitExceeded` message as a `SnackBar` rather than crashing. Soft-deleted presets are confirmed hidden from this list. |
 | `test/bubble_widget_test.dart` | **Bubble UX hybrid.** Icon map + letter avatar; expanded width clamp; collapsed/expanded chrome; Done/Snooze callbacks. |
@@ -330,3 +331,16 @@ prose untouched (PR 2 replaces it). Verified on-device 2026-08-16, A063.
 | 88 | Permission step: collapsed **Can't find it?** | ✅ | Confirmed on-device 2026-08-16. Body is the 10-word line. Hint and skip-later line hidden until expanded. Grant still works. |
 | 89 | OEM step: collapsed **Why does this happen?** | ✅ | Confirmed on-device 2026-08-16. Body is the 9-word line. `oemGuidanceIntro` hidden until expanded. Matched OEM steps stay visible. |
 | 90 | **Permission grant → background → return** | ✅ | Confirmed on-device 2026-08-16. Grant overlay permission, leave, return → status shows Granted without a restart. Same for Disable battery optimization on "Keep Beacon awake." |
+
+### Onboarding revamp PR 2 — animated walkthrough (2026-08-16)
+
+Branch `cursor/onboarding-walkthrough`. Replaces How-it-works prose with the 7-beat
+walkthrough. Do not mark these passed here.
+
+| # | Case | Status | Notes / expected |
+|---|---|---|---|
+| 91 | Fresh install: walkthrough is onboarding step 2 | ❌ | After value-prop, Continue/dots/Back hide and outer swipe is locked while the 7-beat sequence plays. Skip jumps to the last beat; **then** Continue appears and goes to **One permission.** Inner swipe still scrubs beats. Beat duration named `walkthroughBeatDuration` (feel-tune). |
+| 92 | Tap pauses / resume; swipe scrubs beats | ❌ | Tap freezes auto-advance; another tap resumes. Horizontal swipe moves between beats. Reduced-motion (system animation off) shows a static list of the 7 captions. |
+| 93 | Existing install: Home **"See how Beacon works"** card | ❌ | Upgrade over a completed-onboarding install. Card appears once; Watch opens the walkthrough; Dismiss (or finishing Watch) hides it permanently. |
+| 94 | About **"How Beacon works"** | ❌ | Row always present; opens the same walkthrough. Skip (top-right) jumps to the last beat; **Done** then pops. App-bar X also pops. Does not re-show the Home card once it has been dismissed. |
+| 95 | **Permission grant → return still works after the step insert** | ❌ | Highest-risk leftover from PR 1. Grant on **One permission.**, leave, return → Granted. Confirm it did not regress when How-it-works became the walkthrough. |

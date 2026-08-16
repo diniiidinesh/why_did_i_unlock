@@ -14,6 +14,7 @@ import 'intent_store.dart';
 import 'manage_presets_screen.dart';
 import 'settings_screen.dart';
 import 'status_screen.dart';
+import 'walkthrough.dart';
 
 /// Home: "is it working?" first, then today's story (counts / donut / timing),
 /// then links into Settings / History / Manage / Status / About.
@@ -68,6 +69,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _loadFailed = false;
   bool? _batteryExempt;
   bool _oemNudgeDismissed = false;
+  int _walkthroughSeenVersion = 0;
 
   @override
   void initState() {
@@ -98,6 +100,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         widget.settings.loadSnapshot(),
         widget.checkBatteryExemption(),
         widget.settings.oemAutostartNudgeDismissed(),
+        widget.settings.walkthroughSeenVersion(),
       ).wait;
       if (!mounted) return;
       setState(() {
@@ -105,6 +108,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _settingsSnapshot = results.$2;
         _batteryExempt = results.$3;
         _oemNudgeDismissed = results.$4;
+        _walkthroughSeenVersion = results.$5;
       });
       await _loadInsights();
     } catch (e, st) {
@@ -130,6 +134,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // (via delete-all) the underlying logs — refresh when we become visible
     // again even if the process never left `resumed`.
     if (mounted) await _onPullRefresh();
+  }
+
+  Future<void> _markWalkthroughSeen() async {
+    await widget.settings.setWalkthroughSeenVersion(AppSettings.currentWalkthroughVersion);
+    if (mounted) {
+      setState(() => _walkthroughSeenVersion = AppSettings.currentWalkthroughVersion);
+    }
   }
 
   Future<void> _load() async {
@@ -166,6 +177,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         'AppSettings.oemAutostartNudgeDismissed()',
         widget.settings.oemAutostartNudgeDismissed(),
       );
+      final walkthroughSeen = await _awaitWithTimeout(
+        'AppSettings.walkthroughSeenVersion()',
+        widget.settings.walkthroughSeenVersion(),
+      );
 
       if (!mounted) {
         if (_ownsStore) await store.close();
@@ -178,6 +193,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _settingsSnapshot = snapshot;
         _batteryExempt = batteryExempt;
         _oemNudgeDismissed = nudgeDismissed ?? false;
+        _walkthroughSeenVersion = walkthroughSeen ?? 0;
         _loadFailed = false;
       });
       await _loadInsights();
@@ -337,6 +353,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   permissionGranted: _permissionGranted,
                   onOpenStatus: () => _openRoute((_) => const StatusScreen()),
                 ),
+                if (_walkthroughSeenVersion < AppSettings.currentWalkthroughVersion) ...[
+                  const SizedBox(height: 12),
+                  _WalkthroughReentryCard(
+                    onWatch: () async {
+                      await _openRoute((_) => const WalkthroughScreen());
+                      await _markWalkthroughSeen();
+                    },
+                    onDismiss: _markWalkthroughSeen,
+                  ),
+                ],
                 if (_batteryExempt == false && !_oemNudgeDismissed) ...[
                   const SizedBox(height: 12),
                   _OemAutostartNudgeCard(
@@ -535,6 +561,39 @@ class _StatusCard extends StatelessWidget {
               onPressed: onOpenStatus,
               child: const Text('Status & troubleshooting'),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WalkthroughReentryCard extends StatelessWidget {
+  final VoidCallback onWatch;
+  final VoidCallback onDismiss;
+
+  const _WalkthroughReentryCard({required this.onWatch, required this.onDismiss});
+
+  @override
+  Widget build(BuildContext context) {
+    return _HomeCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'See how Beacon works',
+            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'A short walkthrough of the prompt and the bubble.',
+            style: TextStyle(color: Colors.white70, height: 1.35),
+          ),
+          Row(
+            children: [
+              TextButton(onPressed: onWatch, child: const Text('Watch')),
+              TextButton(onPressed: onDismiss, child: const Text('Dismiss')),
+            ],
           ),
         ],
       ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:why_did_i_unlock/about_screen.dart';
+import 'package:why_did_i_unlock/walkthrough.dart';
 
 void main() {
   testWidgets('renders app name, version, and every action row', (tester) async {
@@ -12,11 +13,13 @@ void main() {
     expect(find.text(appDisplayName), findsOneWidget);
     expect(find.byType(Image), findsOneWidget);
     expect(find.text('Version $appVersion'), findsOneWidget);
+    expect(find.text('How Beacon works'), findsOneWidget);
     expect(find.text('Send feedback'), findsOneWidget);
     expect(find.text('Report a problem'), findsOneWidget);
     expect(find.text('Privacy policy'), findsOneWidget);
     expect(find.text('Rate on Play'), findsOneWidget);
     expect(find.text('Share'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Support'), 300);
     expect(find.text('Support'), findsOneWidget);
   });
 
@@ -133,5 +136,24 @@ void main() {
     expect(find.textContaining('support development'), findsOneWidget);
     expect(find.byType(TextButton), findsNothing);
     expect(find.byIcon(Icons.attach_money), findsNothing);
+  });
+
+  testWidgets('tapping "How Beacon works" opens the walkthrough', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: AboutScreen(launch: (_) async => true),
+    ));
+    await tester.pump();
+
+    await tester.tap(find.text('How Beacon works'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(WalkthroughView), findsOneWidget);
+    expect(find.text('Skip'), findsOneWidget);
+    expect(find.text('Done'), findsNothing);
+    expect(find.byTooltip('Close'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Close'));
+    await tester.pumpAndSettle();
+    expect(find.byType(WalkthroughView), findsNothing);
   });
 }

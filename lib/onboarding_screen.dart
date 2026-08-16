@@ -6,6 +6,7 @@ import 'app_settings.dart';
 import 'brand.dart';
 import 'device_manufacturer.dart';
 import 'oem_autostart_copy.dart';
+import 'walkthrough.dart';
 
 /// First-run pages, in order. [values.length] is the page count.
 ///
@@ -15,13 +16,13 @@ import 'oem_autostart_copy.dart';
 /// point. See `docs/erd/onboarding-revamp-2026-08-15.md` §5.1.
 enum OnboardingStep {
   valueProp,
-  howItWorks,
+  walkthrough,
   permission,
   oem,
   yourData,
 }
 
-/// Five-step first-run flow: value prop → how it works → overlay permission
+/// Five-step first-run flow: value prop → walkthrough → overlay permission
 /// (explained before the system dialog, not a cold ask) → OEM reliability →
 /// data disclosure. See the sprint 4 plan's screen map — this replaces
 /// today's cold permission request in `HomeScreen.initState` (`CLAUDE.md` §9
@@ -66,7 +67,11 @@ class OnboardingScreen extends StatefulWidget {
         readManufacturer = readManufacturer ?? readDeviceManufacturer,
         completeOnboarding = completeOnboarding ?? _defaultCompleteOnboarding;
 
-  static Future<void> _defaultCompleteOnboarding() => const AppSettings().setOnboardingCompleted(true);
+  static Future<void> _defaultCompleteOnboarding() async {
+    const settings = AppSettings();
+    await settings.setOnboardingCompleted(true);
+    await settings.setWalkthroughSeenVersion(AppSettings.currentWalkthroughVersion);
+  }
 
   // Top-level-function tear-offs, not inline closures, so this constructor
   // can stay `const` — see status_screen.dart's identical pattern/doc.
@@ -92,6 +97,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
 
   OemGuidance? _matchedOem;
   bool _manufacturerLoaded = false;
+
+  /// Option A: while the walkthrough is mid-sequence, lock the outer pager
+  /// and hide Continue / Back / dots so swipe + dots don't fight the 7 beats.
+  bool _walkthroughPlaybackActive = false;
 
   @override
   void initState() {
@@ -144,7 +153,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
       case OnboardingStep.oem:
         _refreshBatteryExemption();
       case OnboardingStep.valueProp:
-      case OnboardingStep.howItWorks:
+      case OnboardingStep.walkthrough:
       case OnboardingStep.yourData:
         break;
     }
@@ -171,6 +180,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
   }
 
   void _next() {
+    if (_hideWizardChrome) return;
     if (_step == OnboardingStep.values.last) {
       _finish();
       return;
@@ -189,18 +199,36 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
 
   void _onPageChanged(int index) {
     final step = OnboardingStep.values[index];
-    setState(() => _step = step);
+    setState(() {
+      _step = step;
+      // Assume playing as soon as the walkthrough page is selected; the
+      // child confirms via [WalkthroughView.onPlaybackActive]. Any other
+      // step must show the wizard chrome even if a stale true lingered.
+      _walkthroughPlaybackActive = step == OnboardingStep.walkthrough;
+    });
     // Re-checking whenever these steps come into view keeps status honest
     // when navigating back — without auto-advancing again.
     _refreshStatusFor(step);
   }
 
+  void _onWalkthroughPlaybackActive(bool playing) {
+    if (_step != OnboardingStep.walkthrough) return;
+    if (_walkthroughPlaybackActive == playing) return;
+    setState(() => _walkthroughPlaybackActive = playing);
+  }
+
+  bool get _hideWizardChrome =>
+      _step == OnboardingStep.walkthrough && _walkthroughPlaybackActive;
+
   Widget _pageFor(OnboardingStep step) {
     switch (step) {
       case OnboardingStep.valueProp:
         return const _ValuePropStep();
-      case OnboardingStep.howItWorks:
-        return const _HowItWorksStep();
+      case OnboardingStep.walkthrough:
+        return WalkthroughView(
+          active: _step == OnboardingStep.walkthrough,
+          onPlaybackActive: _onWalkthroughPlaybackActive,
+        );
       case OnboardingStep.permission:
         return _PermissionStep(
           granted: _permissionGranted,
@@ -221,6 +249,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
   @override
   Widget build(BuildContext context) {
     final isLast = _step == OnboardingStep.values.last;
+    final hideChrome = _hideWizardChrome;
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
@@ -228,35 +257,39 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
           children: [
             Expanded(
               child: PageView(
+                key: const ValueKey('onboarding-pages'),
                 controller: _controller,
                 onPageChanged: _onPageChanged,
+                physics: hideChrome ? const NeverScrollableScrollPhysics() : null,
                 children: [
                   for (final step in OnboardingStep.values) _pageFor(step),
                 ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-              child: Column(
-                children: [
-                  _StepDots(step: _step.index, count: OnboardingStep.values.length),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      if (_step.index > 0)
-                        TextButton(onPressed: _back, child: const Text('Back'))
-                      else
-                        const SizedBox.shrink(),
-                      const Spacer(),
-                      ElevatedButton(
-                        onPressed: _next,
-                        child: Text(isLast ? 'Get started' : 'Continue'),
-                      ),
-                    ],
-                  ),
-                ],
+            if (!hideChrome)
+              Padding(
+                key: const ValueKey('onboarding-wizard-chrome'),
+                padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+                child: Column(
+                  children: [
+                    _StepDots(step: _step.index, count: OnboardingStep.values.length),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        if (_step.index > 0)
+                          TextButton(onPressed: _back, child: const Text('Back'))
+                        else
+                          const SizedBox.shrink(),
+                        const Spacer(),
+                        ElevatedButton(
+                          onPressed: _next,
+                          child: Text(isLast ? 'Get started' : 'Continue'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -378,25 +411,6 @@ class _ValuePropStep extends StatelessWidget {
       ),
       headline: 'Notice why you picked up your phone',
       body: 'Most unlocks are autopilot. $appDisplayName makes them deliberate.',
-    );
-  }
-}
-
-class _HowItWorksStep extends StatelessWidget {
-  const _HowItWorksStep();
-
-  @override
-  Widget build(BuildContext context) {
-    return const _StepBody(
-      icon: Icons.timeline_outlined,
-      headline: 'How it works',
-      body:
-          'Unlock your phone and you\'ll be asked what you\'re doing. Tap a '
-          'preset or type your own reason — it follows you as a small bubble '
-          'across apps until you dismiss it.\n\n'
-          'By default you\'re asked on every unlock, except within 1 minute of '
-          'the last prompt (so rapid lock/unlock doesn\'t nag). Change that '
-          'gap — or how often you\'re asked — anytime in Settings.',
     );
   }
 }

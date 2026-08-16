@@ -44,6 +44,12 @@ void main() {
       await settings.setOemAutostartNudgeDismissed(true);
       expect(await settings.oemAutostartNudgeDismissed(), isTrue);
     });
+
+    test('walkthroughSeenVersion defaults to 0 and round-trips', () async {
+      expect(await settings.walkthroughSeenVersion(), 0);
+      await settings.setWalkthroughSeenVersion(AppSettings.currentWalkthroughVersion);
+      expect(await settings.walkthroughSeenVersion(), AppSettings.currentWalkthroughVersion);
+    });
   });
 
   group('31. round-trips', () {

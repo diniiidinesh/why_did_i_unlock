@@ -1,7 +1,7 @@
 # ERD — Onboarding revamp (copy diet + animated walkthrough + day-1 feature discovery)
 
 > Plan doc. Scoped 2026-08-15. **Part A (PR 1) merged 2026-08-16** (PR #20).
-> Parts B/C/D not yet built. Owner: Dinesh.
+> **Part B (PR 2) in progress** on `cursor/onboarding-walkthrough`. Parts C/D not yet built. Owner: Dinesh.
 > Parts A/B/C-in-app are pure main-UI-engine work — no isolate, overlay, native,
 > or schema changes. The day-1 **notification** (§4D) is the one piece that
 > breaks that boundary; it is deliberately isolated into its own PR so the rest
@@ -39,6 +39,23 @@
 - **2026-08-16 (verified)** — PR 1 merged (PR #20). On-device cases 87–90 ✅
   (fresh 5-step walk, both disclosures, grant → leave → return). The integer-
   index landmine is gone. Next is PR 2 (`cursor/onboarding-walkthrough`).
+- **2026-08-16 (PR 2)** — Walkthrough implemented: `lib/walkthrough.dart`
+  (7 beats, named `walkthroughBeatDuration`, Skip, tap-pause, swipe via
+  PageView, reduced-motion list). Reuses `BubbleWidget` + extracted
+  `PresetPill`. `howItWorks` enum value renamed `walkthrough`.
+  `walkthroughSeenVersion` added to `AppSettings`; Home re-entry card +
+  About "How Beacon works" row. Not merged — on-device cases 91–95.
+- **2026-08-16 (PR 2 morph)** — Walkthrough is one persistent phone frame;
+  beats morph in place (hidden PageView is swipe-only). Standalone route
+  (Home / About) has AppBar Close + always-visible Done.
+- **2026-08-16 (Option A)** — Onboarding walkthrough is "video mode": outer
+  pager locked and Continue/Back/dots hidden until the last beat; Skip still
+  jumps to the end, then Continue means the next onboarding step.
+- **2026-08-16 (walkthrough teaching)** — Dropped the "Saved" label; selected
+  pill flies into the bubble. Done/Snooze get a one-shot amber callout, then
+  snooze fades. Timings: `walkthroughBeatDuration` /
+  `walkthroughMorphDuration` / `walkthroughHighlightDuration` /
+  `walkthroughSnoozeHoldDuration` (snooze holds a beat longer before fade).
 
 ---
 

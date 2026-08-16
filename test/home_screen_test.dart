@@ -4,6 +4,7 @@ import 'package:shared_preferences_platform_interface/in_memory_shared_preferenc
 import 'package:shared_preferences_platform_interface/shared_preferences_async_platform_interface.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:why_did_i_unlock/home_screen.dart';
+import 'package:why_did_i_unlock/app_settings.dart';
 import 'package:why_did_i_unlock/insights/outcome_donut.dart';
 import 'package:why_did_i_unlock/intent_store.dart';
 
@@ -168,6 +169,7 @@ void main() {
 
   testWidgets('shows OEM nudge when battery not exempt; dismiss hides it', (tester) async {
     final store = await openStore(tester);
+    await const AppSettings().setWalkthroughSeenVersion(AppSettings.currentWalkthroughVersion);
     await pumpHome(tester, store, checkBatteryExemption: () async => false);
 
     expect(find.text('Keep monitoring alive'), findsOneWidget);
@@ -185,6 +187,29 @@ void main() {
     await pumpHome(tester, store, checkBatteryExemption: () async => true);
 
     expect(find.text('Keep monitoring alive'), findsNothing);
+
+    await tester.runAsync(() => store.close());
+  });
+
+  testWidgets('existing install with unseen walkthrough shows the re-entry card; dismiss hides it', (tester) async {
+    final store = await openStore(tester);
+    await pumpHome(tester, store);
+
+    expect(find.text('See how Beacon works'), findsOneWidget);
+    await tester.tap(find.text('Dismiss'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('See how Beacon works'), findsNothing);
+
+    await tester.runAsync(() => store.close());
+  });
+
+  testWidgets('hides the walkthrough re-entry card once the current version has been seen', (tester) async {
+    final store = await openStore(tester);
+    await const AppSettings().setWalkthroughSeenVersion(AppSettings.currentWalkthroughVersion);
+    await pumpHome(tester, store);
+
+    expect(find.text('See how Beacon works'), findsNothing);
 
     await tester.runAsync(() => store.close());
   });

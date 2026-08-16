@@ -16,6 +16,7 @@ import 'bubble_widget.dart';
 import 'home_screen.dart';
 import 'intent_store.dart';
 import 'onboarding_screen.dart';
+import 'preset_pill.dart';
 import 'problem_report.dart';
 import 'prompt_policy.dart';
 
@@ -2214,7 +2215,7 @@ class _IntentCaptureScreenState extends State<IntentCaptureScreen> {
                                 alignment: WrapAlignment.center,
                                 children: [
                                   for (final preset in widget.presets)
-                                    _PresetButton(
+                                    PresetPill(
                                       label: preset.label,
                                       onTap: () => widget.onSubmit(preset.label, 'preset', presetId: preset.id),
                                     ),
@@ -2279,30 +2280,9 @@ class _IntentCaptureScreenState extends State<IntentCaptureScreen> {
   }
 }
 
-class _PresetButton extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-
-  const _PresetButton({required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return OutlinedButton(
-      onPressed: onTap,
-      style: OutlinedButton.styleFrom(
-        foregroundColor: Colors.white,
-        side: const BorderSide(color: BeaconColors.amber, width: 1.25),
-        shape: const StadiumBorder(),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      ),
-      child: Text(label),
-    );
-  }
-}
-
 /// "Just Like That" — a real pill so it reads as tappable (Dinesh's feedback
 /// on the previous bare italic-underlined TextButton), but styled MUTED
-/// relative to [_PresetButton] (dimmer border/text, no fill) so it still
+/// relative to [PresetPill] (dimmer border/text, no fill) so it still
 /// visually reads as the "no real reason" option rather than another topic.
 class _NoIntentButton extends StatelessWidget {
   final VoidCallback onTap;
