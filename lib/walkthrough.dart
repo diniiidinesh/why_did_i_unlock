@@ -8,11 +8,17 @@ import 'bubble_widget.dart';
 import 'intent_store.dart';
 import 'preset_pill.dart';
 
-/// Auto-advance interval per beat. Named so it can be retuned on-device
-/// without hunting literals (`docs/erd/onboarding-revamp-2026-08-15.md` §8.4).
+/// Feel-tune these on device; they are the only walkthrough timings.
+///
+/// - [walkthroughBeatDuration] — how long each beat holds before auto-advance
+/// - [walkthroughMorphDuration] — pill→bubble / sheet / dock interpolation
+/// - [walkthroughHighlightDuration] — Done halo
+/// - [walkthroughSnoozeHoldDuration] — Snooze pulse before the bubble fades
+///   (longer than a normal highlight so that last teaching beat can land)
 const Duration walkthroughBeatDuration = Duration(milliseconds: 2800);
-
-const Duration _kBeatAnim = Duration(milliseconds: 400);
+const Duration walkthroughMorphDuration = Duration(milliseconds: 500);
+const Duration walkthroughHighlightDuration = Duration(milliseconds: 900);
+const Duration walkthroughSnoozeHoldDuration = Duration(milliseconds: 1800);
 
 /// The 7 teaching beats, in order. Captions are the Dinesh-approved copy
 /// from the onboarding-revamp ERD §4B — do not reword to fit the layout.
@@ -52,9 +58,11 @@ String get _demoIntent => defaultPresetLabels.first;
 /// Scripted 7-beat walkthrough of unlock → prompt → bubble.
 ///
 /// Main-UI-engine only — never mount this from overlay-isolate code.
-/// Reuses [BubbleWidget] and [PresetPill] directly; does not wrap a Ticker
-/// that outlives the sequence (autoplay is a [Timer], cancelled on last
-/// beat, pause, inactive, and dispose).
+/// One persistent phone frame: beat changes morph the same prompt / bubble
+/// via implicit animations. A hidden [PageView] is only the swipe-to-scrub
+/// gesture surface — it must not slide a new frame onto the screen.
+/// Reuses [BubbleWidget] and [PresetPill] directly; autoplay is a [Timer],
+/// cancelled on last beat, pause, inactive, and dispose.
 class WalkthroughView extends StatefulWidget {
   /// When false, autoplay is stopped (the onboarding [PageView] builds every
   /// step eagerly; only the visible step should tick).
@@ -62,6 +70,14 @@ class WalkthroughView extends StatefulWidget {
 
   /// Pushed from Home / About rather than embedded in onboarding.
   final bool standalone;
+
+  /// When false, the caller owns close (e.g. [WalkthroughScreen]'s AppBar).
+  final bool showCloseButton;
+
+  /// Called while [active] when playback reaches or leaves the last beat.
+  /// `true` means still playing (not last beat); `false` means holding on
+  /// the last beat (or reduced-motion, which has no sequence).
+  final ValueChanged<bool>? onPlaybackActive;
 
   /// Called when a standalone walkthrough should close (Skip on the last
   /// beat, or Done).
@@ -71,6 +87,8 @@ class WalkthroughView extends StatefulWidget {
     super.key,
     this.active = true,
     this.standalone = false,
+    this.showCloseButton = true,
+    this.onPlaybackActive,
     this.onStandaloneFinished,
   });
 
@@ -83,6 +101,7 @@ class _WalkthroughViewState extends State<WalkthroughView> {
   WalkthroughBeat _beat = WalkthroughBeat.unlock;
   bool _paused = false;
   Timer? _autoplay;
+  bool? _lastNotifiedPlaying;
 
   @override
   void initState() {
@@ -95,11 +114,12 @@ class _WalkthroughViewState extends State<WalkthroughView> {
     super.didUpdateWidget(oldWidget);
     if (widget.active && !oldWidget.active) {
       _paused = false;
-      _goTo(WalkthroughBeat.unlock, animate: false);
-      _scheduleAdvance();
+      _lastNotifiedPlaying = null;
+      _goTo(WalkthroughBeat.unlock);
     } else if (!widget.active && oldWidget.active) {
       _autoplay?.cancel();
       _autoplay = null;
+      _lastNotifiedPlaying = null;
     }
   }
 
@@ -124,21 +144,16 @@ class _WalkthroughViewState extends State<WalkthroughView> {
     });
   }
 
-  void _goTo(WalkthroughBeat beat, {bool animate = true}) {
+  void _goTo(WalkthroughBeat beat) {
     _beat = beat;
-    if (_pages.hasClients) {
-      if (animate) {
-        _pages.animateToPage(
-          beat.index,
-          duration: _kBeatAnim,
-          curve: Curves.easeOut,
-        );
-      } else {
-        _pages.jumpToPage(beat.index);
-      }
+    // Always jump: the PageView is an invisible scrubber. Animating it would
+    // slide empty pages underneath a frame that is supposed to morph in place.
+    if (_pages.hasClients && _pages.page?.round() != beat.index) {
+      _pages.jumpToPage(beat.index);
     }
     setState(() {});
     _scheduleAdvance();
+    _notifyPlayback();
   }
 
   void _onPageChanged(int index) {
@@ -146,6 +161,24 @@ class _WalkthroughViewState extends State<WalkthroughView> {
     if (beat == _beat) return;
     setState(() => _beat = beat);
     _scheduleAdvance();
+    _notifyPlayback();
+  }
+
+  bool _isPlaying(BuildContext context) {
+    if (MediaQuery.disableAnimationsOf(context)) return false;
+    return _beat != WalkthroughBeat.values.last;
+  }
+
+  void _notifyPlayback() {
+    if (!widget.active || widget.onPlaybackActive == null) return;
+    final playing = _isPlaying(context);
+    if (_lastNotifiedPlaying == playing) return;
+    _lastNotifiedPlaying = playing;
+    final cb = widget.onPlaybackActive!;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !widget.active) return;
+      cb(playing);
+    });
   }
 
   void _togglePause() {
@@ -160,51 +193,59 @@ class _WalkthroughViewState extends State<WalkthroughView> {
   }
 
   void _onSkip() {
-    if (widget.standalone) {
-      widget.onStandaloneFinished?.call();
-      return;
-    }
     if (_beat == WalkthroughBeat.values.last) return;
     _paused = false;
-    _goTo(WalkthroughBeat.values.last, animate: false);
+    _goTo(WalkthroughBeat.values.last);
   }
 
   @override
   Widget build(BuildContext context) {
+    _notifyPlayback();
     if (MediaQuery.disableAnimationsOf(context)) {
       return _ReducedMotionWalkthrough(
         standalone: widget.standalone,
+        showCloseButton: widget.showCloseButton,
         onSkip: widget.standalone ? widget.onStandaloneFinished : _onSkip,
       );
     }
 
     return Column(
       children: [
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton(
-            onPressed: _onSkip,
-            child: const Text('Skip'),
+        if (widget.showCloseButton &&
+            !(widget.standalone && _beat == WalkthroughBeat.values.last))
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: _onSkip,
+              child: const Text('Skip'),
+            ),
           ),
-        ),
         Expanded(
           child: GestureDetector(
+            key: const ValueKey('walkthrough-stage'),
             behavior: HitTestBehavior.opaque,
             onTap: _togglePause,
-            child: PageView.builder(
-              controller: _pages,
-              itemCount: WalkthroughBeat.values.length,
-              onPageChanged: _onPageChanged,
-              itemBuilder: (context, index) {
-                return Center(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 36),
-                    child: _PhoneFrame(
-                      child: _BeatScene(beat: WalkthroughBeat.values[index]),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                PageView.builder(
+                  controller: _pages,
+                  itemCount: WalkthroughBeat.values.length,
+                  onPageChanged: _onPageChanged,
+                  itemBuilder: (context, index) => const SizedBox.expand(),
+                ),
+                IgnorePointer(
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 36),
+                      child: _PhoneFrame(
+                        key: const ValueKey('walkthrough-phone'),
+                        child: _BeatScene(beat: _beat),
+                      ),
                     ),
                   ),
-                );
-              },
+                ),
+              ],
             ),
           ),
         ),
@@ -221,6 +262,17 @@ class _WalkthroughViewState extends State<WalkthroughView> {
             ),
           ),
         ),
+        if (widget.standalone && _beat == WalkthroughBeat.values.last)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: widget.onStandaloneFinished,
+                child: const Text('Done'),
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -228,21 +280,27 @@ class _WalkthroughViewState extends State<WalkthroughView> {
 
 class _ReducedMotionWalkthrough extends StatelessWidget {
   final bool standalone;
+  final bool showCloseButton;
   final VoidCallback? onSkip;
 
-  const _ReducedMotionWalkthrough({required this.standalone, this.onSkip});
+  const _ReducedMotionWalkthrough({
+    required this.standalone,
+    this.showCloseButton = true,
+    this.onSkip,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton(
-            onPressed: onSkip,
-            child: Text(standalone ? 'Close' : 'Skip'),
+        if (showCloseButton)
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: onSkip,
+              child: Text(standalone ? 'Close' : 'Skip'),
+            ),
           ),
-        ),
         Expanded(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
@@ -258,6 +316,17 @@ class _ReducedMotionWalkthrough extends StatelessWidget {
             ],
           ),
         ),
+        if (standalone)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: onSkip,
+                child: const Text('Done'),
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -265,7 +334,7 @@ class _ReducedMotionWalkthrough extends StatelessWidget {
 
 class _PhoneFrame extends StatelessWidget {
   final Widget child;
-  const _PhoneFrame({required this.child});
+  const _PhoneFrame({super.key, required this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -289,39 +358,77 @@ class _PhoneFrame extends StatelessWidget {
   }
 }
 
-class _BeatScene extends StatelessWidget {
+class _BeatScene extends StatefulWidget {
   final WalkthroughBeat beat;
   const _BeatScene({required this.beat});
 
   @override
+  State<_BeatScene> createState() => _BeatSceneState();
+}
+
+class _BeatSceneState extends State<_BeatScene> {
+  Timer? _snoozeFade;
+  bool _snoozeDismissed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _armSnoozeFade();
+  }
+
+  @override
+  void didUpdateWidget(_BeatScene oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.beat != widget.beat) _armSnoozeFade();
+  }
+
+  @override
+  void dispose() {
+    _snoozeFade?.cancel();
+    super.dispose();
+  }
+
+  void _armSnoozeFade() {
+    _snoozeFade?.cancel();
+    _snoozeDismissed = false;
+    if (widget.beat != WalkthroughBeat.snooze) return;
+    _snoozeFade = Timer(walkthroughSnoozeHoldDuration, () {
+      if (mounted) setState(() => _snoozeDismissed = true);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final showPrompt = beat == WalkthroughBeat.promptShown || beat == WalkthroughBeat.promptSelected;
+    final beat = widget.beat;
+    final showPrompt =
+        beat == WalkthroughBeat.promptShown || beat == WalkthroughBeat.promptSelected;
     final promptSelected = beat == WalkthroughBeat.promptSelected;
     final showApps = beat == WalkthroughBeat.followsYou ||
         beat == WalkthroughBeat.markDone ||
         beat == WalkthroughBeat.snooze;
-    final showCollapsed = beat == WalkthroughBeat.becomesBubble || beat == WalkthroughBeat.followsYou;
-    final showExpanded = beat == WalkthroughBeat.markDone || beat == WalkthroughBeat.snooze;
-    final bubbleVisible = showCollapsed || showExpanded;
-    final bubbleOpacity = beat == WalkthroughBeat.snooze ? 0.0 : 1.0;
+    final showCollapsed =
+        beat == WalkthroughBeat.becomesBubble || beat == WalkthroughBeat.followsYou;
+    final showExpanded =
+        beat == WalkthroughBeat.markDone || beat == WalkthroughBeat.snooze;
+    final docked = showCollapsed || showExpanded;
 
     return ColoredBox(
-      color: beat == WalkthroughBeat.unlock ? const Color(0xFF0A0A0A) : const Color(0xFF1C1C1E),
+      color: const Color(0xFF1C1C1E),
       child: Stack(
         children: [
           AnimatedOpacity(
-            duration: _kBeatAnim,
+            duration: walkthroughMorphDuration,
             opacity: showApps ? 1 : 0,
             child: const _MockApps(),
           ),
           AnimatedOpacity(
-            duration: _kBeatAnim,
+            duration: walkthroughMorphDuration,
             opacity: beat == WalkthroughBeat.unlock ? 1 : 0,
             child: const ColoredBox(color: Color(0xFF0A0A0A)),
           ),
           AnimatedPositioned(
-            duration: _kBeatAnim,
-            curve: Curves.easeOut,
+            duration: walkthroughMorphDuration,
+            curve: Curves.easeOutCubic,
             left: 8,
             right: 8,
             bottom: showPrompt ? 12 : -220,
@@ -329,53 +436,132 @@ class _BeatScene extends StatelessWidget {
               child: _PromptSheet(selected: promptSelected),
             ),
           ),
-          if (promptSelected)
-            const Positioned(
-              left: 0,
-              right: 0,
-              bottom: 168,
-              child: Center(
-                child: Text(
-                  'Saved',
-                  style: TextStyle(
-                    color: BeaconColors.amber,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
           AnimatedPositioned(
-            duration: _kBeatAnim,
-            curve: Curves.easeOut,
+            duration: walkthroughMorphDuration,
+            curve: Curves.easeOutCubic,
             right: 8,
-            top: showCollapsed || showExpanded ? 72 : 200,
-            child: IgnorePointer(
-              child: AnimatedOpacity(
-                duration: _kBeatAnim,
-                opacity: bubbleVisible ? bubbleOpacity : 0,
-                child: showExpanded
-                    ? SizedBox(
-                        width: expandedBubbleWidthDp(_demoIntent),
-                        child: BubbleWidget(
-                          intentText: _demoIntent,
-                          expanded: true,
-                          onDone: () {},
-                          onSnooze: () {},
-                          onToggleExpand: () {},
-                        ),
-                      )
-                    : BubbleWidget(
-                        intentText: _demoIntent,
-                        expanded: false,
-                        onDone: () {},
-                        onSnooze: () {},
-                        onToggleExpand: () {},
-                      ),
+            top: docked ? 72 : 200,
+            child: AnimatedOpacity(
+              duration: walkthroughMorphDuration,
+              opacity: docked && !_snoozeDismissed ? 1 : 0,
+              child: _DockedBubble(
+                expanded: showExpanded,
+                highlightDone: beat == WalkthroughBeat.markDone,
+                highlightSnooze: beat == WalkthroughBeat.snooze && !_snoozeDismissed,
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Matches [_BubbleAction] layout in `bubble_widget.dart` (32dp, 8dp trailing
+/// padding, 6dp gap). Rings sit *around* the icons — stroke only, no label.
+const double _kActionDp = 32;
+const double _kActionGap = 6;
+const double _kBubblePadRight = 8;
+const double _kRingDp = 40;
+
+class _DockedBubble extends StatelessWidget {
+  final bool expanded;
+  final bool highlightDone;
+  final bool highlightSnooze;
+
+  const _DockedBubble({
+    required this.expanded,
+    required this.highlightDone,
+    required this.highlightSnooze,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (!expanded) {
+      return SizedBox(
+        width: bubbleCollapsedDp,
+        child: BubbleWidget(
+          intentText: _demoIntent,
+          expanded: false,
+          onDone: () {},
+          onSnooze: () {},
+          onToggleExpand: () {},
+        ),
+      );
+    }
+    return SizedBox(
+      width: expandedBubbleWidthDp(_demoIntent),
+      height: bubbleExpandedHeightDp,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          BubbleWidget(
+            intentText: _demoIntent,
+            expanded: true,
+            onDone: () {},
+            onSnooze: () {},
+            onToggleExpand: () {},
+          ),
+          if (highlightDone)
+            Positioned(
+              key: const ValueKey('walkthrough-highlight-done'),
+              right: _ringRight(_kBubblePadRight + _kActionDp / 2),
+              top: (bubbleExpandedHeightDp - _kRingDp) / 2,
+              child: const _PulseRing(),
+            ),
+          if (highlightSnooze)
+            Positioned(
+              key: const ValueKey('walkthrough-highlight-snooze'),
+              right: _ringRight(
+                _kBubblePadRight + _kActionDp + _kActionGap + _kActionDp / 2,
+              ),
+              top: (bubbleExpandedHeightDp - _kRingDp) / 2,
+              child: const _PulseRing(),
+            ),
+        ],
+      ),
+    );
+  }
+
+  static double _ringRight(double centerFromRight) => centerFromRight - _kRingDp / 2;
+}
+
+/// Stroke-only circle that pulses. Square [SizedBox] so BoxShape.circle stays
+/// round even inside a tight row. Ticker is disposed with the State.
+class _PulseRing extends StatefulWidget {
+  const _PulseRing();
+
+  @override
+  State<_PulseRing> createState() => _PulseRingState();
+}
+
+class _PulseRingState extends State<_PulseRing> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 700),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ScaleTransition(
+      scale: Tween<double>(begin: 0.92, end: 1.12).animate(
+        CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
+      ),
+      child: SizedBox(
+        width: _kRingDp,
+        height: _kRingDp,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: BeaconColors.amber, width: 2),
+          ),
+        ),
       ),
     );
   }
@@ -476,6 +662,13 @@ class WalkthroughScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        leading: const CloseButton(),
+        title: const Text('How Beacon works'),
+      ),
       body: SafeArea(
         child: WalkthroughView(
           standalone: true,

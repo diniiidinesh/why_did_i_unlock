@@ -45,6 +45,17 @@
   `PresetPill`. `howItWorks` enum value renamed `walkthrough`.
   `walkthroughSeenVersion` added to `AppSettings`; Home re-entry card +
   About "How Beacon works" row. Not merged — on-device cases 91–95.
+- **2026-08-16 (PR 2 morph)** — Walkthrough is one persistent phone frame;
+  beats morph in place (hidden PageView is swipe-only). Standalone route
+  (Home / About) has AppBar Close + always-visible Done.
+- **2026-08-16 (Option A)** — Onboarding walkthrough is "video mode": outer
+  pager locked and Continue/Back/dots hidden until the last beat; Skip still
+  jumps to the end, then Continue means the next onboarding step.
+- **2026-08-16 (walkthrough teaching)** — Dropped the "Saved" label; selected
+  pill flies into the bubble. Done/Snooze get a one-shot amber callout, then
+  snooze fades. Timings: `walkthroughBeatDuration` /
+  `walkthroughMorphDuration` / `walkthroughHighlightDuration` /
+  `walkthroughSnoozeHoldDuration` (snooze holds a beat longer before fade).
 
 ---
 

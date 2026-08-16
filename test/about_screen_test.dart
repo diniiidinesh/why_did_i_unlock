@@ -149,5 +149,11 @@ void main() {
 
     expect(find.byType(WalkthroughView), findsOneWidget);
     expect(find.text('Skip'), findsOneWidget);
+    expect(find.text('Done'), findsNothing);
+    expect(find.byTooltip('Close'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Close'));
+    await tester.pumpAndSettle();
+    expect(find.byType(WalkthroughView), findsNothing);
   });
 }

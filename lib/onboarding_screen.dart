@@ -98,6 +98,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
   OemGuidance? _matchedOem;
   bool _manufacturerLoaded = false;
 
+  /// Option A: while the walkthrough is mid-sequence, lock the outer pager
+  /// and hide Continue / Back / dots so swipe + dots don't fight the 7 beats.
+  bool _walkthroughPlaybackActive = false;
+
   @override
   void initState() {
     super.initState();
@@ -176,6 +180,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
   }
 
   void _next() {
+    if (_hideWizardChrome) return;
     if (_step == OnboardingStep.values.last) {
       _finish();
       return;
@@ -194,18 +199,36 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
 
   void _onPageChanged(int index) {
     final step = OnboardingStep.values[index];
-    setState(() => _step = step);
+    setState(() {
+      _step = step;
+      // Assume playing as soon as the walkthrough page is selected; the
+      // child confirms via [WalkthroughView.onPlaybackActive]. Any other
+      // step must show the wizard chrome even if a stale true lingered.
+      _walkthroughPlaybackActive = step == OnboardingStep.walkthrough;
+    });
     // Re-checking whenever these steps come into view keeps status honest
     // when navigating back — without auto-advancing again.
     _refreshStatusFor(step);
   }
+
+  void _onWalkthroughPlaybackActive(bool playing) {
+    if (_step != OnboardingStep.walkthrough) return;
+    if (_walkthroughPlaybackActive == playing) return;
+    setState(() => _walkthroughPlaybackActive = playing);
+  }
+
+  bool get _hideWizardChrome =>
+      _step == OnboardingStep.walkthrough && _walkthroughPlaybackActive;
 
   Widget _pageFor(OnboardingStep step) {
     switch (step) {
       case OnboardingStep.valueProp:
         return const _ValuePropStep();
       case OnboardingStep.walkthrough:
-        return WalkthroughView(active: _step == OnboardingStep.walkthrough);
+        return WalkthroughView(
+          active: _step == OnboardingStep.walkthrough,
+          onPlaybackActive: _onWalkthroughPlaybackActive,
+        );
       case OnboardingStep.permission:
         return _PermissionStep(
           granted: _permissionGranted,
@@ -226,6 +249,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
   @override
   Widget build(BuildContext context) {
     final isLast = _step == OnboardingStep.values.last;
+    final hideChrome = _hideWizardChrome;
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
@@ -236,33 +260,36 @@ class _OnboardingScreenState extends State<OnboardingScreen> with WidgetsBinding
                 key: const ValueKey('onboarding-pages'),
                 controller: _controller,
                 onPageChanged: _onPageChanged,
+                physics: hideChrome ? const NeverScrollableScrollPhysics() : null,
                 children: [
                   for (final step in OnboardingStep.values) _pageFor(step),
                 ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-              child: Column(
-                children: [
-                  _StepDots(step: _step.index, count: OnboardingStep.values.length),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      if (_step.index > 0)
-                        TextButton(onPressed: _back, child: const Text('Back'))
-                      else
-                        const SizedBox.shrink(),
-                      const Spacer(),
-                      ElevatedButton(
-                        onPressed: _next,
-                        child: Text(isLast ? 'Get started' : 'Continue'),
-                      ),
-                    ],
-                  ),
-                ],
+            if (!hideChrome)
+              Padding(
+                key: const ValueKey('onboarding-wizard-chrome'),
+                padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+                child: Column(
+                  children: [
+                    _StepDots(step: _step.index, count: OnboardingStep.values.length),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        if (_step.index > 0)
+                          TextButton(onPressed: _back, child: const Text('Back'))
+                        else
+                          const SizedBox.shrink(),
+                        const Spacer(),
+                        ElevatedButton(
+                          onPressed: _next,
+                          child: Text(isLast ? 'Get started' : 'Continue'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
           ],
         ),
       ),

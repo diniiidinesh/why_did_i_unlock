@@ -339,8 +339,8 @@ walkthrough. Do not mark these passed here.
 
 | # | Case | Status | Notes / expected |
 |---|---|---|---|
-| 91 | Fresh install: walkthrough is onboarding step 2 | ❌ | After value-prop, the 7-beat sequence plays (phone mock + captions). Skip jumps to the last beat; Continue still goes to **One permission.** Beat duration named `walkthroughBeatDuration` (feel-tune). |
+| 91 | Fresh install: walkthrough is onboarding step 2 | ❌ | After value-prop, Continue/dots/Back hide and outer swipe is locked while the 7-beat sequence plays. Skip jumps to the last beat; **then** Continue appears and goes to **One permission.** Inner swipe still scrubs beats. Beat duration named `walkthroughBeatDuration` (feel-tune). |
 | 92 | Tap pauses / resume; swipe scrubs beats | ❌ | Tap freezes auto-advance; another tap resumes. Horizontal swipe moves between beats. Reduced-motion (system animation off) shows a static list of the 7 captions. |
 | 93 | Existing install: Home **"See how Beacon works"** card | ❌ | Upgrade over a completed-onboarding install. Card appears once; Watch opens the walkthrough; Dismiss (or finishing Watch) hides it permanently. |
-| 94 | About **"How Beacon works"** | ❌ | Row always present; opens the same walkthrough. Does not re-show the Home card once it has been dismissed. |
+| 94 | About **"How Beacon works"** | ❌ | Row always present; opens the same walkthrough. Skip (top-right) jumps to the last beat; **Done** then pops. App-bar X also pops. Does not re-show the Home card once it has been dismissed. |
 | 95 | **Permission grant → return still works after the step insert** | ❌ | Highest-risk leftover from PR 1. Grant on **One permission.**, leave, return → Granted. Confirm it did not regress when How-it-works became the walkthrough. |
