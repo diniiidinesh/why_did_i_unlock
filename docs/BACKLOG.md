@@ -363,9 +363,18 @@ doing nothing) as one cause, not several.
 
 ## Store listing / About follow-ups (Play)
 
-- **[P1] Privacy policy effective date** — `docs/PRIVACY_POLICY.md` still has
-  `[DATE OF PUBLICATION]`. Set a real date when the Play listing / closed test
-  goes live, and sync the hosted HTML at `dineshkaliki.com/beacon/privacy/`.
+- **[DONE 2026-08-16] Privacy policy effective date + hosted sync** — effective
+  date has been real (**25 July 2026**) since the listing went up; the item was
+  just never closed. Hosted page at `dineshkaliki.com/beacon/privacy/` re-synced
+  2026-08-16 to add the `POST_NOTIFICATIONS` bullet shipped with the day-1
+  recap. **Gotcha for the next sync:** the live page (served from
+  `diniiidinesh/dineshkaliki.github.io`, path `beacon/privacy/index.html`,
+  `CNAME` → `dineshkaliki.com`) carries a **Cloudflare Web Analytics snippet in
+  `<head>` that `docs/site/privacy.html` does not**. Copying the mirror over the
+  live file wholesale silently deletes it — merge the policy change into the
+  live file instead, or re-add the snippet. Note also `diniiidinesh/beacon-site`
+  exists with a similar tree but is **not** what serves the domain; don't edit it
+  by mistake.
 
 - **[P1] Wire About "Rate on Play" + "Share" to the real listing** — today both
   open `playListingUrl` which is still a `TODO_*` placeholder
