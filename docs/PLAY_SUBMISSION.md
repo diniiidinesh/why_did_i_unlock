@@ -186,8 +186,10 @@ first four trigger Play's sensitive-permission declaration forms (Accessibility,
 SMS/Call Log, `QUERY_ALL_PACKAGES`, `MANAGE_EXTERNAL_STORAGE`, exact alarms,
 etc.). `POST_NOTIFICATIONS` is a runtime permission (Android 13+), not a
 declaration-form permission; it is requested at the end of onboarding only if
-the user leaves "Remind me tomorrow" on, and the recap still works in-app if
-they refuse. The `<queries>` block is a narrowly scoped `PROCESS_TEXT` intent inserted
+the user leaves "Remind me tomorrow" on (**new installs only**; existing
+installs are not opted in), and the recap still works in-app if
+they refuse. Tapping the reminder opens the same first-day recap as
+opening the app from the icon. The `<queries>` block is a narrowly scoped `PROCESS_TEXT` intent inserted
 by the Flutter engine, **not** `QUERY_ALL_PACKAGES`.
 
 > ⚠️ **`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`** — use the draft in §1 when the
@@ -226,12 +228,12 @@ by the Flutter engine, **not** `QUERY_ALL_PACKAGES`.
   mandatory tablet-screenshot requirement from the publish checklist — the
   manifest change alone doesn't retroactively clear an already-surfaced Console
   prompt.
-- **[ ] Verify the foreground-service notification is actually visible on
-  Android 13+.** `POST_NOTIFICATIONS` is now in the manifest for the optional
-  day-1 recap reminder. Play policy expects
-  a foreground service to be user-visible; granting the permission for that
-  reminder also un-suppresses the ongoing FGS notification. **Check on a real
-  Android 13+ device** both with the permission granted and refused.
+- **[DONE 2026-08-16] Verify the foreground-service notification is actually visible on
+  Android 13+.** Granting `POST_NOTIFICATIONS` for the day-1 recap also
+  un-suppresses the overlay plugin's FGS shade item. Dinesh confirmed two
+  shade entries: the one-shot recap, plus the overlay FGS (silent, clears
+  on Done). Accepted as-is — Android requires a visible FGS notification.
+  Permission-refused path still degrades to in-app recap only.
 - **[ ] `applicationId` is permanent:** `com.whydidiunlock.why_did_i_unlock`.
   It appears in the Play URL forever and cannot be changed after first publish.
   The display name can change freely; this cannot. **Acknowledge before first

@@ -1,12 +1,14 @@
 # ERD — Outstanding-intent prompt ("continue or something else?")
 
 > Plan doc. Scoped 2026-08-15, **not yet built**. Owner: Dinesh.
-> Prerequisite: the `closeOverlay()` hang fix (branch `fix/overlay-close-hang-stuck-flag`)
-> must be verified on-device and in production first — see §7 Risks for why that
-> ordering is not optional.
+> Prerequisite: the `closeOverlay()` hang fix is **on `main`** (`0.6.3+13`).
+> See §7 Risks for why that ordering was not optional — it is satisfied.
 
 ## Update log
 
+- **2026-08-16** — Overlay-close hang prerequisite shipped. Next session can
+  build this; do not wait on another overlay-lifecycle PR. Timer still out
+  of scope.
 - **2026-08-15** — Created. Scopes T12's deferred half: populating
   `outstandingIntents` and acting on it. Timer is explicitly out of scope and
   planned as the next piece of work after this.

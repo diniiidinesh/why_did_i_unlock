@@ -9,9 +9,12 @@
 > `docs/erd/onboarding-revamp-2026-08-15.md` Appendix A). Order of work agreed:
 >
 > 1. **[P0] Onboarding revamp — DONE 2026-08-16.** PRs #20–#23 (copy diet,
->    walkthrough, tooltips + Try it now, day-1 recap). Existing installs
+>    walkthrough, tooltips + Try it now, day-1 recap) plus **PR #24**
+>    (notification tap → same recap screen as icon open). Existing installs
 >    are not asked for `POST_NOTIFICATIONS`; they still get the in-app recap.
->    Plan: `docs/erd/onboarding-revamp-2026-08-15.md`.
+>    Overlay FGS shade is expected once that permission is granted — Dinesh
+>    accepted it (silent, clears on Done). Plan:
+>    `docs/erd/onboarding-revamp-2026-08-15.md`.
 > 2. **[P0] Outstanding-intent prompt** — plan already written
 >    (`docs/erd/outstanding-intent-prompt-2026-08-15.md`), not built. **Promoted
 >    on feedback evidence:** Vishishta's "my response isn't recorded and the app

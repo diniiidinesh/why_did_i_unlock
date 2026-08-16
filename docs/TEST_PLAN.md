@@ -20,8 +20,9 @@ for the exact assertions.
 | `test/intent_store_test.dart` | `IntentStore` repository. **Sprint 3 (1–9):** insert/read, empty DB, SQL-injection literal stored verbatim, idempotent `client_id`, `fromMessage` validation (7 sub-cases incl. `presetId` typing + `toMessage` round-trip), no-intent row shape, `recentEvents` limit+ordering, `lastCompletedAt` across kinds, reopen. **Sprint 4 (20–25):** real v1→v2 migration from a hand-built v1 file, `unlock_log` round-trip incl. every `SkipReason`, declare→dismiss lifecycle (`open`/`done`/`abandoned`, idempotency, no-op on unknown id, **no resurrection of abandoned rows**), `unlock_id` stateless resolution (incl. later-skipped-unlock and no-prompted-unlock cases), preset CRUD + limits + soft-delete + restore-defaults. |
 | `test/app_settings_test.dart` | `AppSettings` (30–35): defaults match the previously-hardcoded constants, round-trips, **clamping on both write and read**, retention enum mapping + sentinel, quiet-hours flag independent of window, `loadSnapshot` batching, cross-instance visibility. |
 | `test/prompt_policy_test.dart` | Triage policies. **Sprint 3 (10–12):** `ProbabilityPromptPolicy` bounds + seeded determinism, `TimeCooldownPolicy` boundary (`>=`), `CompositePromptPolicy` AND-semantics. **Sprint 4 (40–42):** `QuietHoursPolicy` same-day window, **overnight wraparound**, inclusive-start/exclusive-end boundaries, degenerate zero-width window fails open. |
-| `test/day_one_test.dart` | **Onboarding revamp PR 4.** 24h boundary, fires-once, permission-denied fallback, most-common-reason grouping, `maybePostDayOneNotification` posts once. |
+| `test/day_one_test.dart` | **Onboarding revamp PR 4.** 24h boundary, fires-once, permission-denied fallback, existing-install reminder default off, most-common-reason grouping, `maybePostDayOneNotification` posts once. |
 | `test/day_one_stats_screen_test.dart` | **Onboarding revamp PR 4.** Recap screen renders injected-store counts. |
+| `test/widget_test.dart` (recap case) | AppLauncher shows `DayOneStatsScreen` after 24h. |
 | `test/widget_test.dart` | `HomeScreen` title + nav entries (13, no Unlock-prompts Switch); `IntentCaptureScreen` presets/pill/field/OK (14), empty presets (16), preset id via `onSubmit` (17), custom text no `presetId` (18); AppLauncher onboarding gate (19). |
 | `test/history_screen_test.dart` | `HistoryScreen` renders events newest-first, styles `no_intent` rows distinctly (15). |
 | `test/home_screen_test.dart` | **Sprint 4 (T18).** Home insight cards: empty first-run copy, seeded counts + donut categories + median duration, null duration empty copy. Injected store + permission; `tester.runAsync` for sqflite. |
@@ -363,13 +364,13 @@ the formal matrix — not every row was walked after the scroll/Got it fix.
 
 ### Onboarding revamp PR 4 — day-1 recap + local notification (2026-08-16)
 
-Merged PR #23. Shade reminder verified on-device 2026-08-16; remaining cases still Dinesh's.
+Merged PRs #23 + #24. Shade posting + tap-opens-recap feel-passed 2026-08-16; remaining cases still Dinesh's.
 
 | # | Case | Status | Notes / expected |
 |---|---|---|---|
 | 101 | Last onboarding step: **"Remind me tomorrow to check my first day"** default on | ❌ | Switch on `Stays on your phone.` (no overlay) or `Try it once.` (overlay granted). Toggle off skips the system permission dialog. Finish still lands on Home. |
-| 102 | Unlock after 24h, reminder on, permission granted | ❌ | One local notification ("Your first day with Beacon"). Next unlock does **not** post another. Opening the app **from the icon** or **tapping the notification** shows the recap once; Continue goes to Home. |
+| 102 | Unlock after 24h, reminder on, permission granted | 🟡 | One local notification ("Your first day with Beacon"). Next unlock does **not** post another. Opening the app **from the icon** or **tapping the notification** shows the recap once; Continue goes to Home. Shade posting + tap-opens-recap feel-passed 2026-08-16. |
 | 103 | Permission denied **or** reminder off (incl. existing installs who never opted in) | ❌ | No notification. Opening the app past 24h still shows the recap. Continue marks it seen. Testers already past onboarding are **not** asked for `POST_NOTIFICATIONS`. |
 | 104 | Hidden debug: long-press About version | ❌ | Dialog: **Preview recap** opens the stats screen now. **Pretend 24 hours passed** backdates first launch; a later unlock/reopen shows the real recap path. |
 | 105 | Recap numbers | ❌ | Unlocks / intents declared / Just Like That / most common reason match History for the first day. No new SQL. |
-| 106 | Tap the day-1 notification | ❌ | Opens **"Your first day"** (not Home), whether the app was backgrounded or killed. Continue → Home. After Continue, a later tap stays on Home. |
+| 106 | Tap the day-1 notification | 🟡 | Opens **"Your first day"** (not Home), whether the app was backgrounded or killed. Continue → Home. After Continue, a later tap stays on Home. Feel-passed 2026-08-16. |

@@ -79,7 +79,7 @@
       <li><strong>Foreground service</strong> — to keep a lightweight process alive so unlock events are not missed; Android shows an ongoing notification while it runs.</li>
       <li><strong>Run at startup</strong> — so the app resumes after a reboot without opening it manually.</li>
       <li><strong>Ignore battery optimizations</strong> (optional, user-initiated from Status) — so aggressive OEM battery savers do not silently kill unlock monitoring.</li>
-      <li><strong>Notifications</strong> (optional) — asked at the end of onboarding only if you leave "Remind me tomorrow" on, so Beacon can post one local reminder after 24 hours. If you decline, the same recap still appears in the app. Not a push notification; nothing is sent off your device.</li>
+      <li><strong>Notifications</strong> (optional) — asked at the end of onboarding only if you leave "Remind me tomorrow" on, so Beacon can post one local reminder after 24 hours. People who already finished onboarding before this shipped are not asked. If you decline (or were never asked), the same recap still appears in the app. Tapping the reminder opens that recap. Not a push notification; nothing is sent off your device.</li>
     </ul>
 
     <h2>Deleting your data</h2>

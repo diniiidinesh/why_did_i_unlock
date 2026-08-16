@@ -394,6 +394,16 @@ background engine.
   run. Capturing overlay-isolate errors needs a relay through the background isolate's
   ports, the same pattern as `_intentWritePortName` — tracked in `docs/BACKLOG.md`, not
   yet built (needs on-device iteration, not a blind port-wiring change).
+- **Day-1 recap notification is two engines, not one.** `flutter_local_notifications.show`
+  runs in the **background** isolate (unlock handler, `maybePostDayOneNotification`).
+  Tap handling (`onDidReceiveNotificationResponse` / `bindUiTapHandler`) lives on the
+  **main UI** isolate (`AppLauncher`) so a shade tap while Home is already up can
+  still open the recap. Never call the plugin from overlay-isolate code.
+  **Android AAR requires core-library desugaring** (`isCoreLibraryDesugaringEnabled` +
+  `desugar_jdk_libs` in `android/app/build.gradle.kts`) even though we never call
+  `zonedSchedule`. **One destination:** icon open and shade tap both show
+  `DayOneStatsScreen`; Continue is the only path to Home. Payload `day_one_recap`
+  so we ignore the overlay plugin's own FGS notification.
 
 ## 6. Known limitations / reliability gaps (not defects introduced here)
 
@@ -411,6 +421,14 @@ background engine.
   killed between a bubble dismiss and the background engine's DB write completing,
   that event is lost — same class of gap, not a new one. (Not the same mechanism as an
   **app update** killing the process — that's handled by `UpdateReceiver`, above.)
+- **The overlay plugin's FGS notification is expected, not a second recap.** Android
+  requires a visible foreground-service notification. Once `POST_NOTIFICATIONS` is
+  granted, testers see **two** shade items: the one-shot day-1 recap
+  ("Your first day with Beacon") and the overlay `OverlayService` item (channel
+  `IMPORTANCE_DEFAULT`; body is `overlayContent`, the declared intent). Dinesh
+  accepted this 2026-08-16: silent, clears when the session is marked Done. Do
+  **not** patch the overlay fork to hide it unless a Play review demands it.
+
 - **Memory:** up to 3 engines while the app is open (UI + background + overlay), dropping
   to ~2 (background + overlay) when closed. Battery soak vs. the <2%/day target is untested.
 - **`flutter_overlay_window`'s own background service (`OverlayService`) crashes with a
