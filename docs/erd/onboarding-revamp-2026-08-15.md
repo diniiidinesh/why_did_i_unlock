@@ -1,7 +1,7 @@
 # ERD — Onboarding revamp (copy diet + animated walkthrough + day-1 feature discovery)
 
 > Plan doc. Scoped 2026-08-15. **Part A (PR 1) merged 2026-08-16** (PR #20).
-> **Part B (PR 2) in progress** on `cursor/onboarding-walkthrough`. Parts C/D not yet built. Owner: Dinesh.
+> **Part C (PR 3) in progress** on `cursor/onboarding-tooltips`. Part D not yet built. Owner: Dinesh.
 > Parts A/B/C-in-app are pure main-UI-engine work — no isolate, overlay, native,
 > or schema changes. The day-1 **notification** (§4D) is the one piece that
 > breaks that boundary; it is deliberately isolated into its own PR so the rest
@@ -56,6 +56,14 @@
   snooze fades. Timings: `walkthroughBeatDuration` /
   `walkthroughMorphDuration` / `walkthroughHighlightDuration` /
   `walkthroughSnoozeHoldDuration` (snooze holds a beat longer before fade).
+- **2026-08-16 (PR 3)** — Tooltips + Try it now + "How long until Done" on
+  `cursor/onboarding-tooltips`. Anchored overlay uses the target's
+  `RenderBox` (`lib/discovery_tooltip.dart`) rather than
+  `CompositedTransformFollower`, which painted hundreds of pixels off-screen
+  against Home's scrolling `ListView`. `OnboardingStep.tryIt` is omitted
+  unless overlay permission is granted. `NudgeTuning` + §2.2 keys live in
+  `AppSettings`. First-visit banners on Settings / Manage options. Analyze
+  and `flutter test` clean; on-device cases 96–100 still ❌.
 
 ---
 

@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'about_screen.dart';
 import 'app_settings.dart';
 import 'beacon_theme.dart';
+import 'discovery_tooltip.dart';
 import 'history_screen.dart';
 import 'insights/outcome_donut.dart';
 import 'intent_store.dart';
@@ -71,6 +72,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _oemNudgeDismissed = false;
   int _walkthroughSeenVersion = 0;
 
+  final GlobalKey _settingsTargetKey = GlobalKey();
+  final GlobalKey _manageTargetKey = GlobalKey();
+  final DiscoveryPolicy _discovery = const DiscoveryPolicy();
+  OverlayEntry? _tooltipEntry;
+  DiscoveryTarget? _tooltipTarget;
+  final Set<DiscoveryTarget> _tooltipDismissedThisSession = {};
+  bool _launchRecorded = false;
+  int _appLaunchCount = 0;
+  bool _settingsOpened = false;
+  bool _manageOpened = false;
+  int _settingsShows = 0;
+  int _manageShows = 0;
+  bool _fallbackDismissedThisSession = false;
+
   @override
   void initState() {
     super.initState();
@@ -86,6 +101,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       _onPullRefresh();
     }
+  }
+
+  @override
+  void didChangeMetrics() {
+    // Stale overlay position after rotation is the classic coach-mark bug
+    // (`§4C.3`). Dismiss and re-anchor on the next frame if the target is
+    // still visible.
+    _hideTooltip();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncDiscovery();
+    });
   }
 
   /// Re-reads permission, settings snapshot, and insight queries without
@@ -111,6 +137,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _walkthroughSeenVersion = results.$5;
       });
       await _loadInsights();
+      await _readDiscoveryFlags();
+      _scheduleDiscovery();
     } catch (e, st) {
       if (kDebugMode) debugPrint('🏠 Home._refreshVisible failed: $e\n$st');
       if (mounted) setState(() => _loadFailed = true);
@@ -129,6 +157,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _openRoute(WidgetBuilder builder) async {
+    _hideTooltip();
     await Navigator.of(context).push(MaterialPageRoute(builder: builder));
     // Settings / Status / History / Manage can change prefs, permission, or
     // (via delete-all) the underlying logs — refresh when we become visible
@@ -197,6 +226,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _loadFailed = false;
       });
       await _loadInsights();
+      await widget.settings.ensureFirstLaunchAt(DateTime.now());
+      if (!_launchRecorded) {
+        _launchRecorded = true;
+        await widget.settings.incrementAppLaunchCount();
+      }
+      await _readDiscoveryFlags();
+      _scheduleDiscovery();
     } catch (e, st) {
       if (kDebugMode) debugPrint('🏠 Home._load failed: $e\n$st');
       if (mounted) setState(() => _loadFailed = true);
@@ -255,9 +291,113 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await _loadInsights();
   }
 
+  Future<void> _readDiscoveryFlags() async {
+    final results = await (
+      widget.settings.appLaunchCount(),
+      widget.settings.settingsScreenOpened(),
+      widget.settings.managePresetsOpened(),
+      widget.settings.settingsTooltipShows(),
+      widget.settings.manageTooltipShows(),
+    ).wait;
+    if (!mounted) return;
+    setState(() {
+      _appLaunchCount = results.$1;
+      _settingsOpened = results.$2;
+      _manageOpened = results.$3;
+      _settingsShows = results.$4;
+      _manageShows = results.$5;
+    });
+  }
+
+  void _scheduleDiscovery() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncDiscovery();
+    });
+  }
+
+  Future<void> _syncDiscovery() async {
+    if (!mounted) return;
+    final wantFallback = !_fallbackDismissedThisSession &&
+        _discovery.showFallbackBanner(
+          launchCount: _appLaunchCount,
+          settingsOpened: _settingsOpened,
+          manageOpened: _manageOpened,
+        );
+    if (wantFallback) {
+      _hideTooltip();
+      return;
+    }
+
+    final next = _discovery.nextTooltip(
+      hasUnlocks: (_allTimeUnlockCount ?? 0) > 0,
+      settingsOpened: _settingsOpened,
+      manageOpened: _manageOpened,
+      settingsShows: _settingsShows,
+      manageShows: _manageShows,
+      dismissedThisSession: _tooltipDismissedThisSession,
+    );
+    if (next == _tooltipTarget && _tooltipEntry != null) {
+      final visibleKey =
+          next == DiscoveryTarget.settings ? _settingsTargetKey : _manageTargetKey;
+      if (discoveryTargetIsVisible(visibleKey)) return;
+      _hideTooltip();
+      return;
+    }
+    _hideTooltip();
+    if (next == null) return;
+
+    final key = next == DiscoveryTarget.settings ? _settingsTargetKey : _manageTargetKey;
+    if (!discoveryTargetIsVisible(key)) return;
+
+    final overlay = Overlay.maybeOf(context);
+    if (overlay == null) return;
+
+    if (next == DiscoveryTarget.settings) {
+      _settingsShows += 1;
+      await widget.settings.setSettingsTooltipShows(_settingsShows);
+    } else {
+      _manageShows += 1;
+      await widget.settings.setManageTooltipShows(_manageShows);
+    }
+    if (!mounted) return;
+
+    _tooltipTarget = next;
+    _tooltipEntry = buildDiscoveryTooltipEntry(
+      targetKey: key,
+      target: next,
+      onGotIt: _onTooltipGotIt,
+    );
+    overlay.insert(_tooltipEntry!);
+  }
+
+  void _onTooltipGotIt() {
+    _advanceQueueAfterDismiss();
+  }
+
+  void _onHomePointerDown(PointerDownEvent _) {
+    if (_tooltipTarget == null) return;
+    _advanceQueueAfterDismiss();
+  }
+
+  void _advanceQueueAfterDismiss() {
+    final current = _tooltipTarget;
+    _hideTooltip();
+    if (current != null) _tooltipDismissedThisSession.add(current);
+    Future<void>.delayed(const Duration(milliseconds: 80), () {
+      if (mounted) _syncDiscovery();
+    });
+  }
+
+  void _hideTooltip() {
+    _tooltipEntry?.remove();
+    _tooltipEntry = null;
+    _tooltipTarget = null;
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _hideTooltip();
     if (_ownsStore) _store?.close();
     super.dispose();
   }
@@ -327,7 +467,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: _onPullRefresh,
-          child: ListView(
+          child: Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: _onHomePointerDown,
+            child: NotificationListener<ScrollNotification>(
+              onNotification: (_) {
+                _tooltipEntry?.markNeedsBuild();
+                _scheduleDiscovery();
+                return false;
+              },
+              child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(20, 24, 20, 32),
             children: [
@@ -371,6 +520,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       await widget.settings.setOemAutostartNudgeDismissed(true);
                       if (mounted) setState(() => _oemNudgeDismissed = true);
                     },
+                  ),
+                ],
+                if (!_fallbackDismissedThisSession &&
+                    _discovery.showFallbackBanner(
+                      launchCount: _appLaunchCount,
+                      settingsOpened: _settingsOpened,
+                      manageOpened: _manageOpened,
+                    )) ...[
+                  const SizedBox(height: 12),
+                  _FallbackDiscoveryCard(
+                    settingsOpened: _settingsOpened,
+                    manageOpened: _manageOpened,
+                    onOpenSettings: () => _openRoute((_) => const SettingsScreen()),
+                    onOpenManage: () => _openRoute((_) => const ManagePresetsScreen()),
+                    onDismiss: () => setState(() => _fallbackDismissedThisSession = true),
                   ),
                 ],
                 const SizedBox(height: 12),
@@ -458,7 +622,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          'Time to mark done',
+                          'How long until Done',
                           style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 8),
@@ -486,37 +650,43 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ],
                 const SizedBox(height: 12),
                 _HomeCard(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Settings',
-                        style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        _settingsSnapshot == null
-                            ? 'Loading…'
-                            : _settingsSummary(_settingsSnapshot!),
-                        style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.35),
-                      ),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton(
-                          onPressed: () => _openRoute((_) => const SettingsScreen()),
-                          child: const Text('Open Settings'),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Settings',
+                          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
                         ),
-                      ),
-                    ],
-                  ),
+                        const SizedBox(height: 6),
+                        Text(
+                          _settingsSnapshot == null
+                              ? 'Loading…'
+                              : _settingsSummary(_settingsSnapshot!),
+                          style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.35),
+                        ),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            key: _settingsTargetKey,
+                            onPressed: () => _openRoute((_) => const SettingsScreen()),
+                            child: const Text('Open Settings'),
+                          ),
+                        ),
+                      ],
+                    ),
                 ),
               ],
               const SizedBox(height: 20),
               _HomeLink(label: 'View history', onPressed: () => _openRoute((_) => const HistoryScreen())),
-              _HomeLink(label: 'Manage options', onPressed: () => _openRoute((_) => const ManagePresetsScreen())),
+              KeyedSubtree(
+                key: _manageTargetKey,
+                child: _HomeLink(label: 'Manage options', onPressed: () => _openRoute((_) => const ManagePresetsScreen())),
+              ),
               _HomeLink(label: 'About', onPressed: () => _openRoute((_) => const AboutScreen())),
             ],
           ),
+              ),
+            ),
         ),
       ),
     );
@@ -629,6 +799,57 @@ class _OemAutostartNudgeCard extends StatelessWidget {
               TextButton(onPressed: onOpenStatus, child: const Text('Open Status')),
               TextButton(onPressed: onDismiss, child: const Text('Dismiss')),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FallbackDiscoveryCard extends StatelessWidget {
+  final bool settingsOpened;
+  final bool manageOpened;
+  final VoidCallback onOpenSettings;
+  final VoidCallback onOpenManage;
+  final VoidCallback onDismiss;
+
+  const _FallbackDiscoveryCard({
+    required this.settingsOpened,
+    required this.manageOpened,
+    required this.onOpenSettings,
+    required this.onOpenManage,
+    required this.onDismiss,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _HomeCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'A few things you can change',
+            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+          ),
+          if (!settingsOpened) ...[
+            const SizedBox(height: 8),
+            Text(
+              DiscoveryCopy.settingsBody,
+              style: const TextStyle(color: Colors.white70, height: 1.35),
+            ),
+            TextButton(onPressed: onOpenSettings, child: const Text('Open Settings')),
+          ],
+          if (!manageOpened) ...[
+            const SizedBox(height: 4),
+            Text(
+              DiscoveryCopy.manageBody,
+              style: const TextStyle(color: Colors.white70, height: 1.35),
+            ),
+            TextButton(onPressed: onOpenManage, child: const Text('Manage options')),
+          ],
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(onPressed: onDismiss, child: const Text('Dismiss')),
           ),
         ],
       ),

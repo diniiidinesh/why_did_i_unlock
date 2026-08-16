@@ -9,9 +9,11 @@
 > `docs/erd/onboarding-revamp-2026-08-15.md` Appendix A). Order of work agreed:
 >
 > 1. **[P0] Onboarding revamp — IN PROGRESS.** PR 1 merged 2026-08-16
->    (copy diet + `OnboardingStep` enum, on-device ✅). Next: animated
->    walkthrough (`cursor/onboarding-walkthrough`). Then tooltips, then
->    day-1 stats. Full plan + guardrails:
+>    (copy diet + `OnboardingStep` enum, on-device ✅). PR 2 walkthrough is
+>    on `cursor/onboarding-walkthrough` (not merged). **PR 3 (tooltips +
+>    Try it now + label rename) is on `cursor/onboarding-tooltips`** —
+>    `flutter analyze`/`flutter test` clean; needs on-device cases 96–100
+>    (`docs/TEST_PLAN.md`). Then PR 4 day-1 stats. Full plan + guardrails:
 >    `docs/erd/onboarding-revamp-2026-08-15.md` (§9 sequencing, §11 handoff).
 > 2. **[P0] Outstanding-intent prompt** — plan already written
 >    (`docs/erd/outstanding-intent-prompt-2026-08-15.md`), not built. **Promoted
@@ -134,10 +136,10 @@ Priority tags: **[P1]** = do soon / alongside related work · **[P2]** = worthwh
   day-1 stats screen in `docs/erd/onboarding-revamp-2026-08-15.md` §4C.5 is a
   partial down-payment on (a).
 
-- **[P2 — NEW 2026-08-15] Rename the "Time to mark done" insight label.**
+- **[P2 — DONE 2026-08-16] Rename the "Time to mark done" insight label.**
   Vishishta: *"I am not clear what the 'Time to mark done' feature means."* It's a
   duration statistic, not a feature, and the label reads like a setting. One-line
-  copy fix — folded into the onboarding work's PR 3 (`onboarding-revamp` §5.4).
+  copy fix — Home now says **"How long until Done"** (`cursor/onboarding-tooltips`).
 
 - **[P2] Outcome donut — prompt-level (per-preset) breakdown** — today's donut is outcome categories only (`IntentStore.outcomeBreakdown` → T15/T18). Want a split of **which presets** contributed inside a slice (e.g. within "done", how many were Payments vs Calls). A full dedicated per-preset breakdown screen is optional later; **MVP:** tap/long-press (or hover on desktop) a slice → tooltip/sheet showing preset-level counts for that outcome. Needs a store query that groups by `(outcome category, preset_id/label)` for the active insight window — not just category totals. Requested 2026-07-24.
 

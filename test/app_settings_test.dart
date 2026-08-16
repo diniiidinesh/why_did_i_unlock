@@ -50,6 +50,39 @@ void main() {
       await settings.setWalkthroughSeenVersion(AppSettings.currentWalkthroughVersion);
       expect(await settings.walkthroughSeenVersion(), AppSettings.currentWalkthroughVersion);
     });
+
+    test('feature-discovery flags default off and round-trip', () async {
+      expect(await settings.firstLaunchAtMs(), isNull);
+      await settings.ensureFirstLaunchAt(DateTime.utc(2026, 8, 16));
+      expect(await settings.firstLaunchAtMs(), DateTime.utc(2026, 8, 16).millisecondsSinceEpoch);
+      await settings.ensureFirstLaunchAt(DateTime.utc(2026, 8, 17));
+      expect(await settings.firstLaunchAtMs(), DateTime.utc(2026, 8, 16).millisecondsSinceEpoch);
+
+      expect(await settings.dayOneNudgeShown(), isFalse);
+      await settings.setDayOneNudgeShown(true);
+      expect(await settings.dayOneNudgeShown(), isTrue);
+
+      expect(await settings.settingsScreenOpened(), isFalse);
+      await settings.setSettingsScreenOpened(true);
+      expect(await settings.settingsScreenOpened(), isTrue);
+
+      expect(await settings.managePresetsOpened(), isFalse);
+      await settings.setManagePresetsOpened(true);
+      expect(await settings.managePresetsOpened(), isTrue);
+
+      expect(await settings.settingsTooltipShows(), 0);
+      await settings.setSettingsTooltipShows(2);
+      expect(await settings.settingsTooltipShows(), 2);
+
+      expect(await settings.manageTooltipShows(), 0);
+      await settings.setManageTooltipShows(1);
+      expect(await settings.manageTooltipShows(), 1);
+
+      expect(await settings.appLaunchCount(), 0);
+      await settings.incrementAppLaunchCount();
+      await settings.incrementAppLaunchCount();
+      expect(await settings.appLaunchCount(), 2);
+    });
   });
 
   group('31. round-trips', () {

@@ -3,6 +3,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'about_screen.dart' show privacyPolicyUrl;
 import 'app_settings.dart';
+import 'discovery_tooltip.dart';
 import 'export_csv.dart';
 import 'intent_store.dart';
 import 'manage_presets_screen.dart';
@@ -80,6 +81,8 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   double? _probability;
   bool? _quietHoursEnabled;
   QuietHoursWindow? _quietHoursWindow;
+  bool _showFirstVisitBanner = false;
+  bool _firstVisitResolved = false;
 
   @override
   void initState() {
@@ -113,6 +116,12 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
       widget.settings.quietHoursEnabled(),
       widget.settings.quietHoursWindow(),
     ).wait;
+    if (!_firstVisitResolved) {
+      final already = await widget.settings.settingsScreenOpened();
+      if (!already) await widget.settings.setSettingsScreenOpened(true);
+      _firstVisitResolved = true;
+      _showFirstVisitBanner = !already;
+    }
     if (!mounted) return;
     setState(() {
       _promptsEnabled = results.$1;
@@ -265,6 +274,11 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
             ? const Center(child: CircularProgressIndicator())
             : ListView(
               children: [
+                if (_showFirstVisitBanner)
+                  FirstVisitBanner(
+                    message: DiscoveryCopy.settingsBody,
+                    onDismiss: () => setState(() => _showFirstVisitBanner = false),
+                  ),
                 const _SectionHeader('Prompts'),
                 SwitchListTile(
                   title: const Text('Prompt on unlock', style: TextStyle(color: Colors.white)),

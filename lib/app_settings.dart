@@ -45,6 +45,13 @@ class AppSettings {
   static const String _onboardingCompletedKey = 'onboarding_completed';
   static const String _oemAutostartNudgeDismissedKey = 'oem_autostart_nudge_dismissed';
   static const String _walkthroughSeenVersionKey = 'walkthrough_seen_version';
+  static const String _firstLaunchAtKey = 'first_launch_at';
+  static const String _dayOneNudgeShownKey = 'day_one_nudge_shown';
+  static const String _settingsScreenOpenedKey = 'settings_screen_opened';
+  static const String _managePresetsOpenedKey = 'manage_presets_opened';
+  static const String _settingsTooltipShowsKey = 'settings_tooltip_shows';
+  static const String _manageTooltipShowsKey = 'manage_tooltip_shows';
+  static const String _appLaunchCountKey = 'app_launch_count';
 
   // ---------------------------------------------------------------------
   // Bounds — see docs/DATA_MODEL.md §5 (Settings) for the product rationale.
@@ -115,6 +122,71 @@ class AppSettings {
 
   Future<void> setWalkthroughSeenVersion(int value) async {
     await SharedPreferencesAsync().setInt(_walkthroughSeenVersionKey, value);
+  }
+
+  // ---------------------------------------------------------------------
+  // Feature discovery (§4C) — Home tooltips + first-visit banners.
+  // firstLaunchAt / dayOneNudgeShown are written here so PR 4 can consume
+  // them without a second prefs migration.
+  // ---------------------------------------------------------------------
+  Future<int?> firstLaunchAtMs() async {
+    return SharedPreferencesAsync().getInt(_firstLaunchAtKey);
+  }
+
+  /// Sets once; later calls are no-ops.
+  Future<void> ensureFirstLaunchAt(DateTime now) async {
+    final prefs = SharedPreferencesAsync();
+    if (await prefs.getInt(_firstLaunchAtKey) != null) return;
+    await prefs.setInt(_firstLaunchAtKey, now.millisecondsSinceEpoch);
+  }
+
+  Future<bool> dayOneNudgeShown() async {
+    return await SharedPreferencesAsync().getBool(_dayOneNudgeShownKey) ?? false;
+  }
+
+  Future<void> setDayOneNudgeShown(bool value) async {
+    await SharedPreferencesAsync().setBool(_dayOneNudgeShownKey, value);
+  }
+
+  Future<bool> settingsScreenOpened() async {
+    return await SharedPreferencesAsync().getBool(_settingsScreenOpenedKey) ?? false;
+  }
+
+  Future<void> setSettingsScreenOpened(bool value) async {
+    await SharedPreferencesAsync().setBool(_settingsScreenOpenedKey, value);
+  }
+
+  Future<bool> managePresetsOpened() async {
+    return await SharedPreferencesAsync().getBool(_managePresetsOpenedKey) ?? false;
+  }
+
+  Future<void> setManagePresetsOpened(bool value) async {
+    await SharedPreferencesAsync().setBool(_managePresetsOpenedKey, value);
+  }
+
+  Future<int> settingsTooltipShows() async {
+    return await SharedPreferencesAsync().getInt(_settingsTooltipShowsKey) ?? 0;
+  }
+
+  Future<void> setSettingsTooltipShows(int value) async {
+    await SharedPreferencesAsync().setInt(_settingsTooltipShowsKey, value);
+  }
+
+  Future<int> manageTooltipShows() async {
+    return await SharedPreferencesAsync().getInt(_manageTooltipShowsKey) ?? 0;
+  }
+
+  Future<void> setManageTooltipShows(int value) async {
+    await SharedPreferencesAsync().setInt(_manageTooltipShowsKey, value);
+  }
+
+  Future<int> appLaunchCount() async {
+    return await SharedPreferencesAsync().getInt(_appLaunchCountKey) ?? 0;
+  }
+
+  Future<void> incrementAppLaunchCount() async {
+    final next = await appLaunchCount() + 1;
+    await SharedPreferencesAsync().setInt(_appLaunchCountKey, next);
   }
 
   // ---------------------------------------------------------------------
