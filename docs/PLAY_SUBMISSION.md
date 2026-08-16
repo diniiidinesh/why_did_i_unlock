@@ -162,6 +162,8 @@ submission**, because a single added dependency can invalidate every answer:
     no network.
   - `share_plus` — hands a local CSV temp file to the system share sheet; the
     *user* may choose an app that uploads, but Beacon does not transmit.
+  - `flutter_local_notifications` — posts an on-device day-1 recap reminder
+    from the background engine. No FCM, no network, no off-device payload.
 - `android:allowBackup="false"` — intent history is excluded from Android
   auto-backup, so it does not leave the device that way either.
 
@@ -178,10 +180,14 @@ submission**, because a single added dependency can invalidate every answer:
 
 Confirmed against the current **main** manifest — the app requests
 `SYSTEM_ALERT_WINDOW`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`,
-`RECEIVE_BOOT_COMPLETED`, `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`. None of the
+`RECEIVE_BOOT_COMPLETED`, `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`,
+`POST_NOTIFICATIONS`. None of the
 first four trigger Play's sensitive-permission declaration forms (Accessibility,
 SMS/Call Log, `QUERY_ALL_PACKAGES`, `MANAGE_EXTERNAL_STORAGE`, exact alarms,
-etc.). The `<queries>` block is a narrowly scoped `PROCESS_TEXT` intent inserted
+etc.). `POST_NOTIFICATIONS` is a runtime permission (Android 13+), not a
+declaration-form permission; it is requested at the end of onboarding only if
+the user leaves "Remind me tomorrow" on, and the recap still works in-app if
+they refuse. The `<queries>` block is a narrowly scoped `PROCESS_TEXT` intent inserted
 by the Flutter engine, **not** `QUERY_ALL_PACKAGES`.
 
 > ⚠️ **`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`** — use the draft in §1 when the
@@ -221,11 +227,11 @@ by the Flutter engine, **not** `QUERY_ALL_PACKAGES`.
   manifest change alone doesn't retroactively clear an already-surfaced Console
   prompt.
 - **[ ] Verify the foreground-service notification is actually visible on
-  Android 13+.** `POST_NOTIFICATIONS` is not in the manifest. Play policy expects
-  a foreground service to be user-visible; if the ongoing notification is
-  suppressed, that is both a policy and a trust problem. **Check on a real
-  Android 13+ device** — this is a 30-second observation, and the fix (if needed)
-  is a manifest change requiring sign-off per `CLAUDE.md` §7.
+  Android 13+.** `POST_NOTIFICATIONS` is now in the manifest for the optional
+  day-1 recap reminder (`cursor/onboarding-day-one`). Play policy expects
+  a foreground service to be user-visible; granting the permission for that
+  reminder also un-suppresses the ongoing FGS notification. **Check on a real
+  Android 13+ device** both with the permission granted and refused.
 - **[ ] `applicationId` is permanent:** `com.whydidiunlock.why_did_i_unlock`.
   It appears in the Play URL forever and cannot be changed after first publish.
   The display name can change freely; this cannot. **Acknowledge before first

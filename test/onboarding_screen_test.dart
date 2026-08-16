@@ -14,6 +14,8 @@ void main() {
     Future<void> Function()? requestBatteryExemption,
     Future<String?> Function()? readManufacturer,
     Future<void> Function()? completeOnboarding,
+    Future<void> Function(bool enabled)? persistDayOneReminder,
+    Future<void> Function()? requestNotificationPermission,
     VoidCallback? onFinished,
     void Function({required int screenWidth, required int screenHeight})? onShowPromptNow,
   }) {
@@ -25,6 +27,8 @@ void main() {
         requestBatteryExemption: requestBatteryExemption ?? () async {},
         readManufacturer: readManufacturer ?? () async => null,
         completeOnboarding: completeOnboarding ?? () async {},
+        persistDayOneReminder: persistDayOneReminder ?? (_) async {},
+        requestNotificationPermission: requestNotificationPermission ?? () async {},
         onFinished: onFinished,
         onShowPromptNow: onShowPromptNow,
       ),
@@ -350,6 +354,47 @@ void main() {
 
     expect(completed, isTrue);
     expect(finished, isTrue);
+  });
+
+  testWidgets('last-step reminder defaults on; Get started requests notification permission', (tester) async {
+    bool? persisted;
+    var requested = 0;
+    await pumpOnboarding(
+      tester,
+      persistDayOneReminder: (enabled) async => persisted = enabled,
+      requestNotificationPermission: () async { requested++; },
+    );
+    await tester.pump();
+    await advanceTo(tester, OnboardingStep.yourData);
+
+    expect(find.text('Remind me tomorrow to check my first day'), findsOneWidget);
+    await tester.tap(find.text('Get started'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(persisted, isTrue);
+    expect(requested, 1);
+  });
+
+  testWidgets('turning the reminder off skips the permission request', (tester) async {
+    bool? persisted;
+    var requested = 0;
+    await pumpOnboarding(
+      tester,
+      persistDayOneReminder: (enabled) async => persisted = enabled,
+      requestNotificationPermission: () async { requested++; },
+    );
+    await tester.pump();
+    await advanceTo(tester, OnboardingStep.yourData);
+
+    await tester.tap(find.byType(Switch));
+    await tester.pump();
+    await tester.tap(find.text('Get started'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(persisted, isFalse);
+    expect(requested, 0);
   });
 
   testWidgets('Try it now appears only with overlay permission and can skip', (tester) async {

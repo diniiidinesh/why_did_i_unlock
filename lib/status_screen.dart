@@ -188,12 +188,10 @@ class _StatusScreenState extends State<StatusScreen> {
           const _SectionHeader('Notifications'),
           const SizedBox(height: 8),
           const Text(
-            // Honest, not a fabricated "granted" check — the manifest does
-            // not request POST_NOTIFICATIONS yet (CLAUDE.md §2), so there is
-            // nothing real to report here beyond this note.
-            'This app doesn\'t use notifications yet — the small ongoing '
-            'notification you may see is required by Android to keep the '
-            'background monitoring service alive, not a feature notification.',
+            'The small ongoing notification is required by Android to keep '
+            'unlock monitoring alive. After the first day, Beacon may also '
+            'post one local reminder to look at your stats — only if you '
+            'opted in during onboarding, and never via the internet.',
             style: TextStyle(color: Colors.white70, fontSize: 13),
           ),
           const SizedBox(height: 24),

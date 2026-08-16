@@ -13,6 +13,9 @@ import 'beacon_theme.dart';
 import 'brand.dart';
 import 'bubble_overlay_geometry.dart';
 import 'bubble_widget.dart';
+import 'day_one.dart';
+import 'day_one_notifications.dart';
+import 'day_one_stats_screen.dart';
 import 'home_screen.dart';
 import 'intent_store.dart';
 import 'onboarding_screen.dart';
@@ -763,6 +766,10 @@ void backgroundMain() {
       _lastNativeWidthPx = width;
       _lastNativeHeightPx = height;
       await _showCaptureScreen(width, height);
+      // After the prompt path, not before: a day-1 prefs/plugin call must
+      // never sit on the unlock→capture hot path (`CLAUDE.md` §8). Failures
+      // inside are swallowed; the in-app recap still runs on next launch.
+      unawaited(maybePostDayOneNotification());
     } else if (call.method == 'onLock') {
       debugPrint('🔒 LOCK EVENT RECEIVED at ${DateTime.now()}');
       unawaited(ProblemReportLog.recordBreadcrumb(
@@ -1421,6 +1428,7 @@ class _AppLauncherState extends State<AppLauncher> {
   /// for that brief window rather than a spinner, matching this app's other
   /// "no flash of stale/loading UI" choices (docs/DATA_MODEL.md §4).
   bool? _onboardingCompleted;
+  bool _showDayOneRecap = false;
 
   @override
   void initState() {
@@ -1440,7 +1448,26 @@ class _AppLauncherState extends State<AppLauncher> {
       'AppSettings.onboardingCompleted()',
       _appSettings.onboardingCompleted(),
     );
-    if (mounted) setState(() => _onboardingCompleted = completed ?? true);
+    await _appSettings.ensureFirstLaunchAt(DateTime.now());
+    var showRecap = false;
+    if (completed != false) {
+      showRecap = await _withTimeout(
+            'dayOneRecapShouldShow()',
+            dayOneRecapShouldShow(_appSettings, DateTime.now()),
+          ) ??
+          false;
+    }
+    if (mounted) {
+      setState(() {
+        _onboardingCompleted = completed ?? true;
+        _showDayOneRecap = showRecap;
+      });
+    }
+  }
+
+  Future<void> _dismissDayOneRecap() async {
+    await _appSettings.setDayOneNudgeShown(true);
+    if (mounted) setState(() => _showDayOneRecap = false);
   }
 
   @override
@@ -1456,6 +1483,9 @@ class _AppLauncherState extends State<AppLauncher> {
           if (mounted) setState(() => _onboardingCompleted = true);
         },
       );
+    }
+    if (_showDayOneRecap) {
+      return DayOneStatsScreen(onFinished: _dismissDayOneRecap);
     }
     return const HomeScreen();
   }

@@ -47,6 +47,8 @@ class AppSettings {
   static const String _walkthroughSeenVersionKey = 'walkthrough_seen_version';
   static const String _firstLaunchAtKey = 'first_launch_at';
   static const String _dayOneNudgeShownKey = 'day_one_nudge_shown';
+  static const String _dayOneReminderEnabledKey = 'day_one_reminder_enabled';
+  static const String _dayOneNotificationPostedKey = 'day_one_notification_posted';
   static const String _settingsScreenOpenedKey = 'settings_screen_opened';
   static const String _managePresetsOpenedKey = 'manage_presets_opened';
   static const String _settingsTooltipShowsKey = 'settings_tooltip_shows';
@@ -76,6 +78,8 @@ class AppSettings {
   static const int defaultQuietHoursEndMinutes = 7 * 60; // 07:00 — wraps past midnight
   static const RetentionPeriod defaultRetention = RetentionPeriod.oneYear;
   static const bool defaultOnboardingCompleted = false;
+  /// Opt-in on the last onboarding step — defaulted on (§4D.3).
+  static const bool defaultDayOneReminderEnabled = true;
 
   /// Bump when the mechanic itself changes (e.g. the timer ships) so the
   /// Home re-entry card resurfaces. Independent of [onboardingCompleted] —
@@ -126,8 +130,9 @@ class AppSettings {
 
   // ---------------------------------------------------------------------
   // Feature discovery (§4C) — Home tooltips + first-visit banners.
-  // firstLaunchAt / dayOneNudgeShown are written here so PR 4 can consume
-  // them without a second prefs migration.
+  // firstLaunchAt / dayOneNudgeShown were written in PR 3 so PR 4 can
+  // consume them without a second prefs migration. Reminder-opt-in and
+  // "notification already posted" are PR 4's own keys.
   // ---------------------------------------------------------------------
   Future<int?> firstLaunchAtMs() async {
     return SharedPreferencesAsync().getInt(_firstLaunchAtKey);
@@ -140,12 +145,35 @@ class AppSettings {
     await prefs.setInt(_firstLaunchAtKey, now.millisecondsSinceEpoch);
   }
 
+  /// Overwrites [firstLaunchAt] — used only by About's hidden long-press
+  /// so Dinesh can fire the recap without waiting 24h (`§6`).
+  Future<void> overwriteFirstLaunchAt(DateTime at) async {
+    await SharedPreferencesAsync().setInt(_firstLaunchAtKey, at.millisecondsSinceEpoch);
+  }
+
   Future<bool> dayOneNudgeShown() async {
     return await SharedPreferencesAsync().getBool(_dayOneNudgeShownKey) ?? false;
   }
 
   Future<void> setDayOneNudgeShown(bool value) async {
     await SharedPreferencesAsync().setBool(_dayOneNudgeShownKey, value);
+  }
+
+  Future<bool> dayOneReminderEnabled() async {
+    return await SharedPreferencesAsync().getBool(_dayOneReminderEnabledKey) ??
+        defaultDayOneReminderEnabled;
+  }
+
+  Future<void> setDayOneReminderEnabled(bool value) async {
+    await SharedPreferencesAsync().setBool(_dayOneReminderEnabledKey, value);
+  }
+
+  Future<bool> dayOneNotificationPosted() async {
+    return await SharedPreferencesAsync().getBool(_dayOneNotificationPostedKey) ?? false;
+  }
+
+  Future<void> setDayOneNotificationPosted(bool value) async {
+    await SharedPreferencesAsync().setBool(_dayOneNotificationPostedKey, value);
   }
 
   Future<bool> settingsScreenOpened() async {

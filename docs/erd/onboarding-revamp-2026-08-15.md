@@ -70,6 +70,12 @@
   overlay still blocks later unlocks). Three show-cap and scroll-duplicate
   bugs were fixed before merge. Parked: replace a leftover *practice
   capture* on the next real unlock (not a declared bubble).
+- **2026-08-16 (PR 4)** — Day-1 stats + local notification on
+  `cursor/onboarding-day-one`. Recap uses existing `IntentStore` queries.
+  `flutter_local_notifications` posts from the background unlock handler
+  (`plain show()`, no `zonedSchedule`). Opt-in row on the last onboarding
+  step; in-app recap if the permission is refused. Hidden long-press on
+  About version skips the 24h wait.
 
 ---
 

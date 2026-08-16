@@ -56,6 +56,11 @@ your intent history is not copied into Google Drive or device backups.
 - **Ignore battery optimizations** (`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`) —
   optional and user-initiated from the Status screen, so aggressive OEM battery
   savers do not silently kill unlock monitoring.
+- **Notifications** (`POST_NOTIFICATIONS`) — optional. Asked at the end of
+  onboarding only if you leave "Remind me tomorrow to check my first day" on,
+  so Beacon can post one local reminder after 24 hours. If you decline, the
+  same recap still appears the next time you open the app. This is not a
+  push notification and nothing is sent off your device.
 
 The app requests no other permissions.
 
