@@ -20,15 +20,42 @@ void main() {
   // for the fuller explanation).
   Future<IntentStore> openTestStore() async {
     SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
-    return IntentStore.open(path: inMemoryDatabasePath);
+    // ownConnection: true — without it every test in every file sharing this
+    // same literal path collides on sqflite's singleInstance connection
+    // cache (see IntentStore.open's doc comment); this was the root cause of
+    // this file's "restoring defaults" test being flaky under the
+    // full-suite run (docs/BACKLOG.md).
+    return IntentStore.open(path: inMemoryDatabasePath, ownConnection: true);
+  }
+
+  /// Polls in small real-clock steps (bounded by [timeout]) instead of a
+  /// single fixed delay. sqflite_common_ffi does its work on a background
+  /// Isolate outside the test's fake zone, so a blind `Future.delayed(50ms)`
+  /// is really a guess at how long that real I/O takes — fine under normal
+  /// load, but a race under a full `flutter test` run where CPU contention
+  /// from other suites can push it past 50ms (this is what made "restoring
+  /// defaults" flaky, not the DB-sharing bug fixed alongside this). Returns
+  /// as soon as [ready] is true, so the common case is still fast; only a
+  /// genuine regression burns the full timeout.
+  Future<void> settle(
+    WidgetTester tester, {
+    required bool Function() ready,
+    Duration timeout = const Duration(seconds: 2),
+    Duration step = const Duration(milliseconds: 50),
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    while (true) {
+      await tester.runAsync(() => Future<void>.delayed(step));
+      await tester.pump();
+      if (ready() || DateTime.now().isAfter(deadline)) return;
+    }
   }
 
   Future<void> pumpScreen(WidgetTester tester, IntentStore store) async {
     await tester.pumpWidget(MaterialApp(
       home: ManagePresetsScreen(openStore: () async => store),
     ));
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
-    await tester.pump();
+    await settle(tester, ready: () => find.byType(CircularProgressIndicator).evaluate().isEmpty);
   }
 
   testWidgets('lists the seeded default presets, newest-first schema aside — sorted by sort_order', (tester) async {
@@ -256,8 +283,7 @@ void main() {
     expect(find.text('Restore default presets?'), findsOneWidget);
 
     await tester.tap(find.text('Restore'));
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
-    await tester.pump();
+    await settle(tester, ready: () => find.text('Renamed Preset').evaluate().isEmpty);
 
     expect(find.text('Renamed Preset'), findsNothing);
     for (final label in defaultPresetLabels) {

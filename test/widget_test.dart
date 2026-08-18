@@ -31,7 +31,7 @@ void main() {
     databaseFactory = databaseFactoryFfi;
     late IntentStore store;
     await tester.runAsync(() async {
-      store = await IntentStore.open(path: inMemoryDatabasePath);
+      store = await IntentStore.open(path: inMemoryDatabasePath, ownConnection: true);
     });
 
     await tester.pumpWidget(MaterialApp(

@@ -26,7 +26,7 @@ void main() {
       // hatch: it runs the given callback in the real root zone so genuine
       // async I/O (isolates, real Timers, file I/O) completes normally.
       await tester.runAsync(() async {
-        store = await IntentStore.open(path: inMemoryDatabasePath);
+        store = await IntentStore.open(path: inMemoryDatabasePath, ownConnection: true);
         await store.insertEvent(IntentEvent(
           clientId: 'a',
           kind: IntentKind.intent,
@@ -75,7 +75,7 @@ void main() {
   testWidgets('HistoryScreen shows empty state with no events', (tester) async {
     late IntentStore store;
     await tester.runAsync(() async {
-      store = await IntentStore.open(path: inMemoryDatabasePath);
+      store = await IntentStore.open(path: inMemoryDatabasePath, ownConnection: true);
     });
 
     await tester.pumpWidget(MaterialApp(

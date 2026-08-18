@@ -169,7 +169,7 @@ void main() {
       sqfliteFfiInit();
       databaseFactory = databaseFactoryFfi;
       SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
-      store = await IntentStore.open(path: inMemoryDatabasePath);
+      store = await IntentStore.open(path: inMemoryDatabasePath, ownConnection: true);
     });
 
     tearDown(() async => store.close());

@@ -15,7 +15,7 @@ void main() {
     late IntentStore store;
     final now = DateTime.utc(2026, 8, 16, 12);
     await tester.runAsync(() async {
-      store = await IntentStore.open(path: inMemoryDatabasePath);
+      store = await IntentStore.open(path: inMemoryDatabasePath, ownConnection: true);
       await store.insertUnlock(unlockedAt: now, promptShown: true);
       await store.insertEvent(IntentEvent(
         clientId: 'a',
