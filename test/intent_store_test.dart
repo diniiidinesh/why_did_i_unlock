@@ -37,7 +37,12 @@ void main() {
     // Seed-version migration reads SharedPreferencesAsync on every open().
     SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
     // ":memory:" — fresh in-memory DB per test, no shared state, no disk I/O.
-    store = await IntentStore.open(path: inMemoryDatabasePath);
+    // ownConnection: true is required here, not optional — without it every
+    // test in every file sharing this same literal path collides on
+    // sqflite's singleInstance connection cache (see IntentStore.open's doc
+    // comment); this is what made the manage_presets_screen_test.dart
+    // "restoring defaults" test flaky under the full-suite run.
+    store = await IntentStore.open(path: inMemoryDatabasePath, ownConnection: true);
   });
 
   tearDown(() async {
