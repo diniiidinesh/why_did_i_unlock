@@ -32,7 +32,14 @@ class DayOneNotifications {
   static Future<void> initialize({void Function()? onRecapTapped}) async {
     if (onRecapTapped != null) _uiTapHandler = onRecapTapped;
     if (_ready) return;
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    // ic_stat_beacon (res/drawable), not the launcher mipmap: Android
+    // notification/status-bar icons must be a flat white silhouette on a
+    // transparent background — a full-color adaptive icon (ic_launcher)
+    // can't be rendered as one, so Android silently falls back to its own
+    // default icon instead. Same asset UnlockListenerService.kt's
+    // foreground-service notification already uses (see setSmallIcon
+    // there) — keeps both notifications visually consistent.
+    const android = AndroidInitializationSettings('ic_stat_beacon');
     await _plugin.initialize(
       const InitializationSettings(android: android),
       onDidReceiveNotificationResponse: (response) {

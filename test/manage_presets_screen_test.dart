@@ -51,6 +51,27 @@ void main() {
     }
   }
 
+  /// Same idea as [settle], for the handful of assertions that check raw
+  /// store state rather than something visible in the widget tree — [ready]
+  /// needs real async I/O to evaluate, so it runs inside [WidgetTester.runAsync]
+  /// each iteration rather than as a plain synchronous check.
+  Future<void> settleStore(
+    WidgetTester tester, {
+    required Future<bool> Function() ready,
+    Duration timeout = const Duration(seconds: 2),
+    Duration step = const Duration(milliseconds: 50),
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    while (true) {
+      final done = await tester.runAsync(() async {
+        await Future<void>.delayed(step);
+        return ready();
+      });
+      await tester.pump();
+      if (done! || DateTime.now().isAfter(deadline)) return;
+    }
+  }
+
   Future<void> pumpScreen(WidgetTester tester, IntentStore store) async {
     await tester.pumpWidget(MaterialApp(
       home: ManagePresetsScreen(openStore: () async => store),
@@ -85,8 +106,11 @@ void main() {
     await tester.drag(handle, const Offset(0, 120));
     await tester.pumpAndSettle();
 
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
-    await tester.pump();
+    await settleStore(tester, ready: () async {
+      final all = await store.allPresets();
+      final byLabel = {for (final p in all) p.label: p.sortOrder};
+      return byLabel['Check mail']! > byLabel['Message someone']!;
+    });
 
     await tester.runAsync(() async {
       final all = await store.allPresets();
@@ -149,8 +173,10 @@ void main() {
       of: find.widgetWithText(ListTile, 'Check mail'),
       matching: find.byType(Switch),
     ));
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
-    await tester.pump();
+    await settleStore(
+      tester,
+      ready: () async => (await store.allPresets()).firstWhere((p) => p.label == 'Check mail').enabled == false,
+    );
 
     await tester.runAsync(() async {
       final all = await store.allPresets();
@@ -188,8 +214,7 @@ void main() {
       of: find.widgetWithText(ListTile, 'One too many'),
       matching: find.byType(Switch),
     ));
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
-    await tester.pump();
+    await settle(tester, ready: () => find.byType(SnackBar).evaluate().isNotEmpty);
 
     // A usable error, not a crash — and the row must still read as disabled
     // afterwards, since the store rejected the mutation and _reload() only
@@ -219,8 +244,7 @@ void main() {
     expect(find.text('Delete preset?'), findsOneWidget);
 
     await tester.tap(find.text('Delete'));
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
-    await tester.pump();
+    await settle(tester, ready: () => find.text('Pay someone').evaluate().isEmpty);
 
     expect(find.text('Pay someone'), findsNothing);
 
@@ -255,8 +279,7 @@ void main() {
     ));
     await tester.pump();
     await tester.tap(find.text('Delete'));
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
-    await tester.pump();
+    await settle(tester, ready: () => find.text('Check mail').evaluate().isEmpty);
 
     await tester.runAsync(() async {
       final events = await store.recentEvents();
@@ -322,8 +345,7 @@ void main() {
     await tester.pump();
     await tester.enterText(find.byType(TextField), 'One too many');
     await tester.tap(find.text('Save'));
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
-    await tester.pump();
+    await settle(tester, ready: () => find.byType(SnackBar).evaluate().isNotEmpty);
 
     expect(find.byType(SnackBar), findsOneWidget);
     expect(find.text('One too many'), findsNothing);
