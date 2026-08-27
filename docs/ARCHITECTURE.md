@@ -447,6 +447,24 @@ background engine.
   access can't be added mid-session) and an on-device restart-path check (`flutter pub
   get`, force-stop the app, unlock again) before this is considered verified. Full RCA:
   `docs/debug/rca-overlay-service-null-intent-crash-2026-08-02.md`.
+- **The overlay plugin's own FGS notification (above) was showing no visible icon.**
+  Found 2026-08-27, alongside auditing every notification source for correct Beacon
+  branding (two others — `UnlockListenerService`'s own FGS notification and the day-1
+  recap — already used a dedicated flat icon and were fine). `OverlayService`'s
+  `setSmallIcon()` was fed `getDrawableResourceId("mipmap", "launcher")`, which
+  resolves the host app's `ic_launcher` — an adaptive icon (background+foreground
+  layers) on API 26+, which Android cannot render as a notification small icon; it
+  silently falls back to a blank/default icon per-OEM instead of erroring, the same
+  failure class fixed for the day-1 recap notification (§PLAY_SUBMISSION/CLAUDE.md
+  PR #28). **Applied 2026-08-27:** second patch to the same fork
+  (`diniiidinesh/flutter_overlay_window`, `fix/overlay-service-null-intent` branch,
+  commit `2cca325`) — looks up a dedicated flat `ic_stat_beacon` drawable first,
+  falling back to the original launcher-mipmap lookup only if that resource is
+  absent (keeps default behavior for any other app using this plugin). Confirmed via
+  `flutter build appbundle --release` + `flutter build apk --release --split-per-abi`
+  after `flutter pub upgrade flutter_overlay_window` (bumps `pubspec.lock`'s
+  `resolved-ref`); on-device confirmation that the bubble's shade item now shows the
+  Beacon icon is still open.
 
 ## 7. Testing gotchas (Sprint 3 — sqflite + widget tests)
 
