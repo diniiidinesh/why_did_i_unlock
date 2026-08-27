@@ -79,6 +79,16 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+            // Explicit R8 code shrinking/obfuscation + resource shrinking for the
+            // Play Console "memory and code optimization" policy (enforced Feb 2027,
+            // 25% min R8 coverage on the published bundle). Previously relied on
+            // Flutter's Gradle plugin default rather than an explicit project setting.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }
