@@ -374,3 +374,10 @@ Merged PRs #23 + #24. Shade posting + tap-opens-recap feel-passed 2026-08-16; re
 | 104 | Hidden debug: long-press About version | ❌ | Dialog: **Preview recap** opens the stats screen now. **Pretend 24 hours passed** backdates first launch; a later unlock/reopen shows the real recap path. |
 | 105 | Recap numbers | ❌ | Unlocks / intents declared / Just Like That / most common reason match History for the first day. No new SQL. |
 | 106 | Tap the day-1 notification | 🟡 | Opens **"Your first day"** (not Home), whether the app was backgrounded or killed. Continue → Home. After Continue, a later tap stays on Home. Feel-passed 2026-08-16. |
+
+### `0.6.4+15` — R8 shrink config + walkthrough caption position (2026-08-27)
+
+| # | Case | Status | Notes / expected |
+|---|---|---|---|
+| 107 | Onboarding walkthrough: caption reads above the animation | ✅ | `lib/walkthrough.dart` — per-beat caption ("You unlock.", "Beacon asks why.", etc.) now renders right below Skip, before the animated phone stage, instead of below it. Confirmed on-device 2026-08-27. |
+| 108 | Release build sanity after explicit R8/shrinkResources config | ✅ | Dinesh ran the `--release` build with `isMinifyEnabled`/`isShrinkResources` enabled on-device, confirmed fine — no shrinking-induced crash/regression observed. Not yet a case-by-case pass of every feature (unlock/bubble/notifications/report-a-problem) specifically re-verified post-shrinking; flag anything odd if it surfaces. `flutter analyze`/`flutter test` still to be run (CLAUDE.md §7 division of labor). |
