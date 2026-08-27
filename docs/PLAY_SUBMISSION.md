@@ -443,7 +443,7 @@ plugin code) would be far harder to read from Play Console alone.
       tab → upload deobfuscation file. Retroactively upload for build 11 if
       still possible.
 
-**Build 15 (0.6.4+15, 2026-08-27) — first release with R8 explicitly
+**Build 15/16 (0.6.4+16 shipped, 2026-08-27) — first release with R8 explicitly
 configured, not just Flutter's default.** Also driven by a real deadline this
 time, not just the leanness nudge above: Google's Aug 2026 Play policy
 enforces a minimum 25% R8 optimization/shrinking/obfuscation coverage on
@@ -462,6 +462,12 @@ failure class as PR #28's day-1 recap fix; both are one build, not two).
 - [x] `flutter analyze` / `flutter test` clean; all on-device checks
       (walkthrough caption, overlay notification icon, general release-build
       sanity) confirmed by Dinesh 2026-08-27.
+- [DONE — SUPERSEDED] ~~Upload AAB to Play Console (production track).~~
+      **Play Console rejected version code 15 as already in use** (2026-08-27) —
+      some earlier attempt had already claimed it. Bumped to **`0.6.4 (16)`**
+      (code-only, no functional change) and rebuilt; see the entry directly
+      below. All content described above (R8 config, walkthrough caption,
+      overlay notification icon) ships unchanged in build 16 instead.
 - [ ] Upload AAB to Play Console (production track).
 - [ ] Upload `mapping.txt` as the deobfuscation file (same steps as above).
 - [ ] Confirm the App bundle detail page now shows real (non-`-`)

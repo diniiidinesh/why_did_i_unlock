@@ -32,7 +32,7 @@ export 'brand.dart'
 /// `versionCode=12`. `about_screen_version_test.dart` now parses
 /// `pubspec.yaml` and fails if the two ever diverge again, so this can drift
 /// only as far as the next `flutter test`.
-const String appVersion = '0.6.4+15';
+const String appVersion = '0.6.4+16';
 
 /// Injected in place of a real `url_launcher` call so widget tests never
 /// touch a platform channel — same pattern `HistoryScreen.openStore` uses
