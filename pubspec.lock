@@ -243,7 +243,7 @@ packages:
     description:
       path: "."
       ref: "fix/overlay-service-null-intent"
-      resolved-ref: "614e5cb8a114c71f85eefdf089d86fb2eea9b10f"
+      resolved-ref: "2cca3251ff8ff197eeb9f86e2e88bee2bcea35e3"
       url: "https://github.com/diniiidinesh/flutter_overlay_window.git"
     source: git
     version: "0.5.0"
