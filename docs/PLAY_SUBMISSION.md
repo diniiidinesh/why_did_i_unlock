@@ -452,10 +452,16 @@ publishing capability otherwise). `android/app/build.gradle.kts`'s release
 block now explicitly sets `isMinifyEnabled`/`isShrinkResources` + a new
 `android/app/proguard-rules.pro`. Confirmed this does **not** require the
 AGP 9.0+ bump Play Console also suggests — see `docs/BACKLOG.md`'s AGP-bump
-entry (parked, ask-first).
+entry (parked, ask-first). Also bundles the onboarding walkthrough
+caption-position fix and a second `flutter_overlay_window` fork patch (the
+bubble's own FGS notification was showing no icon — same adaptive-icon
+failure class as PR #28's day-1 recap fix; both are one build, not two).
 - [x] Build: `flutter build appbundle --release`, `0.6.4 (15)` — produces
       `build/app/outputs/bundle/release/app-release.aab` (55.3MB) +
       `build/app/outputs/mapping/release/mapping.txt`.
+- [x] `flutter analyze` / `flutter test` clean; all on-device checks
+      (walkthrough caption, overlay notification icon, general release-build
+      sanity) confirmed by Dinesh 2026-08-27.
 - [ ] Upload AAB to Play Console (production track).
 - [ ] Upload `mapping.txt` as the deobfuscation file (same steps as above).
 - [ ] Confirm the App bundle detail page now shows real (non-`-`)
