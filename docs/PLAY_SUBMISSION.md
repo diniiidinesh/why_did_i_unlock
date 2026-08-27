@@ -443,6 +443,26 @@ plugin code) would be far harder to read from Play Console alone.
       tab → upload deobfuscation file. Retroactively upload for build 11 if
       still possible.
 
+**Build 15 (0.6.4+15, 2026-08-27) — first release with R8 explicitly
+configured, not just Flutter's default.** Also driven by a real deadline this
+time, not just the leanness nudge above: Google's Aug 2026 Play policy
+enforces a minimum 25% R8 optimization/shrinking/obfuscation coverage on
+published bundles starting **February 2027** (reduced Play visibility/
+publishing capability otherwise). `android/app/build.gradle.kts`'s release
+block now explicitly sets `isMinifyEnabled`/`isShrinkResources` + a new
+`android/app/proguard-rules.pro`. Confirmed this does **not** require the
+AGP 9.0+ bump Play Console also suggests — see `docs/BACKLOG.md`'s AGP-bump
+entry (parked, ask-first).
+- [x] Build: `flutter build appbundle --release`, `0.6.4 (15)` — produces
+      `build/app/outputs/bundle/release/app-release.aab` (55.3MB) +
+      `build/app/outputs/mapping/release/mapping.txt`.
+- [ ] Upload AAB to Play Console (production track).
+- [ ] Upload `mapping.txt` as the deobfuscation file (same steps as above).
+- [ ] Confirm the App bundle detail page now shows real (non-`-`)
+      Optimization/Shrinking/Obfuscation percentages — the concrete evidence
+      this release's R8 config actually took effect in the shipped bundle,
+      not just in the local build.
+
 ### "Continuously opted-in" trap
 
 - Inviting 12 emails is not enough — they must **accept and stay** opted in.
