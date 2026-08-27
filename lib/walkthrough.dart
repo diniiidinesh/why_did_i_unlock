@@ -220,6 +220,19 @@ class _WalkthroughViewState extends State<WalkthroughView> {
               child: const Text('Skip'),
             ),
           ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 12, 24, 8),
+          child: Text(
+            _beat.caption,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              height: 1.3,
+            ),
+          ),
+        ),
         Expanded(
           child: GestureDetector(
             key: const ValueKey('walkthrough-stage'),
@@ -246,19 +259,6 @@ class _WalkthroughViewState extends State<WalkthroughView> {
                   ),
                 ),
               ],
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 12, 24, 8),
-          child: Text(
-            _beat.caption,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              height: 1.3,
             ),
           ),
         ),
