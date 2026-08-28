@@ -10,7 +10,9 @@
   rewritten.** (1) UI is no longer `[Continue] [Something else]` buttons — the
   outstanding intent becomes a **selectable row with a resolve affordance**,
   sitting above the presets under the existing headline (§4a). (2) Triage moves
-  from a plain cooldown to a **staleness floor + re-ask backoff** (§5). (3) The
+  from a plain cooldown to a **staleness floor + re-ask backoff, both flat at
+  2 min** (§5) — an escalating backoff was proposed and rejected; the reasoning
+  on both sides is recorded there so it isn't re-litigated. (3) The
   `abandoned` status is **renamed, not extended** — the sweep's status gets a new
   name and `abandoned` is repurposed for the user's conscious move-on (§4c).
   (4) §11 test plan expanded substantially. Timer still out of scope, but §8 now
@@ -240,33 +242,67 @@ The earlier "same triage as a normal prompt" wording was insufficient, and
 worth spelling out why, because the failure it hides is subtle.
 
 The normal cooldown is measured from the **last event** (last prompt or
-declaration). Applied here, it blocks re-asking for one minute after the intent
-is declared — and then permits a "still doing X?" prompt on *every single
-unlock* thereafter. On the 40–90 minute sessions §1 identifies as the whole
-point of this feature, that is dozens of prompts. The cooldown solves the wrong
-half of the problem.
+declaration), which conflates two things that need to be reasoned about
+separately here: *how old is this intent* and *how recently did we ask about
+it*. Both currently default to 2 minutes, so they behave similarly today — but
+they anchor to different events, and keeping them distinct matters for
+correctness and for tuning them apart later:
 
-Two distinct questions need two distinct gates:
+Two distinct questions, two distinct gates:
 
 | Gate | Question it answers | Default | Prevents |
 |---|---|---|---|
 | **Staleness floor** | Has this intent been open long enough to be worth questioning? | **2 min** (Dinesh) | Asking "still ordering food?" 20 seconds after they said "order food" — the most obviously absurd case |
-| **Re-ask backoff** | Have we already asked about *this* intent recently? | see below | Nagging across many unlocks during one long session |
+| **Re-ask backoff** | Have we already asked about *this* intent recently? | **2 min, flat** (see below) | Nagging across an unlock *burst* — several unlocks in quick succession |
 
-Both must pass. Staleness alone is not enough: once an intent crosses 2 minutes
-it stays stale forever, so a staleness-only gate permits every subsequent unlock
-to prompt — the same nagging problem, merely delayed by two minutes.
+Both must pass. Staleness alone is not enough: once an intent crosses the floor
+it stays stale forever, so a staleness-only gate would prompt on **every**
+subsequent unlock — including the bursts where someone unlocks four times in
+ninety seconds. The backoff exists to collapse those bursts to one ask, not to
+make the app go quiet on aging intents.
 
-#### Recommended backoff shape: escalating, not flat
+#### Backoff shape: flat, same value as the floor (decided 2026-08-28)
 
-A flat 5-minute re-ask on a 90-minute session still yields ~17 prompts. But the
-*value* of the checkpoint does not decay linearly — the first "still on this?"
-after 2 minutes is worth a lot, the fourteenth is worth nothing and is actively
-corrosive to trust in the app.
+An escalating backoff (5 → 10 → 20 → 40 min) was proposed and **rejected**.
+Dinesh's argument, which holds: the probability that a declared task has
+actually been *completed* rises with elapsed time, so the checkpoint gets more
+valuable as the intent ages, not less. Escalating backoff has the perverse
+property that **the longer the bubble is wrong, the less often the user is told**
+— backwards for what is fundamentally a data-quality problem, and corrosive to
+the bubble's meaning, which `CLAUDE.md` §10 puts at the centre of the product
+thesis.
 
-Recommended: **escalating backoff per intent — 5 → 10 → 20 → 40 min (capped).**
-That yields roughly 5 prompts across a 90-minute runaway session, front-loaded
-where they matter. Flagged as a recommendation, not a settled number (§9.4).
+Second argument, equally decisive: escalating backoff optimises for long-open
+intents persisting — the exact situation this feature exists to eliminate. The
+40–90 minute sessions in §1 exist *because nothing was asking*.
+
+**Decision: staleness floor and re-ask backoff are both `2 min`,** as a single
+named tunable constant rather than a hardcoded literal (same treatment as
+`cooldown`/`probability`, so it can move without a code change and could surface
+in Settings later if testers split on it).
+
+**The honest counter-argument, recorded so it isn't re-litigated from scratch.**
+The quantity that actually governs "ask now?" is not cumulative completion
+probability but the *conditional* probability of completion since the last ask —
+roughly a hazard rate, which for most tasks is highest early and declines, since
+an intent still open at 90 minutes is selected for being genuinely long-running.
+Two real effects pull opposite ways:
+
+- `P(completed since last ask | still open)` — **declines** with age
+- `P(bubble is currently wrong)` — **rises** with age and stays high
+
+Flat cadence optimises the second. That is a deliberate product call, not an
+oversight. It is also empirically checkable post-ship (§11j).
+
+**Snooze is the escape hatch, not an algorithm.** For a genuinely long task, a
+2-minute cadence needs a way out — and one already exists: continue → the bubble
+returns → snooze it. The user controls the backoff rather than a curve guessing
+on their behalf, which matches how every other frequency control in this app
+works. No new affordance on the row (which would worsen §4a.1's mis-tap risk).
+
+**If it proves too chatty, raise the one constant.** Do not re-introduce
+escalation machinery — see the complexity note under "Where 'when did we last
+ask?' is stored" for what that costs on the unlock path.
 
 #### Probability does NOT apply to this prompt
 
@@ -305,11 +341,21 @@ Costs: the query sits on the unlock path, so it must be indexed and bounded
 alongside `openIntents()` (§7 latency budget), and it must be robust to the row
 being absent (first ever ask).
 
+With a **flat** backoff this is a single timestamp comparison — one `MAX()`, one
+subtraction. Nothing to count, nothing to reset, and it survives process death
+for free because it is derived from durable rows rather than in-memory state.
+
+This simplicity is a large part of why flat won. An escalating backoff would
+have needed the *count* of prior asks for the current intent, which drags in a
+bounded-by-`declared_at` query rather than a plain `MAX()`, correct reset
+semantics on a new intent, counter robustness across restarts, and clock-change
+behaviour on a counter rather than a single timestamp — several extra failure
+modes on the ~500ms critical unlock path, bought with a number neither party
+could defend from first principles.
+
 Because N=1 (§3), "last time we asked about *this* intent" and "last time we
-asked at all" are currently equivalent — but the escalating backoff needs the
-count of prior asks *for the current intent*, so the query must be bounded by
-`declared_at` of the open intent, not merely global. If N>1 ever ships, this
-must become genuinely per-intent.
+asked at all" are currently equivalent. Still bound the query by the open
+intent's `declared_at` so the semantics stay correct if N>1 ever ships.
 
 This yields four states rather than today's two:
 
@@ -323,8 +369,9 @@ This yields four states rather than today's two:
 `skip_reason='overlay_active'` stays for row 2. Row 3 needs its own reason
 (`SkipReason.continueBackoff` or similar) so "we deliberately stayed quiet" is
 distinguishable in analysis from "the intent was too fresh." A further outcome
-marker is needed for "we asked and they continued" (§4a) — without it, the
-escalating backoff has nothing to count.
+marker is needed for "we asked and they continued" (§4a) — the backoff derives
+its timestamp from it (§5), and §11j's continue-vs-resolve ratio is unmeasurable
+without it.
 
 ## 6. Engine / state changes
 
@@ -468,10 +515,12 @@ Sources: [Ariely & Wertenbroch 2002 (PDF)](https://web.mit.edu/ariely/www/MIT/Pa
    behavioural-design question; `docs/USER_INTERVIEWS.md` material rather than a
    guess. §8a's over-run finding leans toward showing it, but that evidence is
    about deliberate deadlines, not passive elapsed time — do not over-read it.
-6. **Escalating vs. flat re-ask backoff, and the actual numbers** (§5).
-   Recommendation is 5 → 10 → 20 → 40 min capped, with a 2-min staleness floor.
-   Every one of those numbers is currently a judgement call from one user's
-   export. Interview/telemetry material.
+6. **The actual value of the 2-min constant** (§5). Escalating-vs-flat is
+   **decided** (flat, §5). The remaining question is only whether 2 minutes is
+   the right number — it is a judgement call from one user's export, and the
+   binding constraint in practice is unlock *frequency*, not the constant. Post-
+   ship measurement (§11j) settles this better than any amount of reasoning;
+   the fix if it is chatty is raising one tunable, not adding machinery.
 7. **Does the ✓ need an undo?** Resolve-as-done is destructive and has no undo
    anywhere in the app today (the bubble's Done button has the same property, so
    this is not a new asymmetry — but this design puts the affordance somewhere
@@ -499,7 +548,7 @@ and can land and soak before any UI exists.
 | 4 | `'resolve'` message on `intentWritePort` + background handler | New outbound type (§4b). Fire-and-forget, idempotent on `clientId`. |
 | 5 | Render the outstanding row in `IntentCaptureScreen` | §4a. Includes duplicate-preset suppression and hit-target separation. Widget tests with 0 and 1 outstanding intents. |
 | 6 | Continue / ✓-resolve / replace handlers | Preserve vs. clear widget state (§6) — the two paths differ deliberately. |
-| 7 | Background triage: staleness floor + escalating backoff + new `SkipReason`s | §5's four-state table is the spec. Derive last-ask from `unlock_log`, no new column. |
+| 7 | Background triage: staleness floor + flat backoff + new `SkipReason`s | §5's four-state table is the spec. Both gates are one named tunable (2 min), not literals. Derive last-ask from `unlock_log` — a single `MAX()`, no new column, no counter. |
 | 8 | Breadcrumbs for the new decisions | `ProblemReportLog.recordBreadcrumb` via the existing relay, so a problem report shows continue/resolve/replace decisions. |
 | 9 | On-device cases in `docs/TEST_PLAN.md` | §11 is the source list. Incl. reopen-failure fallback (§7.3). |
 
@@ -528,7 +577,7 @@ case numbers when built (task 9).
 | A9 | 🔴 `'resolve'` on an already-`abandoned` row | No-op — must **not** resurrect a resolved row (existing invariant, `intent_store_test.dart` already guards this class) |
 | A10 | Replace path writes `status='abandoned'` on the old row + a new `open` row | Two rows, one open |
 | A11 | Last-ask derivation query returns null on a fresh DB | Backoff treats "never asked" correctly, no crash |
-| A12 | Last-ask derivation is bounded by the open intent's `declared_at` | A previous intent's asks don't inflate the current intent's backoff step (§5) |
+| A12 | Last-ask derivation is bounded by the open intent's `declared_at` | A previous intent's asks don't leak into the current intent's gate (§5) |
 
 ### 11b. Schema v3 migration — automated 🔴
 
@@ -582,9 +631,10 @@ The whole of §4c.1 lives or dies here. Build a **real v2 DB file** (as
 | E1 | 🔴 Declare intent, lock, unlock **within** the staleness floor | **No prompt.** `skip_reason='overlay_active'`. This is the "absurd case" the floor exists to kill |
 | E2 | Unlock just **after** the staleness floor | Prompt appears |
 | E3 | 🔴 Prompt shown, continue, unlock again immediately | **No prompt** (re-ask backoff). Bubble untouched |
-| E4 | Unlock repeatedly across a long session | Prompts follow the escalating schedule (5→10→20→40), **not** every unlock. Count them — this is the nagging regression guard |
-| E5 | 🔴 Backoff state survives a process restart | Force-stop mid-session, unlock → backoff step is preserved (derived from `unlock_log`, §5), not reset to the first step |
-| E6 | New intent declared → backoff resets | The next intent starts at the first backoff step, not wherever the old one ended |
+| E4 | 🔴 **Unlock burst** — 4 unlocks within 90s, intent stale | Exactly **one** prompt, not four. This is the backoff's actual job (§5) |
+| E4b | Unlock repeatedly across a long session at >2 min intervals | A prompt each time, by design. Count them and record the number — this is the input to the §11j "is 2 min too chatty" question, not a pass/fail |
+| E5 | 🔴 Backoff survives a process restart | Force-stop mid-session, unlock immediately → still suppressed if within 2 min of the last ask (derived from `unlock_log`, not in-memory state, §5) |
+| E6 | New intent declared → gates re-anchor | Staleness measures from the **new** intent's `declared_at`; the old intent's asks don't suppress the new one |
 | E7 | 🔴 **Master prompt toggle OFF** + outstanding intent | **No prompt, ever.** The worst-bug-class guard (§5) |
 | E8 | 🔴 **Probability = Never (0%)** + outstanding intent | **No prompt.** Distinct from 25–75%, which does not gate this prompt |
 | E9 | Probability = 50% + outstanding intent | Prompt appears **deterministically** — probability does not apply (§5) |
@@ -663,8 +713,19 @@ after a few days of use:
   (i.e. a process-death problem), not that users changed behaviour.
 - The `overlay_active` skip share drops meaningfully from the 48/109 baseline
   in §1 — that number was the motivation, so it is the number to re-measure.
-- Prompt counts per long session match the escalating backoff (E4), on real
-  usage rather than a contrived test.
+- 🔴 **Prompts per long session, on real usage.** This is the number that
+  settles §9.6 — whether flat 2 min is right, or too chatty. Reasoning cannot
+  settle it; unlock frequency is the binding constraint and it varies per person.
+- 🔴 **Snooze rate on the bubble.** §5 makes Snooze the user-controlled escape
+  hatch instead of an algorithmic backoff. A rising snooze rate is the clearest
+  signal the cadence is too aggressive — and unlike a complaint, it arrives as
+  data. If it climbs, raise the constant; do not add escalation machinery back.
+- **Continue-vs-resolve ratio.** Mostly ✓ means the prompt is catching real
+  stale bubbles (the feature working). Mostly Continue means it is interrupting
+  genuine work, which points the same direction as a high snooze rate.
+- **Long-open intents should become rarer over time.** The 40–90 min sessions in
+  §1 existed because nothing was asking. If they persist at the same rate after
+  shipping, the prompt is not doing its job — check before tuning the cadence.
 - No rise in "Just Like That" rate — a rise would suggest the extra decision is
   being escaped rather than engaged with (the same backfire risk flagged for
   pill randomisation in `docs/BACKLOG.md`).
