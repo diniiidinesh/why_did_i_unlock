@@ -468,12 +468,34 @@ failure class as PR #28's day-1 recap fix; both are one build, not two).
       (code-only, no functional change) and rebuilt; see the entry directly
       below. All content described above (R8 config, walkthrough caption,
       overlay notification icon) ships unchanged in build 16 instead.
-- [ ] Upload AAB to Play Console (production track).
+- [x] Upload AAB to Play Console (production track) — `0.6.4 (16)` uploaded
+      2026-08-28.
 - [ ] Upload `mapping.txt` as the deobfuscation file (same steps as above).
 - [ ] Confirm the App bundle detail page now shows real (non-`-`)
       Optimization/Shrinking/Obfuscation percentages — the concrete evidence
       this release's R8 config actually took effect in the shipped bundle,
       not just in the local build.
+
+**Build 17 (0.6.4+17, 2026-08-28) — AGP 8.11.1 → 8.13.0 + optimized resource
+shrinking, NOT the AGP 9.0+ Play Console also suggests.** After build 16
+uploaded, Play Console's "Protected with Play" panel still flagged
+"Optimized resource shrinking isn't enabled" — a separate, newer R8 pipeline
+from plain `shrinkResources`, needing AGP **8.12+** with an explicit
+`android.r8.optimizedResourceShrinking=true` flag (default-on only at AGP
+9.0+, which is why Console's suggestion conflated the two). Bumped AGP to
+`8.13.0` (`android/settings.gradle.kts`, latest 8.x, same DSL/plugin model —
+none of AGP 9's breaking changes apply) + added the flag to
+`android/gradle.properties`. Gradle wrapper (`8.14`) already met AGP 8.13's
+`>=8.13` requirement. AGP 9.0+ itself stays parked — see `docs/BACKLOG.md`'s
+AGP-bump entry.
+- [x] Build: `flutter build appbundle --release`, `0.6.4 (17)` — succeeds;
+      AAB shrank slightly (55.3MB → 55.0MB), consistent with the new
+      pipeline catching more. `flutter apk --release --split-per-abi` also
+      confirmed succeeding.
+- [ ] Upload AAB to Play Console (production track).
+- [ ] Upload `mapping.txt` as the deobfuscation file.
+- [ ] Confirm the App bundle detail page's Optimization/Shrinking/
+      Obfuscation percentages actually improve over build 16's.
 
 ### "Continuously opted-in" trap
 
