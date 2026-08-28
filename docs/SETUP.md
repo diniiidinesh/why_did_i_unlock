@@ -111,6 +111,43 @@ If `flutter pub get` fails on an SDK-constraint error, your Flutter is too old f
 
 ---
 
+## 8. Restore the release signing key (only if you'll build for Play)
+
+**A fresh clone builds fine without this** — `build.gradle.kts` falls back to debug
+signing when `android/key.properties` is absent, so `flutter run` and debug builds
+work immediately. You only need this step to produce a **release** build that Play
+will accept as an update to the existing app.
+
+Two files, both **gitignored by design** and therefore *not* in the clone
+(`CLAUDE.md` §5):
+
+| File | What it is |
+|---|---|
+| `android/app/keystore/upload-keystore.jks` | The upload key (alias `upload`) |
+| `android/key.properties` | Points at the keystore + holds its passwords |
+
+Restore both from your own backup, then verify:
+
+```powershell
+flutter build appbundle --release
+```
+
+> ### ⚠️ If the keystore or its password is lost, it cannot be regenerated
+>
+> Play matches every update against the original upload key. Losing it means no
+> future build can be published as an update — existing users would need a full
+> uninstall/reinstall of a differently-signed app to ever get another version.
+>
+> Keep the `.jks` in durable backup (password manager attachment, encrypted
+> cloud storage — somewhere that survives losing this machine) and the password
+> in a password manager. **Never commit either**; both are in `.gitignore`
+> precisely so an accidental `git add -A` can't publish the signing key.
+
+`android/local.properties` is also machine-local, but is regenerated
+automatically by the Flutter tooling — nothing to restore.
+
+---
+
 ## Troubleshooting: a build looks stuck
 
 If `flutter run --release` sits at `Running Gradle task 'assembleRelease'...` with
@@ -154,3 +191,12 @@ Green required: **Flutter**, **Android toolchain**, **Connected device** (after 
 ## Done when
 
 `flutter doctor` is green on Flutter + Android toolchain, your phone shows in `flutter devices`, and `flutter run` launches the app on it. Test in `--release` on a low-end device when judging real-world performance.
+
+If you also intend to publish, §8's `flutter build appbundle --release` should succeed with the real keystore in place — not the debug fallback.
+
+### Also worth knowing on a new machine
+
+- **Windows Developer Mode must be on.** The federated plugins (`sqflite`, `shared_preferences`, `flutter_local_notifications`) need symlink support and will fail to build without it (`CLAUDE.md` §2).
+- **Claude Code's local memory does not follow you.** It lives under `~/.claude/projects/…/memory/` on each machine. Everything durable is deliberately kept in git instead — `CLAUDE.md` for operational state, `docs/` for the rest. Nothing needs exporting.
+- **`.claude/settings.local.json`** holds per-machine tool permissions with absolute paths (e.g. the Android SDK's `adb.exe`). Expect to re-add those on a new machine; they won't match a different user directory.
+- **Re-authenticate the GitHub CLI** (`gh auth login`) — its token is stored in the OS keyring, not the repo.
