@@ -38,7 +38,7 @@ On every phone unlock, a prompt asks **"What are you unlocking for?"** You decla
 | **[`docs/BACKLOG.md`](docs/BACKLOG.md)** | Deferred features/fixes/ideas with priorities. Strategic decisions live in `CLAUDE.md` §11/§12. |
 | **[`docs/TEST_PLAN.md`](docs/TEST_PLAN.md)** | Living test tracker — automated suites + the manual on-device matrix (unlock/overlay/reboot behaviour). |
 | **[`docs/USER_INTERVIEWS.md`](docs/USER_INTERVIEWS.md)** | Running list of questions to ask testers/friends in 1:1s, tied to open product decisions. |
-| **[`docs/SETUP.md`](docs/SETUP.md)** | Windows dev-environment bring-up (toolchain, device). |
+| **[`docs/SETUP.md`](docs/SETUP.md)** | Dev-environment bring-up (toolchain, device, signing-key restore) — macOS first, Windows kept as an appendix. Start here on a new machine. |
 | **[`docs/PLAY_SUBMISSION.md`](docs/PLAY_SUBMISSION.md)** | Google Play listing & review prep — special-use foreground service justification, Data Safety answers, closed-testing requirement, submission gates. |
 | **[`docs/PRIVACY_POLICY.md`](docs/PRIVACY_POLICY.md)** | The app's privacy policy — drafted for the Play listing, honest about zero network calls/local-only storage. |
 | **[`docs/DOC_UPKEEP.md`](docs/DOC_UPKEEP.md)** | For Claude Code: how to keep these docs current without burning context. |
