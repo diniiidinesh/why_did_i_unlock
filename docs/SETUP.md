@@ -31,6 +31,18 @@ PATH edits go in `~/.zshrc` — not `~/.bash_profile`, which zsh never reads. Th
 mismatch is the single most common "I installed it but the command isn't found"
 cause on a fresh Mac.
 
+**Paste commands without trailing `#` comments.** This machine's zsh does not have
+`interactive_comments` enabled, so a line like `brew install --cask android-studio
+# SDK only` is not a command plus a comment — zsh passes `#` and the comment words
+to `brew` as real arguments. Homebrew then goes looking for a cask literally named
+`#`, dumps its entire "did you mean?" list of every cask it knows, and the shell
+reports `command not found: add`. Nothing is installed and nothing says so clearly.
+Either strip the comments when pasting, or turn the option on once:
+
+```bash
+echo 'setopt interactive_comments' >> ~/.zshrc
+```
+
 ## A1. Xcode Command Line Tools
 
 ```bash
@@ -133,10 +145,16 @@ stable** Flutter.
    Confirm the bundled Dart is **≥ 3.11.5**. If `flutter pub get` later fails with
    an SDK-constraint error, your Flutter is too old → `flutter upgrade`.
 
-> Homebrew does offer `brew install --cask flutter`. It works, but it puts the SDK
-> under Homebrew's control, which makes `flutter upgrade` and channel switching
-> fight with `brew upgrade`. The official archive above is the path Flutter's own
-> tooling assumes.
+> **What's actually installed on this machine:** the Homebrew cask, at
+> `/opt/homebrew/share/flutter`. That predates this document and there is no reason
+> to redo it — `flutter upgrade` was run against it on 2026-08-31 and moved cleanly
+> from 3.41.9 to **3.47.2 (Dart 3.13.2)**, comfortably past this project's
+> `^3.11.5` floor. The caveat to know rather than act on: the SDK now sits under
+> Homebrew's control, so `flutter upgrade` and `brew upgrade` both think they own
+> its version, and a `brew upgrade --cask flutter` can move the SDK out from under
+> a channel you set by hand. The archive install above is what Flutter's own
+> tooling assumes and is the cleaner starting point on a genuinely fresh machine;
+> switching an already-working cask install to it buys nothing.
 
 ## A6. Android Studio (SDK only — not your editor)
 
@@ -176,7 +194,17 @@ echo 'export PATH="$HOME/Library/Android/sdk/platform-tools:$PATH"' >> ~/.zshrc
 
 ## A7. JDK — use Android Studio's bundled one
 
-**Point Flutter at the JetBrains Runtime that ships inside Android Studio:**
+**Do this step after A6, not before.** `flutter config --jdk-dir` stores whatever
+string you hand it without checking that the path exists, so running it before
+Android Studio is installed silently records a broken path and the resulting
+build failure points at the JDK rather than at the missing install. Confirm the
+directory is really there first:
+
+```bash
+ls "/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+```
+
+**Then point Flutter at the JetBrains Runtime that ships inside Android Studio:**
 
 ```bash
 flutter config --jdk-dir "/Applications/Android Studio.app/Contents/jbr/Contents/Home"
