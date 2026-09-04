@@ -37,6 +37,7 @@ On every phone unlock, a prompt asks **"What are you unlocking for?"** You decla
 | **[`docs/PRD.md`](docs/PRD.md)** | Current product requirements (Flutter-accurate). |
 | **[`docs/BACKLOG.md`](docs/BACKLOG.md)** | Deferred features/fixes/ideas with priorities. Strategic decisions live in `CLAUDE.md` §11/§12. |
 | **[`docs/TEST_PLAN.md`](docs/TEST_PLAN.md)** | Living test tracker — automated suites + the manual on-device matrix (unlock/overlay/reboot behaviour). |
+| **[`docs/metrics.md`](docs/metrics.md)** | Goals & success metrics — code audit of what is actually measurable, product purpose, user/business/stakeholder goals, North Star + primary metrics, counter metrics vs. guardrails, and a metadata-only event schema. Proposal; nothing instrumented yet. |
 | **[`docs/USER_INTERVIEWS.md`](docs/USER_INTERVIEWS.md)** | Running list of questions to ask testers/friends in 1:1s, tied to open product decisions. |
 | **[`docs/SETUP.md`](docs/SETUP.md)** | Windows dev-environment bring-up (toolchain, device). |
 | **[`docs/PLAY_SUBMISSION.md`](docs/PLAY_SUBMISSION.md)** | Google Play listing & review prep — special-use foreground service justification, Data Safety answers, closed-testing requirement, submission gates. |
